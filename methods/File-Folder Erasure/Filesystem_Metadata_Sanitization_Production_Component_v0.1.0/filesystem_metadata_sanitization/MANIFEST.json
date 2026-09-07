@@ -1,0 +1,8 @@
+{
+  "project": "filesystem-metadata-sanitization",
+  "version": "0.1.0",
+  "method": "Filesystem Metadata Sanitization",
+  "destructive": true,
+  "raw_filesystem_writes": false,
+  "third_party_source_bundled": false
+}

@@ -1,0 +1,18 @@
+{
+  "method": "filesystem-metadata-sanitization",
+  "safe_default": "dry-run",
+  "supported_operations": [
+    "xattrs",
+    "timestamps",
+    "current permissions",
+    "current directory-entry rename"
+  ],
+  "not_claimed": [
+    "deleted directory-entry slack",
+    "filesystem journal history",
+    "snapshots",
+    "backups",
+    "replicas",
+    "device-controller copies"
+  ]
+}

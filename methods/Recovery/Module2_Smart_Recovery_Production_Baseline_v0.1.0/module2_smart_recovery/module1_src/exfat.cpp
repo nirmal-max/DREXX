@@ -1,0 +1,19 @@
+#include "quick/exfat.hpp"
+#include <array>
+#include <cstring>
+#include <fstream>
+namespace quick {
+static std::uint32_t le32(const std::byte*p){return std::uint32_t(std::to_integer<unsigned char>(p[0]))|(std::uint32_t(std::to_integer<unsigned char>(p[1]))<<8)|(std::uint32_t(std::to_integer<unsigned char>(p[2]))<<16)|(std::uint32_t(std::to_integer<unsigned char>(p[3]))<<24);}
+static std::uint64_t le64(const std::byte*p){std::uint64_t x=0;for(int i=0;i<8;i++)x|=std::uint64_t(std::to_integer<unsigned char>(p[i]))<<(8*i);return x;}
+static std::uint16_t le16(const std::byte*p){return std::uint16_t(std::to_integer<unsigned char>(p[0]))|(std::uint16_t(std::to_integer<unsigned char>(p[1]))<<8);}
+static std::string u16s(const std::byte*p,size_t n){std::string s;for(size_t i=0;i<n;i++){auto u=le16(p+2*i);if(u<128)s.push_back(char(u));else if(u<2048){s.push_back(char(0xC0|(u>>6)));s.push_back(char(0x80|(u&63)));}else{s.push_back(char(0xE0|(u>>12)));s.push_back(char(0x80|((u>>6)&63)));s.push_back(char(0x80|(u&63)));}}return s;}
+bool ExfatProvider::scan(ISource&src,const FsContext&fs,std::vector<Candidate>&out,std::vector<std::string>&w,std::function<bool()>cancelled){
+    (void)w;
+    std::array<std::byte,512>b{};if(!src.read_at(fs.offset,b))return false;auto bps=1u<<std::to_integer<unsigned char>(b[108]);auto spc=1u<<std::to_integer<unsigned char>(b[109]);auto heap=le32(b.data()+88);auto root=le32(b.data()+96);auto count=le32(b.data()+92);auto data=fs.offset+std::uint64_t(heap)*bps;auto rootoff=data+std::uint64_t(root-2)*bps*spc;auto maxbytes=std::min<std::uint64_t>(std::uint64_t(count)*bps*spc,32ULL*1024*1024);std::vector<std::byte>d(static_cast<size_t>(maxbytes));if(!src.read_at(rootoff,d))return false;
+    for(size_t i=0;i+32<=d.size();i+=32){if(cancelled&&cancelled())return false;auto e=d.data()+i;auto t=std::to_integer<unsigned char>(e[0]);if(t==0x00)break;if(t==0x85){auto sec=std::to_integer<unsigned char>(e[1]);if(sec<2||i+(sec+1)*32>d.size())continue;auto stream=d.data()+i+32; if(std::to_integer<unsigned char>(stream[0])!=0xC0)continue;auto nameLen=std::to_integer<unsigned char>(stream[3]);auto first=le32(stream+20);auto size=le64(stream+24);std::string name;size_t remain=nameLen;size_t j=i+64;while(remain&&j+32<=d.size()){auto fn=d.data()+j;if(std::to_integer<unsigned char>(fn[0])!=0xC1)break;auto take=std::min<size_t>(15,remain);name+=u16s(fn+2,take);remain-=take;j+=32;}if(name.empty()||!first||!size)continue;bool inuse=(t&0x80)!=0;if(inuse)continue;auto po=data+std::uint64_t(first-2)*bps*spc;Candidate c{};c.id=out.size()+1;c.filesystem=FsType::exFAT;c.object_id=i;c.name=name;c.path=name;c.size=size;c.deleted=true;c.extents={{0,po,size}};c.evidence={{"EXFAT_ENTRY_SET","deleted file entry set",30},{"EXFAT_STREAM","stream extension present",20},{"EXFAT_NAME","file name entries present",15},{"EXFAT_CLUSTER","first cluster present",15}};c.confidence=80;out.push_back(std::move(c));}}
+    return true;
+}
+bool ExfatProvider::recover(ISource&src,const Candidate&c,const std::filesystem::path&dest,std::string&error,std::function<bool()>cancelled){
+    std::error_code ec;std::filesystem::create_directories(dest,ec);auto n=c.name;for(char&ch:n)if(ch=='/'||ch=='\\')ch='_';std::ofstream o(dest/n,std::ios::binary);if(!o){error="cannot create destination";return false;}std::vector<std::byte>b(1024*1024);std::uint64_t rem=c.size;for(auto&e:c.extents){auto x=std::min(rem,e.length);std::uint64_t done=0;while(done<x){if(cancelled&&cancelled()){error="cancelled";return false;}auto z=std::min<std::uint64_t>(b.size(),x-done);if(!src.read_at(e.physical_offset+done,std::span<std::byte>(b.data(),static_cast<size_t>(z)))){error="source read failed";return false;}o.write(reinterpret_cast<const char*>(b.data()),static_cast<std::streamsize>(z));done+=z;}rem-=x;}return rem==0;
+}
+}

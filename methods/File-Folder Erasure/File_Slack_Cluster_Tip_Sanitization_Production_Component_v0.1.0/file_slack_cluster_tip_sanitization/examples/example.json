@@ -1,0 +1,1 @@
+{"method":"file-slack-cluster-tip-sanitization","safe_behavior":"refuse unsupported physical mapping","default_pattern":"zero"}

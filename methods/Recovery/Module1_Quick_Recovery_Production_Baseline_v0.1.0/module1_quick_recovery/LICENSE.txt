@@ -1,0 +1,9 @@
+Quick Recovery Module 1
+Copyright (c) 2026 Project Owner
+
+This repository contains original implementation code created for the project.
+Third-party technologies are referenced in docs/RESEARCH.md and are NOT bundled
+into this distribution unless explicitly listed in THIRD_PARTY_NOTICES.md.
+
+All original code in this repository is proprietary to the project owner unless
+a separate license file states otherwise.

@@ -1,0 +1,26 @@
+name: DREX IEEE 2883 Purge Tests
+
+on:
+  push:
+    branches: ["repair/production-ready"]
+    paths:
+      - "Drive Erasure/ieee_2883_purge_v2.1.0/**"
+      - ".github/workflows/ieee-2883-purge-tests.yml"
+  pull_request:
+    paths:
+      - "Drive Erasure/ieee_2883_purge_v2.1.0/**"
+      - ".github/workflows/ieee-2883-purge-tests.yml"
+
+jobs:
+  test-ieee-purge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test runner
+        run: python -m pip install --upgrade pytest
+      - name: Run IEEE 2883 Purge tests
+        working-directory: Drive Erasure/ieee_2883_purge_v2.1.0
+        run: python -m pytest -q

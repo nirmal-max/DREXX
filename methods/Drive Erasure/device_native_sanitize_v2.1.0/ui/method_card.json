@@ -1,0 +1,5 @@
+{
+  "name": "Device-Native Sanitize",
+  "description": "Capability-driven native sanitization command planner for ATA, NVMe and SCSI/SAS classes.",
+  "version": "2.1.0"
+}

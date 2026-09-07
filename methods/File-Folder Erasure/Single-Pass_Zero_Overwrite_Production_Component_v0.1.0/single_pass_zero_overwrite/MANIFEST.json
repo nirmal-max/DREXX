@@ -1,0 +1,8 @@
+{
+  "project": "single-pass-zero-overwrite",
+  "version": "0.1.0",
+  "method": "Single-Pass Zero Overwrite",
+  "destructive": true,
+  "scope": "regular files and directories only; no raw-device operations",
+  "third_party_source_bundled": false
+}

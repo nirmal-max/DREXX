@@ -1,0 +1,23 @@
+name: NIST SP 800-88 Rev.2 Tests
+
+on:
+  push:
+    branches: [repair/production-ready]
+  pull_request:
+    branches: [repair/production-ready]
+
+jobs:
+  nist-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Drive Erasure/nist_sp_800_88r2_v2.1.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install test runner
+        run: python -m pip install pytest
+      - name: Run NIST SP 800-88 Rev.2 tests
+        run: python -m pytest -q

@@ -1,0 +1,15 @@
+{
+  "path": "/dev/sdX",
+  "transport": "sata",
+  "media": "hdd",
+  "encrypted": false,
+  "crypto_erase": false,
+  "block_erase": false,
+  "overwrite_sanitize": false,
+  "ata_secure_erase": false,
+  "scsi_sanitize": false,
+  "vendor_sanitize": false,
+  "removable": false,
+  "device_size_bytes": 1000204886016,
+  "identity": "REPLACE-WITH-VERIFIED-SERIAL"
+}

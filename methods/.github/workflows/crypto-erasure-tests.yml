@@ -1,0 +1,21 @@
+name: DREX Cryptographic Erasure Tests
+
+on:
+  push:
+    branches: [repair/production-ready]
+  pull_request:
+    branches: [repair/production-ready]
+
+jobs:
+  crypto-erasure-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: File-Folder Erasure/Cryptographic_Erasure_Sanitization_Production_Component_v0.1.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --upgrade pip pytest cryptography
+      - run: python -m pytest -q cryptographic_erasure_sanitization/tests

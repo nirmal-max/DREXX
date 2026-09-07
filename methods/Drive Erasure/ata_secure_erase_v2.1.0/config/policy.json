@@ -1,0 +1,11 @@
+{
+  "module": "ATA Secure Erase",
+  "version": "2.1.0",
+  "safety": [
+    "offline when required",
+    "identity confirmation",
+    "no silent downgrade",
+    "audit every destructive action"
+  ],
+  "claim_boundary": "Software implementation is not itself a NIST/IEEE/NSA certification."
+}

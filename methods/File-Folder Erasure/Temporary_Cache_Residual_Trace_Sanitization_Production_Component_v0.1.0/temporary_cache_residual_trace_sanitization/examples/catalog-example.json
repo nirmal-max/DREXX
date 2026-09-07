@@ -1,0 +1,8 @@
+{
+  "rule_id": "example-browser-cache",
+  "label": "Example Browser Cache",
+  "paths": ["<application-specific-cache-path>"],
+  "actions": ["delete"],
+  "requires_preview": true,
+  "requires_application_closed": true
+}

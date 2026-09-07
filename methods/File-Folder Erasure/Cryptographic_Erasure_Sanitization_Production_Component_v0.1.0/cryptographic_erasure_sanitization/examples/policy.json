@@ -1,0 +1,14 @@
+{
+  "method": "cryptographic-erasure",
+  "preconditions": [
+    "target data is encrypted",
+    "all confidentiality-protecting key paths are identified",
+    "key destruction is irreversible or independently attested",
+    "key backups/replicas are within the assurance boundary"
+  ],
+  "verification": [
+    "authoritative key store reports key absent",
+    "target ciphertext remains present",
+    "decryption through the destroyed key path fails"
+  ]
+}

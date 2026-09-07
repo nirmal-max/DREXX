@@ -1,0 +1,4 @@
+#include "deep/json.hpp"
+#include <sstream>
+namespace deep{static std::string q(const std::string&s){std::string o="\"";for(char c:s){if(c=='"'||c=='\\'){o+='\\';o+=c;}else if(c=='\n')o+="\\n";else o+=c;}return o+"\"";}
+std::string json(const Result&r){std::ostringstream o;o<<"{\"status\":"<<q(r.status)<<",\"region_offset\":"<<r.region.offset<<",\"region_size\":"<<r.region.size<<",\"stride\":"<<r.region.stride<<",\"candidates\":[";for(size_t i=0;i<r.candidates.size();i++){auto&c=r.candidates[i];if(i)o<<",";o<<"{\"filesystem\":"<<q(name(c.type))<<",\"offset\":"<<c.offset<<",\"declared_size\":"<<c.declared_size<<",\"sector_size\":"<<c.sector_size<<",\"cluster_size\":"<<c.cluster_size<<",\"score\":"<<c.score<<",\"status\":"<<q(c.status)<<",\"evidence\":[";for(size_t j=0;j<c.evidence.size();j++){if(j)o<<",";o<<"{\"kind\":"<<q(c.evidence[j].kind)<<",\"weight\":"<<c.evidence[j].weight<<",\"detail\":"<<q(c.evidence[j].detail)<<"}";}o<<"]}";}o<<"]}";return o.str();}}

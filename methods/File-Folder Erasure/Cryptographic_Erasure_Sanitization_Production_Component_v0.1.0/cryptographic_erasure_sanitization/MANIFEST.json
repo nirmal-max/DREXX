@@ -1,0 +1,8 @@
+{
+  "project": "cryptographic-erasure-sanitization",
+  "version": "0.1.0",
+  "method": "Cryptographic Erasure",
+  "destructive": true,
+  "secrets_in_audit": false,
+  "third_party_source_bundled": false
+}

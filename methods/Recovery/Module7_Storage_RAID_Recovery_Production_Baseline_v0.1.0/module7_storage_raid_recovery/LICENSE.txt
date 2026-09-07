@@ -1,0 +1,4 @@
+Module 7 Storage / RAID Recovery
+Copyright (c) 2026 Project Owner.
+
+Original source is proprietary to the project owner unless separately licensed.

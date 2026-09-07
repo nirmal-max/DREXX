@@ -1,0 +1,7 @@
+{
+  "method": "secure-free-space-wiping",
+  "default_pattern": "zero",
+  "default_reserve_bytes": 67108864,
+  "execution": "explicit confirmation required",
+  "scope": "user-addressable filesystem free space"
+}

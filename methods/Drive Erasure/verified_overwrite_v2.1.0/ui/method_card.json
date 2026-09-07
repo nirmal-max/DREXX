@@ -1,0 +1,5 @@
+{
+  "name": "Verified Overwrite",
+  "description": "Host overwrite of addressable media with immediate chunk-level read-back verification.",
+  "version": "2.1.0"
+}

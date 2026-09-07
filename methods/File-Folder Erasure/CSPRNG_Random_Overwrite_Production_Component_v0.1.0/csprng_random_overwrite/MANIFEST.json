@@ -1,0 +1,9 @@
+{
+  "project": "csprng-random-overwrite",
+  "version": "0.1.0",
+  "method": "CSPRNG Random Overwrite",
+  "destructive": true,
+  "scope": "regular files/directories only; no raw-device commands",
+  "random_source": "OS CSPRNG via Python secrets.token_bytes",
+  "third_party_source_bundled": false
+}

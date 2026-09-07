@@ -1,0 +1,6 @@
+#include "fsrecover/types.hpp"
+#include <sstream>
+namespace fsr {
+static std::string q(const std::string&s){std::string o="\"";for(char c:s){if(c=='"'||c=='\\'){o+='\\';o+=c;}else if(c=='\n')o+="\\n";else o+=c;}return o+"\"";}
+std::string to_json(const Result&r){std::ostringstream o;o<<"{\"status\":"<<q(r.status)<<",\"filesystem\":"<<q(fs_name(r.geometry.type))<<",\"sector_size\":"<<r.geometry.sector_size<<",\"cluster_size\":"<<r.geometry.cluster_size<<",\"volume_offset\":"<<r.geometry.volume_offset<<",\"volume_size\":"<<r.geometry.volume_size<<",\"health_score\":"<<r.health.score<<",\"checks\":[";for(size_t i=0;i<r.health.checks.size();i++){if(i)o<<",";o<<q(r.health.checks[i]);}o<<"],\"objects\":[";for(size_t i=0;i<r.objects.size();i++){auto&x=r.objects[i];if(i)o<<",";o<<"{\"id\":"<<x.id<<",\"parent\":"<<x.parent<<",\"type\":"<<q(x.type==ObjectType::Directory?"directory":"file")<<",\"name\":"<<q(x.name)<<",\"size\":"<<x.size<<",\"deleted\":"<<(x.deleted?"true":"false")<<",\"extents\":[";for(size_t j=0;j<x.extents.size();j++){if(j)o<<",";auto&e=x.extents[j];o<<"{\"logical\":"<<e.logical<<",\"physical\":"<<e.physical<<",\"length\":"<<e.length<<"}";}o<<"]}";}o<<"],\"warnings\":[";for(size_t i=0;i<r.warnings.size();i++){if(i)o<<",";o<<q(r.warnings[i]);}o<<"]}";return o.str();}
+}

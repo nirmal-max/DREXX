@@ -1,0 +1,5 @@
+{
+  "name": "Smart Sanitization",
+  "description": "Automatic policy router that selects a qualified method from device capabilities and required assurance.",
+  "version": "2.1.0"
+}

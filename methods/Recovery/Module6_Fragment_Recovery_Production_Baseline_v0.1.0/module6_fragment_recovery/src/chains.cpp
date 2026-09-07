@@ -1,0 +1,9 @@
+#include "fragment/chains.hpp"
+#include <algorithm>
+#include <cstring>
+namespace frag{
+static bool plausible(ISource&s,const Fragment&a,const Fragment&b,std::uint64_t block){if(a.type!=b.type||a.id==b.id)return false;if(b.physical<=a.physical)return false;auto gap=b.physical-(a.physical+a.length);if(gap>block*64)return false;return b.physical%block==0||a.physical+a.length==b.physical;}
+std::vector<Edge> build_edges(ISource&s,const std::vector<Fragment>&f,std::uint64_t block){std::vector<Edge>e;for(auto&a:f)for(auto&b:f)if(plausible(s,a,b,block)){Edge x{};x.from=a.id;x.to=b.id;x.score=25;x.evidence.push_back("same_file_type");if(b.physical==a.physical+a.length){x.score+=30;x.evidence.push_back("physical_adjacency");}else{x.score+=5;x.evidence.push_back("aligned_gap");}e.push_back(x);}return e;}
+static Confidence conf(double x){return x>=90?Confidence::Strong:x>=70?Confidence::Probable:x>=50?Confidence::Weak:Confidence::Rejected;}
+std::vector<Chain> build_chains(const std::vector<Fragment>&f,const std::vector<Edge>&e,std::uint64_t max_frag){std::vector<Chain>out;for(auto&start:f){Chain c{};c.id=out.size()+1;c.type=start.type;c.fragments.push_back(start.id);c.score=start.anchor_score;c.total_size=start.length;std::uint64_t cur=start.id;for(std::uint64_t n=1;n<max_frag;n++){const Edge*best=nullptr;for(auto&x:e)if(x.from==cur&&(!best||x.score>best->score))best=&x;if(!best)break;bool used=false;for(auto id:c.fragments)if(id==best->to)used=true;if(used)break;auto it=std::find_if(f.begin(),f.end(),[&](auto&q){return q.id==best->to;});if(it==f.end())break;c.fragments.push_back(it->id);c.score+=best->score;c.total_size+=it->length;cur=it->id;}c.confidence=conf(c.score);c.evidence.push_back("bounded_best_edge_chain");if(c.fragments.size()>1||c.confidence!=Confidence::Rejected)out.push_back(std::move(c));}std::sort(out.begin(),out.end(),[](auto&a,auto&b){return a.score>b.score;});return out;}
+}

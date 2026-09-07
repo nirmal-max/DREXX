@@ -1,0 +1,5 @@
+Module 4 Filesystem Recovery
+Copyright (c) 2026 Project Owner.
+
+Original source in this repository is proprietary to the project owner unless
+a separate license is stated.

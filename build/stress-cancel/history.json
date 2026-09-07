@@ -1,0 +1,15 @@
+[
+  {
+    "completed": "2026-09-02T22:51:56Z",
+    "duration": "0s",
+    "error": "Zero-overwrite adapter did not complete with verified results.",
+    "method": "Single-Pass Zero Overwrite",
+    "sha256_after": null,
+    "sha256_before": "a2e659dacb4691e887ac0139f8893d04764ee197d70fb73d3190d56113d18e3e",
+    "started": "2026-09-02T22:51:56Z",
+    "status": "CANCELLED",
+    "target": "D:\\New folder\\drex-cancel-stress.bin",
+    "type": "file",
+    "verification": "Not completed"
+  }
+]

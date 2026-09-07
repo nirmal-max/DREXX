@@ -1,0 +1,5 @@
+{
+  "name": "IEEE 2883 Purge",
+  "description": "Technology-aware Purge policy engine aligned to IEEE 2883 and 2883.1; delegates execution to qualified native methods.",
+  "version": "2.1.0"
+}

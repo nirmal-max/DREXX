@@ -1,0 +1,18 @@
+[build-system]
+requires=["setuptools>=68"]
+build-backend="setuptools.build_meta"
+
+[project]
+name="storage-aware-sanitization"
+version="0.1.0"
+description="Storage-aware sanitization policy, planning and guarded native execution"
+requires-python=">=3.10"
+license={text="MIT"}
+dependencies=[]
+
+[project.scripts]
+storage-sanitize="storage_aware.cli:main"
+
+[tool.pytest.ini_options]
+testpaths=["tests"]
+addopts="-q"

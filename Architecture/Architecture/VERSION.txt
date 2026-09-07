@@ -1,0 +1,4 @@
+DREX Architecture — Codex Final Brief
+Version: 1.0
+Status: Ready for Codex implementation
+Installer: Inno Setup / DREX-Setup.exe

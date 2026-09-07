@@ -1,0 +1,19 @@
+{
+  "version": "2.1.0",
+  "automated_tests": 5,
+  "software_qa": "PASS",
+  "zip_extraction_qa": "PASS",
+  "virtual_fault_injection": "PASS",
+  "real_hardware_qa": "NOT_EXECUTED",
+  "real_hardware_required": [
+    "NVMe controllers/firmware",
+    "SATA/ATA drives",
+    "SSD wear leveling/remapping",
+    "power interruption",
+    "controller reset",
+    "unusual firmware",
+    "USB/SATA/NVMe bridges",
+    "physical destruction equipment"
+  ],
+  "certification": "NOT CLAIMED"
+}

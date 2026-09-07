@@ -1,0 +1,16 @@
+{
+  "project": "sanitization-policy-engine",
+  "version": "0.1.0",
+  "scope": "NIST SP 800-88 Rev. 2 policy/decision layer",
+  "destructive_operations": false,
+  "third_party_source_bundled": false,
+  "research_sources": [
+    "NIST SP 800-88 Rev. 2",
+    "IEEE 2883-2022 / IEEE 2883.1-2025",
+    "Microsoft SDelete",
+    "linux-nvme/nvme-cli",
+    "KodyDennon/DriveWipe",
+    "gtrant/eraser",
+    "GNU coreutils shred"
+  ]
+}

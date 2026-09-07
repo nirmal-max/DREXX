@@ -1,0 +1,5 @@
+{
+  "name": "NVMe Secure Erase",
+  "description": "NVMe Sanitize/Format execution adapter with capability discovery and sanitize-log verification.",
+  "version": "2.1.0"
+}

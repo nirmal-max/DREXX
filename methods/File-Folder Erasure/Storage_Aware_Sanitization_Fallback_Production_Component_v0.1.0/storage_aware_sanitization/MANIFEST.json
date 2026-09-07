@@ -1,0 +1,8 @@
+{
+  "project": "storage-aware-sanitization",
+  "version": "0.1.0",
+  "method": "Storage-Aware Sanitization & Fallback",
+  "destructive": true,
+  "real_device_tests_performed": false,
+  "third_party_source_bundled": false
+}

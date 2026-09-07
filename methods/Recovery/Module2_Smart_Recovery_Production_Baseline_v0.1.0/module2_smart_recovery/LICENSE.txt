@@ -1,0 +1,6 @@
+Module 2 — Smart Recovery
+Copyright (c) 2026 Project Owner
+
+Original project source in this package is proprietary to the project owner
+unless a separate file states otherwise. Third-party products named in the
+research documentation are not included or relicensed by this file.

@@ -1,0 +1,3 @@
+# id|name|extension|start_hex|max_size
+sqlite|SQLite database|.sqlite|53514C69746520666F726D6174203300|1073741824
+gif|GIF image|.gif|4749463838|134217728

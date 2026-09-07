@@ -1,0 +1,26 @@
+name: DREX Native Sanitize Tests
+
+on:
+  push:
+    branches: ["repair/production-ready"]
+    paths:
+      - "Drive Erasure/device_native_sanitize_v2.1.0/**"
+      - ".github/workflows/native-sanitize-tests.yml"
+  pull_request:
+    paths:
+      - "Drive Erasure/device_native_sanitize_v2.1.0/**"
+      - ".github/workflows/native-sanitize-tests.yml"
+
+jobs:
+  test-native-sanitize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test runner
+        run: python -m pip install --upgrade pytest
+      - name: Test native sanitize module
+        working-directory: Drive Erasure/device_native_sanitize_v2.1.0
+        run: python -m pytest -q

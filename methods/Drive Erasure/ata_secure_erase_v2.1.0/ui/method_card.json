@@ -1,0 +1,5 @@
+{
+  "name": "ATA Secure Erase",
+  "description": "ATA Security Erase Unit workflow with frozen-state protection and post-operation verification.",
+  "version": "2.1.0"
+}

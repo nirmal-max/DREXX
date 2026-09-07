@@ -1,0 +1,10 @@
+{
+  "media_type": "nvme",
+  "assurance": "purge",
+  "scope": "full_media",
+  "capabilities": ["nvme_sanitize", "nvme_format_crypto", "readback"],
+  "encrypted": false,
+  "verification_available": true,
+  "transport": "pcie",
+  "device_model": "Example NVMe"
+}

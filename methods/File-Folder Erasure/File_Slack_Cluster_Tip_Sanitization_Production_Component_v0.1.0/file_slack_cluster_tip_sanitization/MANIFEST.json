@@ -1,0 +1,8 @@
+{
+  "project": "file-slack-cluster-tip-sanitization",
+  "version": "0.1.0",
+  "method": "File Slack / Cluster-Tip Sanitization",
+  "destructive": true,
+  "safe_behavior": "refuse unsupported physical mapping",
+  "third_party_source_bundled": false
+}

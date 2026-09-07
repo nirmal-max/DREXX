@@ -1,0 +1,10 @@
+{
+  "media_type": "hdd",
+  "assurance": "clear",
+  "scope": "full_media",
+  "capabilities": ["verified_overwrite", "readback"],
+  "encrypted": false,
+  "verification_available": true,
+  "transport": "sata",
+  "device_model": "Example HDD"
+}

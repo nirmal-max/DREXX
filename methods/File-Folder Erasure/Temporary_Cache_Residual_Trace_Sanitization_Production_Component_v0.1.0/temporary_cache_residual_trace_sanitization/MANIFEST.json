@@ -1,0 +1,9 @@
+{
+  "project": "temporary-cache-residual-trace-sanitization",
+  "version": "0.1.0",
+  "method": "Temporary / Cache / Residual-Trace Sanitization",
+  "destructive": true,
+  "catalog_driven": true,
+  "raw_filesystem_writes": false,
+  "third_party_source_bundled": false
+}

@@ -1,0 +1,11 @@
+{
+  "media_type": "ssd",
+  "assurance": "purge",
+  "scope": "full_media",
+  "capabilities": ["crypto_erase", "key_zeroization"],
+  "encrypted": true,
+  "key_management_verified": true,
+  "verification_available": true,
+  "transport": "sata",
+  "device_model": "Example SED"
+}

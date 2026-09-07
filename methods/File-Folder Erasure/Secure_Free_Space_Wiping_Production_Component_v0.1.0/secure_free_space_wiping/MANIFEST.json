@@ -1,0 +1,8 @@
+{
+  "project": "secure-free-space-wiping",
+  "version": "0.1.0",
+  "method": "Secure Free-Space Wiping",
+  "destructive": true,
+  "scope": "filesystem allocation layer; no raw block device access",
+  "third_party_source_bundled": false
+}

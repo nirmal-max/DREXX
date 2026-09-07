@@ -1,0 +1,15 @@
+{
+  "path": "/dev/nvme0",
+  "transport": "nvme",
+  "media": "ssd",
+  "encrypted": true,
+  "crypto_erase": true,
+  "block_erase": true,
+  "overwrite_sanitize": true,
+  "ata_secure_erase": false,
+  "scsi_sanitize": false,
+  "vendor_sanitize": false,
+  "removable": false,
+  "device_size_bytes": 1000204886016,
+  "identity": "REPLACE-WITH-VERIFIED-SERIAL"
+}

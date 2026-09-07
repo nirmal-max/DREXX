@@ -1,0 +1,21 @@
+name: DREX CSPRNG Random Overwrite Tests
+
+on:
+  push:
+    branches: [repair/production-ready]
+  pull_request:
+    branches: [repair/production-ready]
+
+jobs:
+  csprng-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: File-Folder Erasure/CSPRNG_Random_Overwrite_Production_Component_v0.1.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pytest -q csprng_random_overwrite/tests

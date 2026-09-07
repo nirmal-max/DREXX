@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "drex-filesystem-metadata-sanitization"
+version = "0.1.1"
+description = "DREX filesystem metadata sanitization component"
+requires-python = ">=3.10"
+
+[tool.setuptools.packages.find]
+include = ["metadata_sanitizer*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

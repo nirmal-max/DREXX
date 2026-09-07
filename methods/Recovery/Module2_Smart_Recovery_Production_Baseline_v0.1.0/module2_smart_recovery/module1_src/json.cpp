@@ -1,0 +1,6 @@
+#include "quick/json.hpp"
+#include <sstream>
+namespace quick {
+static std::string esc(const std::string&s){std::string o;for(char c:s){if(c=='"'||c=='\\'){o+='\\';o+=c;}else if(c=='\n')o+="\\n";else o+=c;}return o;}
+std::string result_json(const ScanResult&r){std::ostringstream o;o<<"{\n  \"status\":\""<<status_name(r.status)<<"\",\n  \"message\":\""<<esc(r.message)<<"\",\n  \"source\":{\"size\":"<<r.source.size<<",\"identity\":\""<<esc(r.source.identity)<<"\"},\n  \"partitions\":[";for(size_t i=0;i<r.partitions.size();i++){if(i)o<<",";auto&p=r.partitions[i];o<<"{\"index\":"<<p.index<<",\"offset\":"<<p.offset<<",\"size\":"<<p.size<<",\"type\":\""<<esc(p.type)<<"\"}";}o<<"],\n  \"candidates\":[";for(size_t i=0;i<r.candidates.size();i++){if(i)o<<",";auto&c=r.candidates[i];o<<"{\"id\":"<<c.id<<",\"filesystem\":\""<<fs_name(c.filesystem)<<"\",\"object_id\":"<<c.object_id<<",\"name\":\""<<esc(c.name)<<"\",\"size\":"<<c.size<<",\"deleted\":"<<(c.deleted?"true":"false")<<",\"confidence\":"<<c.confidence<<",\"extents\":[";for(size_t j=0;j<c.extents.size();j++){if(j)o<<",";auto&e=c.extents[j];o<<"{\"logical\":"<<e.logical_offset<<",\"physical\":"<<e.physical_offset<<",\"length\":"<<e.length<<"}";}o<<"]}";}o<<"],\n  \"warnings\":[";for(size_t i=0;i<r.warnings.size();i++){if(i)o<<",";o<<"\""<<esc(r.warnings[i])<<"\"";}o<<"]\n}\n";return o.str();}
+}

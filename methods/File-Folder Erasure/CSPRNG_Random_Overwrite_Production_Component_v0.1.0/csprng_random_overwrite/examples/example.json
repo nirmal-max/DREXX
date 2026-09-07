@@ -1,0 +1,6 @@
+{
+  "method": "csprng-random-overwrite",
+  "random_source": "OS CSPRNG",
+  "verification": "SHA-256 before/after comparison",
+  "note": "Logical overwrite only; consult the sanitization policy engine for media-specific assurance."
+}

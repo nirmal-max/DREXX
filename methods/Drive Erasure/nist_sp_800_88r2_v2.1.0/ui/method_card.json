@@ -1,0 +1,5 @@
+{
+  "name": "NIST SP 800-88 Rev.2",
+  "description": "Policy and assurance engine aligned to NIST SP 800-88 Rev.2; delegates technique execution to qualified methods.",
+  "version": "2.1.0"
+}
