@@ -1,0 +1,30 @@
+libfsntfs is a library to access the New Technology File System (NTFS) format.
+
+Project information:
+
+* Status: experimental
+* Licence: LGPL-3.0-or-later
+
+Read-only supported NTFS formats:
+
+* NTFS version 3.0
+* NTFS version 3.1
+
+Supported NTFS format features:
+
+* LZNT1 compression
+* Windows Overlay Filter (WOF) compressed data (LZX and LZXPRESS-Huffman)
+* Case sensitive directories
+
+Unsupported NTFS format features:
+
+* NTFS version 1.0
+* NTFS version 1.1
+* NTFS version 1.2
+* Encrypted File System (EFS)
+
+For more information see:
+
+* Project documentation: https://github.com/libyal/libfsntfs/wiki/Home
+* How to build from source: https://github.com/libyal/libfsntfs/wiki/Building
+

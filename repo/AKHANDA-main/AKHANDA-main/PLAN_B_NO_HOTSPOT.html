@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Akhanda, Plan B if the hotspot fails</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+@page { size: A4; margin: 16mm 15mm 15mm 15mm; }
+*{box-sizing:border-box}
+body{margin:0;background:#fff;color:#14181F;font-family:"Public Sans",Arial,sans-serif;
+  font-size:10.6pt;line-height:1.52}
+.wrap{max-width:180mm;margin:0 auto;padding:0 0 10mm}
+h1,h2,h3{font-family:Newsreader,Georgia,serif;margin:0;font-weight:600;letter-spacing:-.01em}
+h1{font-size:25pt;line-height:1.1}
+h2{font-size:15pt;margin:0 0 2.5mm}
+h3{font-size:11.6pt;margin:0 0 1.5mm}
+p{margin:0 0 2.8mm}
+.m,code{font-family:"IBM Plex Mono",monospace;font-size:.9em}
+code{background:#EEF1F6;border:1px solid #D8DEE8;border-radius:2px;padding:.04em .3em}
+pre{background:#151A22;color:#DCE3EC;border-radius:2px;padding:3mm 4mm;overflow-x:auto;
+  font-size:9pt;line-height:1.6;margin:2.5mm 0;font-family:"IBM Plex Mono",monospace}
+pre .c{color:#7C8797}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:7.6pt;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:#A3322A;margin:0 0 2mm}
+header{border-bottom:2px solid #A3322A;padding-bottom:5mm;margin-bottom:7mm}
+.lede{font-size:11.4pt;color:#3A4351;margin-top:3mm}
+section{margin:0 0 8mm}
+.page-break{page-break-before:always}
+table{border-collapse:collapse;width:100%;font-size:9.5pt;margin:3mm 0;page-break-inside:avoid}
+th{text-align:left;padding:2mm 2.5mm;background:#EEF1F6;border-bottom:1px solid #C9D0DA;
+  font-family:"IBM Plex Mono",monospace;font-size:7.6pt;letter-spacing:.09em;text-transform:uppercase;color:#5A6472}
+td{padding:2mm 2.5mm;border-bottom:1px solid #E4E8EF;vertical-align:top}
+tr:last-child td{border-bottom:0}
+.box{border:1px solid #D3D9E2;border-left:3px solid #6B7482;background:#FAFBFD;padding:3mm 4mm;
+  margin:3mm 0;page-break-inside:avoid}
+.box.ok{border-left-color:#0C6A47;background:#F1F8F4}
+.box.stop{border-left-color:#A3322A;background:#FDF4F3}
+.box.warn{border-left-color:#94600A;background:#FDF8EF}
+.box h3{font-family:"Public Sans",sans-serif;font-size:8pt;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;color:#5A6472;margin:0 0 1.5mm}
+.box p:last-child{margin-bottom:0}
+.tier{display:grid;grid-template-columns:auto 1fr;gap:4mm;margin:0 0 4mm;page-break-inside:avoid}
+.tno{font-family:"IBM Plex Mono",monospace;font-size:8pt;font-weight:600;color:#fff;background:#27409E;
+  border-radius:2px;width:16mm;height:6mm;display:grid;place-items:center;flex:none;margin-top:1mm}
+.tno.b{background:#94600A}.tno.c{background:#A3322A}
+ul{margin:0 0 2.8mm;padding-left:5mm}li{margin-bottom:1.3mm}
+.say{background:#F2F5FB;border-left:3px solid #27409E;padding:2.5mm 3.5mm;margin:2mm 0;
+  font-style:italic;color:#22314F}
+.foot{border-top:1px solid #D3D9E2;padding-top:3mm;margin-top:8mm;color:#6B7482;font-size:8.6pt}
+</style></head><body><div class="wrap">
+
+<header>
+  <p class="eyebrow">Akhanda &middot; SIH26149 &middot; Syntax Squad &middot; contingency</p>
+  <h1>Plan B: when the two laptops cannot talk</h1>
+  <p class="lede">Read this before the day, not during it. There are four fallbacks, each
+    weaker than the last, and every one of them still gives you a working demo. The worst case
+    is not &ldquo;the demo fails&rdquo;; it is &ldquo;the demo runs and we describe honestly
+    what is missing&rdquo;.</p>
+</header>
+
+<section>
+  <h2>First, know what actually broke</h2>
+  <p>Three different things look identical from the outside. Spend twenty seconds telling them
+    apart before reaching for a fallback.</p>
+  <table>
+    <tr><th>Test on laptop A</th><th>Result</th><th>What it means</th></tr>
+    <tr><td class="m">ping 192.168.137.132</td><td>replies</td><td>network is fine, the problem is the program or the firewall</td></tr>
+    <tr><td class="m">ping 192.168.137.132</td><td>no reply</td><td>they are not on the same network, or the network blocks it</td></tr>
+    <tr><td class="m">curl http://&lt;ip&gt;:8000/witness/pubkey</td><td>a key id</td><td>everything works. The fault is elsewhere</td></tr>
+    <tr><td class="m">curl</td><td>connection refused</td><td>the witness program is not running on laptop B</td></tr>
+    <tr><td class="m">curl</td><td>hangs, then times out</td><td>a firewall is blocking the port</td></tr>
+  </table>
+  <div class="box warn">
+    <h3>The most common cause by far</h3>
+    <p>The window running <span class="m">python node.py</span> on laptop B was closed. Check
+      that before anything else. If it is closed, start it again and you are done.</p>
+  </div>
+</section>
+
+<!-- FALLBACKS -->
+<section>
+  <h2>The four fallbacks, strongest first</h2>
+
+  <div class="tier">
+    <div class="tno">PLAN B1</div>
+    <div>
+      <h3>A different hotspot</h3>
+      <p>Any phone will do, including a judge&rsquo;s if you are brave. Turn on the hotspot,
+        join both laptops, get the new address on laptop B with
+        <span class="m">ipconfig</span>, and re-run with that address.</p>
+<pre>python scripts/demo_bundle.py --witness http://&lt;new-ip&gt;:8000</pre>
+      <p><strong>Cost: about ninety seconds. Nothing is lost.</strong> Every claim still holds,
+        including the two-machine signature.</p>
+    </div>
+  </div>
+
+  <div class="tier">
+    <div class="tno">PLAN B2</div>
+    <div>
+      <h3>A cable between the two laptops</h3>
+      <p>If you have a USB-to-Ethernet adapter and a cable, connect the laptops directly. Windows
+        gives each an address automatically. This needs no wireless at all and cannot be blocked
+        by a venue network.</p>
+      <p>Check the address on both with <span class="m">ipconfig</span> and use whatever laptop B
+        reports. <strong>Everything still holds.</strong></p>
+      <div class="box"><p>Plain USB-C to USB-C will <em>not</em> work between two laptops unless
+        both have Thunderbolt. We tested this and recorded the result. Do not waste demo minutes
+        on it.</p></div>
+    </div>
+  </div>
+
+  <div class="tier">
+    <div class="tno b">PLAN B3</div>
+    <div>
+      <h3>Show a record that was already co-signed</h3>
+      <p>You already have a real ledger, produced on 3 September 2026, carrying a genuine second
+        signature from laptop B&rsquo;s key. It is saved at
+        <span class="m">D:\akhanda SIH\demo-data\chain.json</span>. Open it on the screen and run
+        the live check.</p>
+      <p><strong>What still works:</strong> the whole integrity demonstration. The browser
+        recomputes every fingerprint, the tamper demo names the exact broken record, the
+        certificate renders with its clauses, and the co-signer key id is visible on the first
+        row.</p>
+      <p><strong>What you must say:</strong></p>
+      <div class="say">&ldquo;The two machines are not talking right now, so this is a record we
+        produced earlier today rather than one made in front of you. The second signature in it
+        is real, from a key that is not on this laptop. What you are watching the browser do is
+        live: it is recomputing every fingerprint now.&rdquo;</div>
+      <p>That is an honest and strong position. The verification is genuinely live; only the
+        <em>creation</em> of a fresh record is not.</p>
+    </div>
+  </div>
+
+  <div class="tier">
+    <div class="tno c">PLAN B4</div>
+    <div>
+      <h3>Run without the witness, and let it refuse</h3>
+      <p>If laptop B is dead entirely, run the tool alone:</p>
+<pre>python scripts/demo_bundle.py</pre>
+      <p>Records are then marked <span class="m">SOFTWARE_KEY</span> rather than
+        <span class="m">WITNESS_COSIGNED</span>. The tool has honestly downgraded the label
+        because the second party was absent.</p>
+      <div class="box ok">
+        <h3>This failure is itself a demonstration</h3>
+        <p>Point at the tier on screen and say it out loud:</p>
+        <div class="say">&ldquo;The second computer is not available, so the tool has recorded
+          the weaker trust level. It has not pretended. That is the behaviour we are asking you
+          to judge: it would rather tell you it had less help than claim it had more.&rdquo;</div>
+        <p>Then run the deliberate refusal so they see a blocked operation written into the
+          record. A judge who sees a tool refuse itself in public remembers it.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FIREWALL -->
+<section class="page-break">
+  <h2>Fixing the firewall, if that is the cause</h2>
+  <p>Symptom: <span class="m">ping</span> works but <span class="m">curl</span> times out. Laptop
+    B is blocking the port. On <strong>laptop B</strong>, open PowerShell as Administrator
+    (right-click, Run as administrator):</p>
+<pre>New-NetFirewallRule -DisplayName "Akhanda witness 8000" `
+  -Direction Inbound -LocalPort 8000 -Protocol TCP -Action Allow</pre>
+  <p>Or set the network to Private, which Windows treats far more permissively:</p>
+<pre><span class="c"># see which profile the hotspot connection is on</span>
+Get-NetConnectionProfile
+<span class="c"># then set it, using the name shown above</span>
+Set-NetConnectionProfile -Name "&lt;name&gt;" -NetworkCategory Private</pre>
+  <div class="box warn">
+    <h3>Do this the night before</h3>
+    <p>The rule persists. Adding it once at home means it can never cost you demo minutes.</p>
+  </div>
+</section>
+
+<!-- PREVENTION -->
+<section>
+  <h2>How to make Plan B unnecessary</h2>
+  <table>
+    <tr><th>Do this before the day</th><th>Why</th></tr>
+    <tr><td>Copy the witness folder onto laptop B&rsquo;s own hard disk</td><td>if it runs from a USB stick, unplugging the stick kills it</td></tr>
+    <tr><td>Add the firewall rule above, once</td><td>removes the most common silent failure</td></tr>
+    <tr><td>Fix laptop B&rsquo;s address, or write it down each morning</td><td>addresses change overnight when the lease renews</td></tr>
+    <tr><td>Charge both laptops and bring one power strip</td><td>the venue gives one socket per team</td></tr>
+    <tr><td>Bring a second phone for a spare hotspot</td><td>a flat battery should not end the demo</td></tr>
+    <tr><td>Keep the pre-made record in <span class="m">demo-data\</span></td><td>this is Plan B3, and it costs nothing to carry</td></tr>
+    <tr><td>Rehearse the tamper and restore once, out loud</td><td>so the words are ready when the room is watching</td></tr>
+  </table>
+
+  <div class="box ok">
+    <h3>The thing that makes all of this survivable</h3>
+    <p>The verification runs <strong>inside the browser</strong>, on the machine in front of you.
+      It never needed a network, a server, or the second laptop to prove that a record is intact.
+      The second laptop matters when a record is <em>created</em>, not when it is
+      <em>checked</em>. So even in the worst case, the most convincing part of the demonstration
+      still works exactly as designed.</p>
+  </div>
+</section>
+
+<section>
+  <h2>The thirty-second decision</h2>
+  <table>
+    <tr><th>Situation</th><th>Do this</th><th>What you lose</th></tr>
+    <tr><td>Witness window closed</td><td>restart <span class="m">node.py</span></td><td>nothing</td></tr>
+    <tr><td>Hotspot dropped</td><td>Plan B1, another phone</td><td>nothing</td></tr>
+    <tr><td>Venue blocks laptop-to-laptop</td><td>Plan B1 or B2</td><td>nothing</td></tr>
+    <tr><td>Firewall blocking, no admin rights</td><td>Plan B3, the saved record</td><td>only live creation</td></tr>
+    <tr><td>Laptop B will not boot</td><td>Plan B3, then B4</td><td>only live creation</td></tr>
+    <tr><td>Under two minutes left</td><td>Plan B3 immediately</td><td>nothing that matters</td></tr>
+  </table>
+  <div class="box stop">
+    <h3>Never do this</h3>
+    <p>Do not describe a saved record as one made live. Do not claim a co-signature the run did
+      not have. Do not edit a record to make the screen look better. The entire argument of this
+      project is that the tool does not overstate what happened, and a team that overstates in
+      the room has lost the argument before the questions begin.</p>
+  </div>
+</section>
+
+<p class="foot"><strong>Akhanda</strong> &middot; Syntax Squad &middot; GITAM (Deemed to be
+  University), Hyderabad &middot; Smart India Hackathon 2026, SIH26149, sponsored by the
+  National Technical Research Organisation. Keep this page with the laptops, not on them.</p>
+
+</div></body></html>

@@ -1,0 +1,249 @@
+{
+  "check": "stress test on real NIST CFReDS forensic images",
+  "ran_at": "2026-09-04T05:55:33Z",
+  "python": "3.14.7",
+  "stages": [
+    {
+      "stage": "1 - carve real CFReDS images",
+      "images": [
+        {
+          "image": "L0_Graphic.dd",
+          "size_mb": 64.8,
+          "carve_s": 0.34,
+          "throughput_mb_s": 192.9,
+          "artifacts": 6,
+          "result_hash": "60a28e2e6ee3b19e60f4d387f4138ba92300014a27860d17137c35d1a0b9f834",
+          "outcome": "VERIFIED",
+          "summary": {
+            "total": 6,
+            "by_type": {
+              "png": 1,
+              "pcx": 1,
+              "jpg": 1,
+              "bmp": 1,
+              "tif": 1,
+              "gif": 1
+            },
+            "by_confidence": {
+              "HIGH": 6,
+              "MEDIUM": 0,
+              "LOW": 0
+            },
+            "high_confidence": 6,
+            "truncated": 0,
+            "note": "all 6 artefact(s) had their extent confirmed by the file's own structure"
+          }
+        },
+        {
+          "image": "L1_Graphic.dd",
+          "size_mb": 64.8,
+          "carve_s": 0.34,
+          "throughput_mb_s": 192.4,
+          "artifacts": 6,
+          "result_hash": "878ba883dd03662a1bdc858dcd09a6a44ccb0fe2d73fa079d0e87586425cb26d",
+          "outcome": "VERIFIED",
+          "summary": {
+            "total": 6,
+            "by_type": {
+              "jpg": 1,
+              "tif": 1,
+              "bmp": 1,
+              "pcx": 1,
+              "gif": 1,
+              "png": 1
+            },
+            "by_confidence": {
+              "HIGH": 6,
+              "MEDIUM": 0,
+              "LOW": 0
+            },
+            "high_confidence": 6,
+            "truncated": 0,
+            "note": "all 6 artefact(s) had their extent confirmed by the file's own structure"
+          }
+        },
+        {
+          "image": "L2_Graphic.dd",
+          "size_mb": 64.8,
+          "carve_s": 0.33,
+          "throughput_mb_s": 197.7,
+          "artifacts": 3,
+          "result_hash": "49b6266069cf1d17b319030ef7b60c2c06e1c9019606930979810542934c57c9",
+          "outcome": "VERIFIED",
+          "summary": {
+            "total": 3,
+            "by_type": {
+              "jpg": 1,
+              "bmp": 1,
+              "pcx": 1
+            },
+            "by_confidence": {
+              "HIGH": 3,
+              "MEDIUM": 0,
+              "LOW": 0
+            },
+            "high_confidence": 3,
+            "truncated": 0,
+            "note": "all 3 artefact(s) had their extent confirmed by the file's own structure"
+          }
+        },
+        {
+          "image": "L3_Graphic.dd",
+          "size_mb": 48.2,
+          "carve_s": 0.51,
+          "throughput_mb_s": 95.2,
+          "artifacts": 2,
+          "result_hash": "f17a957fcdf3c8ca2e57a89afca00a6a177fc5b43311582af7b73c9bf8c2a113",
+          "outcome": "VERIFIED",
+          "summary": {
+            "total": 2,
+            "by_type": {
+              "jpg": 1,
+              "pcx": 1
+            },
+            "by_confidence": {
+              "HIGH": 2,
+              "MEDIUM": 0,
+              "LOW": 0
+            },
+            "high_confidence": 2,
+            "truncated": 0,
+            "note": "all 2 artefact(s) had their extent confirmed by the file's own structure"
+          }
+        },
+        {
+          "image": "L4_Graphic.dd",
+          "size_mb": 49.5,
+          "carve_s": 0.24,
+          "throughput_mb_s": 203.8,
+          "artifacts": 5,
+          "result_hash": "fbb960c9ccd9d1afe084cdfce95d9d0962aecb98ad15a6286a48889980eb84b6",
+          "outcome": "VERIFIED",
+          "summary": {
+            "total": 5,
+            "by_type": {
+              "jpg": 1,
+              "bmp": 1,
+              "tif": 1,
+              "pcx": 1,
+              "png": 1
+            },
+            "by_confidence": {
+              "HIGH": 5,
+              "MEDIUM": 0,
+              "LOW": 0
+            },
+            "high_confidence": 5,
+            "truncated": 0,
+            "note": "all 5 artefact(s) had their extent confirmed by the file's own structure"
+          }
+        }
+      ],
+      "total_mb": 292.0,
+      "wall_s": 1.75,
+      "aggregate_mb_s": 166.9,
+      "all_deterministic": null,
+      "verdict": "PASS"
+    },
+    {
+      "stage": "2 - build a chain over the real carve results",
+      "build_s": 0.002,
+      "entries": 5,
+      "outcomes": [
+        "VERIFIED"
+      ],
+      "head": "10ff83ca2329bdcb836125a0ac8789fdc01a106f70fa29013e021624c49a1263",
+      "entry_commits_to_real_carve": true,
+      "partial_present": false,
+      "verdict": "PASS"
+    },
+    {
+      "stage": "3 - persist, reload from disk, verify",
+      "bytes_on_disk": 6037,
+      "path": "D:\\akhanda\\evidence\\stress_tmp\\stress_chain.json",
+      "reloaded_entries": 5,
+      "hashes_survive_roundtrip": true,
+      "verify_ms": 0.46,
+      "ok": true,
+      "operator_layer": true,
+      "verified": 5,
+      "reason": "",
+      "verdict": "PASS"
+    },
+    {
+      "stage": "4 - tamper detection and localisation",
+      "cases": [
+        {
+          "case": "edit the operator declaration",
+          "why_an_operator_would": "Rewrite what the ledger says happened, leaving the hashes alone.",
+          "caught": true,
+          "expected_seq": 2,
+          "located_at_seq": 2,
+          "localised": true,
+          "reason": "entry content altered: hash mismatch"
+        },
+        {
+          "case": "swap the result digest",
+          "why_an_operator_would": "Point a real entry at a different, more flattering result file.",
+          "caught": true,
+          "expected_seq": 2,
+          "located_at_seq": 2,
+          "localised": true,
+          "reason": "entry content altered: hash mismatch"
+        },
+        {
+          "case": "flip the outcome VERIFIED -> PARTIAL",
+          "why_an_operator_would": "THE overclaim this project exists to stop: present an incomplete recovery as a complete one. outcome is the 15th signed field for this.",
+          "caught": true,
+          "expected_seq": 2,
+          "located_at_seq": 2,
+          "localised": true,
+          "reason": "entry content altered: hash mismatch"
+        },
+        {
+          "case": "upgrade the custody tier",
+          "why_an_operator_would": "Claim a witness and a present human that were never there.",
+          "caught": true,
+          "expected_seq": 2,
+          "located_at_seq": 2,
+          "localised": true,
+          "reason": "entry content altered: hash mismatch"
+        },
+        {
+          "case": "delete an entry from the middle",
+          "why_an_operator_would": "The attack per-document signing cannot see at all: each remaining certificate is still perfectly signed.",
+          "caught": true,
+          "expected_seq": 3,
+          "located_at_seq": 3,
+          "localised": true,
+          "reason": "seq out of order at index 2"
+        },
+        {
+          "case": "reorder two entries",
+          "why_an_operator_would": "Change which operation came first, so a recovery appears to precede the erasure that destroyed the evidence.",
+          "caught": true,
+          "expected_seq": 2,
+          "located_at_seq": 2,
+          "localised": true,
+          "reason": "seq out of order at index 1"
+        }
+      ],
+      "caught": "6/6",
+      "localised": "6/6",
+      "verdict": "PASS"
+    },
+    {
+      "stage": "5 - independent Rust verifier on the same file",
+      "binary": "D:\\akhanda\\rust\\akhanda-verify\\target\\release\\akhanda-verify.exe",
+      "rust_ms": 13.3,
+      "exit_code": 0,
+      "stdout": "{\"ok\":true,\"total\":5,\"verified\":5,\"concur_verified\":0,\"dual_signed\":0,\"unverifiable\":0,\"broken_seq\":null,\"reason\":\"chain verified\"}",
+      "python_ok": true,
+      "rust_ok": true,
+      "agree": true,
+      "verdict": "PASS",
+      "meaning": "Two implementations sharing no code reached the same verdict on the same bytes."
+    }
+  ],
+  "overall": "PASS"
+}

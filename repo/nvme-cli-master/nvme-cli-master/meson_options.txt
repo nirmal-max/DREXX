@@ -1,0 +1,254 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+option(
+  'nvme',
+  type: 'feature',
+  value: 'enabled',
+  description: 'Build nvme executable'
+)
+option(
+  'libnvme',
+  type: 'feature',
+  value: 'enabled',
+  description: 'Build libnvme library'
+)
+option(
+  'fabrics',
+  type : 'feature',
+  value: 'enabled',
+  description : 'NVMeoF support'
+)
+option(
+  'mi',
+  type : 'feature',
+  value: 'enabled',
+  description : 'MI support'
+)
+option(
+  'nvme-discoverd',
+  type : 'feature',
+  value: 'disabled',
+  description : 'nvme-discoverd daemon (technology preview; requires fabrics and libsystemd >=253)'
+)
+option(
+  'nvmf-autoconnect',
+  type : 'feature',
+  value: 'enabled',
+  description : 'legacy udev/systemd NVMe-oF autoconnect (independent of nvme-discoverd; both may be installed side by side)'
+)
+option(
+  'top',
+  type : 'feature',
+  value: 'enabled',
+  description : 'nvme top support'
+)
+option(
+  'deprecated-cmds',
+  type : 'feature',
+  value: 'enabled',
+  description : 'Deprecated commands support'
+)
+option(
+  'python',
+  type : 'feature',
+  value: 'auto',
+  description : 'Generate libnvme python bindings'
+)
+option(
+  'docs',
+  type : 'combo',
+  choices : ['false', 'html', 'man', 'rst', 'all'],
+  description : 'install documentation'
+)
+option(
+  'docs-build',
+  type : 'boolean',
+  value : false,
+  description : 'build documentation'
+)
+option(
+  'dracutrulesdir',
+  type : 'string',
+  value : 'lib/dracut/dracut.conf.d/',
+  description : 'directory for dracut rules files'
+)
+option(
+  'htmldir',
+  type : 'string',
+  value : '',
+  description : 'directory for HTML documentation'
+)
+option(
+  'rstdir',
+  type : 'string',
+  value : '',
+  description : 'directory for ReST documentation'
+ )
+option(
+  'json-c',
+  type: 'feature',
+  value: 'auto',
+  description: 'JSON suppport'
+)
+option(
+  'libkmod',
+  type: 'feature',
+  value: 'auto',
+  description: 'libkmod support'
+)
+option(
+  'e2e-tests',
+  type : 'boolean',
+  value : false,
+  description: 'Run tests against real hardware'
+)
+option(
+  'e2e-controller',
+  type : 'string',
+  value : '',
+  description : 'controller device for e2e tests, e.g. /dev/nvme0 (required when e2e-tests=true; no default since these tests read/write real data)'
+)
+option(
+  'e2e-ns1',
+  type : 'string',
+  value : '',
+  description : 'namespace device for e2e tests, e.g. /dev/nvme0n1 (required when e2e-tests=true; no default since these tests read/write real data)'
+)
+option(
+  'e2e-log-dir',
+  type : 'string',
+  value : 'nvmetests',
+  description : 'log directory for e2e tests'
+)
+option(
+  'e2e-log-level',
+  type : 'combo',
+  choices : ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+  value : 'WARNING',
+  description : 'log verbosity for e2e tests'
+)
+option(
+  'e2e-nvme-bin',
+  type : 'string',
+  value : 'nvme',
+  description : 'nvme binary to exercise in e2e tests'
+)
+option(
+  'e2e-validate-pci-device',
+  type : 'boolean',
+  value : true,
+  description : 'require the e2e controller to be a PCI NVMe device'
+)
+option(
+  'e2e-collect-device-data',
+  type : 'boolean',
+  value : false,
+  description : 'opt in to recording every nvme command run during e2e tests and its JSON output, plus id-ctrl-derived device metadata, as device_data.json per test'
+)
+option(
+  'tests',
+  type : 'boolean',
+  value : true,
+  description : 'build tests'
+)
+option(
+  'ioctl-tests',
+  type : 'boolean',
+  value : false,
+  description : 'build the ioctl serialization tests and their in-library loopback transport.'
+)
+option(
+  'rundir',
+  type : 'string',
+  value : '/run',
+  description : 'absolute path to the runtime directory (e.g. /run or /var/run)'
+)
+option(
+  'systemctl',
+  type : 'string',
+  value : '/usr/bin/systemctl',
+  description : 'path to systemctl binary'
+)
+option(
+  'systemddir',
+  type : 'string',
+  value : 'lib/systemd/system',
+  description : 'directory for systemd files'
+)
+option(
+  'udevrulesdir',
+  type : 'string',
+  value : 'lib/udev/rules.d',
+  description : 'directory for udev rules files'
+)
+option(
+  'nmdispatchdir',
+  type : 'string',
+  value : 'lib/NetworkManager/dispatcher.d',
+  description : 'directory for NetworkManager dispatcher scripts'
+)
+option(
+  'version-tag',
+  type : 'string',
+  description : 'override the git version string'
+)
+option(
+  'examples',
+  type : 'boolean',
+  value : true,
+  description : 'build examples'
+)
+option(
+  'openssl',
+  type : 'feature',
+  value: 'auto',
+  description : 'OpenSSL support'
+)
+option(
+  'libdbus',
+  type : 'feature',
+  value: 'disabled',
+  description : 'libdbus support'
+)
+option(
+  'keyutils',
+  type: 'feature',
+  value: 'auto',
+  description: 'keyutils support'
+)
+option(
+  'liburing',
+  type : 'feature',
+  value: 'disabled',
+  description : 'liburing support'
+)
+option(
+  'pypi',
+  type : 'boolean',
+  value : false,
+  description : 'building for PyPI (use short soversion, e.g. libnvme.so.3)'
+)
+option(
+  'check-accessors',
+  type : 'boolean',
+  value : false,
+  description : 'CI mode: verify generated accessor files are in sync instead of updating them'
+)
+option(
+  'plugins',
+  type : 'array',
+  choices: ['amzn', 'config', 'dapustor', 'dell', 'dera', 'dir',
+            'exclusion', 'fdp', 'feat', 'fw', 'huawei', 'ibm', 'id', 'innogrit', 'inspur',
+            'intel', 'io-mgmt', 'keys', 'lm', 'log', 'mangoboost', 'memblaze', 'micron', 'nbft',
+            'netapp', 'ns', 'nvidia', 'nvme-mi', 'ocp', 'registry', 'resv', 'rpmb', 'samsung',
+            'sandisk', 'scaleflux', 'seagate', 'security', 'sed', 'shannon', 'solidigm', 'ssstc',
+            'toshiba', 'transcend', 'utils', 'virtium', 'wdc', 'ymtc', 'zns'],
+  description : 'comma-separated list of plugins to build (all plugins are included if unset, [] = no plugins)'
+)
+option(
+  'plugin-tests',
+  type : 'array',
+  # keep in sync with known_plugin_tests in tests/e2e/plugins/meson.build
+  choices : ['micron', 'ocp'],
+  value : [],
+  description : 'comma-separated list of plugin test suites to run against real hardware ([] = none)'
+)

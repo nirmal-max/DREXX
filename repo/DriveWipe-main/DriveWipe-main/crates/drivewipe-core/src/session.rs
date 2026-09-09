@@ -1,0 +1,761 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
+
+use chrono::Utc;
+use crossbeam_channel::Sender;
+use uuid::Uuid;
+
+use crate::config::DriveWipeConfig;
+use crate::error::{DriveWipeError, Result};
+use crate::io::{DEFAULT_BLOCK_SIZE, DeviceWrapper, RawDeviceIo, allocate_aligned_buffer};
+use crate::progress::ProgressEvent;
+use crate::resume::WipeState;
+use crate::types::*;
+use crate::verify::{Verifier, pattern_verify::PatternVerifier};
+use crate::wipe::WipeMethod;
+
+/// A cooperative cancellation token that can be shared across threads.
+pub struct CancellationToken {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl CancellationToken {
+    pub fn new() -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    /// Reset the token so it can be reused for a new batch of operations
+    /// without reinstalling signal handlers.
+    pub fn reset(&self) {
+        self.cancelled.store(false, Ordering::SeqCst);
+    }
+
+    pub fn clone_token(&self) -> Self {
+        Self {
+            cancelled: self.cancelled.clone(),
+        }
+    }
+}
+
+impl Default for CancellationToken {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The main wipe session orchestrator. Coordinates the wipe engine by driving
+/// the method's passes, writing blocks to the device, tracking progress,
+/// managing resume state, and emitting progress events.
+pub struct WipeSession {
+    pub session_id: Uuid,
+    pub drive_info: DriveInfo,
+    pub method: Box<dyn WipeMethod>,
+    pub config: DriveWipeConfig,
+    pub verify_after: bool,
+    /// Verify the full surface after every pass, not just the last one.
+    pub verify_each_pass: bool,
+}
+
+impl WipeSession {
+    pub fn new(
+        drive_info: DriveInfo,
+        method: Box<dyn WipeMethod>,
+        config: DriveWipeConfig,
+    ) -> Self {
+        // A method whose specification mandates verification is always
+        // verified: running DoD 5220.22-M or NIST SP 800-88 without the
+        // read-back does not satisfy the standard it claims to implement, so
+        // `auto_verify` may add verification but must not remove it.
+        let verify_after = config.auto_verify || method.includes_verification();
+        let verify_each_pass = config.verify_each_pass;
+        Self {
+            session_id: Uuid::new_v4(),
+            drive_info,
+            method,
+            config,
+            verify_after,
+            verify_each_pass,
+        }
+    }
+
+    /// Read the entire device back and compare it against the bytes `pattern`
+    /// says should be there.
+    ///
+    /// Returns whether the surface matched, along with the generator so the
+    /// caller can reuse it. A mismatch or read error is recorded in `warnings`
+    /// and reported as `false` rather than aborting, so that a failed
+    /// verification still produces a complete report.
+    ///
+    /// `pass_number` identifies the pass being verified for logging; `None`
+    /// means this is the final whole-session verification.
+    async fn verify_pattern(
+        pattern: Box<dyn crate::wipe::patterns::PatternGenerator + Send>,
+        device: &mut dyn RawDeviceIo,
+        session_id: Uuid,
+        progress_tx: &Sender<ProgressEvent>,
+        warnings: &mut Vec<String>,
+        pass_number: Option<u32>,
+    ) -> Result<(
+        bool,
+        Box<dyn crate::wipe::patterns::PatternGenerator + Send>,
+    )> {
+        let label = match pass_number {
+            Some(n) => format!("Pass {n} verification"),
+            None => "Verification".to_string(),
+        };
+
+        let verifier = PatternVerifier::new(pattern);
+        let outcome = verifier.verify(device, session_id, progress_tx).await;
+        let pattern = verifier.into_pattern();
+
+        let passed = match outcome {
+            Ok(result) => result,
+            Err(DriveWipeError::VerificationFailed {
+                offset,
+                expected,
+                actual,
+            }) => {
+                warnings.push(format!(
+                    "{label} mismatch at offset {offset:#x}: \
+                     expected {expected:#04x}, got {actual:#04x}"
+                ));
+                false
+            }
+            Err(e) => {
+                warnings.push(format!("{label} error: {e}"));
+                false
+            }
+        };
+
+        Ok((passed, pattern))
+    }
+
+    /// Execute the wipe operation.
+    ///
+    /// Runs all passes defined by the wipe method, writing pattern data to the
+    /// device block by block, emitting progress events, and optionally resuming
+    /// from a prior interrupted session.
+    ///
+    /// Pass numbers in the `WipeState` and `PassResult` are 1-indexed for
+    /// display purposes, but calls to `WipeMethod::pattern_for_pass()` use
+    /// 0-indexed pass numbers as required by that API.
+    pub async fn execute(
+        &self,
+        device: &mut dyn RawDeviceIo,
+        progress_tx: &Sender<ProgressEvent>,
+        cancel_token: &CancellationToken,
+        resume_state: Option<WipeState>,
+    ) -> Result<WipeResult> {
+        log::debug!(
+            "[SESSION] Execute called for {}",
+            self.drive_info.path.display()
+        );
+        let total_bytes = self.drive_info.capacity;
+        let total_passes = self.method.pass_count();
+        let session_start = Instant::now();
+        log::debug!(
+            "[SESSION] Capacity: {} bytes, Passes: {}",
+            total_bytes,
+            total_passes
+        );
+
+        // When resuming, reuse the original session's UUID so that events
+        // and the final WipeResult carry a consistent identity.
+        let session_id = resume_state
+            .as_ref()
+            .map(|s| s.session_id)
+            .unwrap_or(self.session_id);
+
+        let started_at = resume_state
+            .as_ref()
+            .map(|s| s.started_at)
+            .unwrap_or_else(Utc::now);
+
+        // Determine resume point.
+        // `current_pass` in WipeState is 1-indexed (1 = first pass).
+        let (start_pass_1indexed, start_offset) = if let Some(ref state) = resume_state {
+            (state.current_pass, state.bytes_written_this_pass)
+        } else {
+            (1, 0)
+        };
+
+        let mut total_bytes_written: u64 = resume_state
+            .as_ref()
+            .map(|s| s.total_bytes_written)
+            .unwrap_or(0);
+
+        // Resolve hostname once for use in all WipeResult constructions.
+        let hostname = hostname::get()
+            .ok()
+            .and_then(|h| h.into_string().ok())
+            .unwrap_or_default();
+
+        // Sessions directory for state persistence
+        let sessions_dir = self.config.sessions_dir.clone();
+
+        // Create initial wipe state for persistence
+        let mut wipe_state = resume_state.unwrap_or_else(|| {
+            WipeState::new(
+                session_id,
+                self.drive_info.path.clone(),
+                self.drive_info.serial.clone(),
+                self.drive_info.model.clone(),
+                total_bytes,
+                self.method.id().to_string(),
+                total_passes,
+                self.verify_after,
+            )
+        });
+
+        // Send SessionStarted event
+        log::debug!("[SESSION] Sending SessionStarted event");
+        let _ = progress_tx.send(ProgressEvent::SessionStarted {
+            session_id,
+            device_path: self.drive_info.path.display().to_string(),
+            device_serial: self.drive_info.serial.clone(),
+            method_id: self.method.id().to_string(),
+            method_name: self.method.name().to_string(),
+            total_bytes,
+            total_passes,
+        });
+        log::debug!("[SESSION] SessionStarted event sent");
+
+        // ── Firmware dispatch ──────────────────────────────────────────
+        // Firmware methods are atomic from the host's perspective: a single
+        // ioctl/admin-command triggers the drive controller's own erase
+        // routine. We skip the entire software write loop and return a
+        // firmware-specific WipeResult.
+        log::debug!(
+            "[SESSION] Is firmware method: {}",
+            self.method.is_firmware()
+        );
+        if self.method.is_firmware() {
+            log::debug!("[SESSION] Executing firmware method");
+            let fw_start = Instant::now();
+            let _ = progress_tx.send(ProgressEvent::FirmwareEraseStarted {
+                session_id,
+                method_name: self.method.name().to_string(),
+            });
+
+            let fw_result = self
+                .method
+                .execute_firmware(&self.drive_info, session_id, progress_tx)
+                .await;
+
+            if let Some(result) = fw_result {
+                let fw_duration = fw_start.elapsed().as_secs_f64();
+
+                let (outcome, errors) = match &result {
+                    Ok(()) => {
+                        let _ = progress_tx.send(ProgressEvent::FirmwareEraseCompleted {
+                            session_id,
+                            duration_secs: fw_duration,
+                        });
+                        let _ = progress_tx.send(ProgressEvent::Completed {
+                            session_id,
+                            outcome: WipeOutcome::Success,
+                            duration_secs: fw_duration,
+                        });
+                        (WipeOutcome::Success, vec![])
+                    }
+                    Err(e) => {
+                        let err_msg = e.to_string();
+                        let _ = progress_tx.send(ProgressEvent::Error {
+                            session_id,
+                            message: err_msg.clone(),
+                        });
+                        let _ = progress_tx.send(ProgressEvent::Completed {
+                            session_id,
+                            outcome: WipeOutcome::Failed,
+                            duration_secs: fw_duration,
+                        });
+                        (WipeOutcome::Failed, vec![err_msg])
+                    }
+                };
+
+                return Ok(WipeResult {
+                    session_id,
+                    device_path: self.drive_info.path.clone(),
+                    device_serial: self.drive_info.serial.clone(),
+                    device_model: self.drive_info.model.clone(),
+                    device_capacity: total_bytes,
+                    method_id: self.method.id().to_string(),
+                    method_name: self.method.name().to_string(),
+                    outcome,
+                    passes: vec![],
+                    total_bytes_written: 0,
+                    total_duration_secs: fw_duration,
+                    average_throughput_mbps: 0.0,
+                    verification_passed: None,
+                    started_at,
+                    completed_at: Utc::now(),
+                    hostname: hostname.clone(),
+                    operator: self.config.operator_name.clone(),
+                    warnings: vec![],
+                    errors,
+                });
+            }
+        }
+
+        let mut pass_results: Vec<PassResult> = Vec::new();
+        let mut warnings: Vec<String> = Vec::new();
+        let state_save_interval = self.config.state_save_interval_secs;
+
+        // The generator from the most recently completed pass. Final
+        // verification reuses it rather than asking the method for a fresh one,
+        // because a new RandomFill would carry a different seed and so compare
+        // the device against a keystream that was never written to it.
+        let mut last_pattern: Option<Box<dyn crate::wipe::patterns::PatternGenerator + Send>> =
+            None;
+
+        for note in self
+            .method
+            .before_passes(&self.drive_info, session_id, progress_tx)
+            .await
+        {
+            log::info!("[SESSION] pre-pass: {}", note);
+            warnings.push(note);
+        }
+
+        log::debug!("[SESSION] Starting software method pass loop");
+        log::debug!(
+            "[SESSION] Start pass: {}, Total passes: {}",
+            start_pass_1indexed,
+            total_passes
+        );
+
+        // Page-aligned write buffer, allocated once for all passes. O_DIRECT
+        // rejects any write whose user buffer is not aligned to the device's
+        // logical block size, so this buffer must reach `write_at` intact —
+        // copying it into a `Vec<u8>` on the way would lose the alignment and
+        // every write would fail with EINVAL.
+        log::debug!("[SESSION] Allocating aligned buffer");
+        let mut buffer = allocate_aligned_buffer(DEFAULT_BLOCK_SIZE, 4096);
+        log::debug!("[SESSION] Buffer allocated");
+
+        // Cache the device's logical block size for O_DIRECT alignment.
+        let device_block_size = device.block_size() as usize;
+
+        // Iterate passes: pass_1idx is 1-indexed, pass_0idx is 0-indexed.
+        for pass_1idx in start_pass_1indexed..=total_passes {
+            log::debug!(
+                "[SESSION] === STARTING PASS {} of {} ===",
+                pass_1idx,
+                total_passes
+            );
+            let pass_0idx = pass_1idx - 1;
+            let pass_start = Instant::now();
+
+            // Get the pattern generator for this pass (0-indexed)
+            let mut pattern = self.method.pattern_for_pass(pass_0idx);
+            let pattern_name = pattern.name().to_string();
+
+            let _ = progress_tx.send(ProgressEvent::PassStarted {
+                session_id,
+                pass_number: pass_1idx,
+                pass_name: pattern_name.clone(),
+            });
+
+            let mut bytes_written_this_pass: u64 = if pass_1idx == start_pass_1indexed {
+                start_offset
+            } else {
+                0
+            };
+
+            let mut last_state_save = Instant::now();
+            let mut last_progress_update = Instant::now();
+            let mut throughput_timer = Instant::now();
+            let mut throughput_bytes: u64 = 0;
+
+            log::debug!(
+                "[SESSION] Starting write loop, bytes to write: {}",
+                total_bytes
+            );
+            let mut write_count = 0;
+            while bytes_written_this_pass < total_bytes {
+                write_count += 1;
+                if write_count == 1 || write_count % 1000 == 0 {
+                    log::debug!(
+                        "[SESSION] Write iteration {}, bytes written: {}/{}",
+                        write_count,
+                        bytes_written_this_pass,
+                        total_bytes
+                    );
+                }
+                // Check for cancellation
+                if cancel_token.is_cancelled() {
+                    wipe_state.update_progress(
+                        pass_1idx,
+                        bytes_written_this_pass,
+                        total_bytes_written,
+                    );
+                    if let Err(e) = wipe_state.save(&sessions_dir) {
+                        log::warn!("Failed to save wipe state on cancellation: {}", e);
+                    }
+
+                    let _ = progress_tx.send(ProgressEvent::Interrupted {
+                        session_id,
+                        reason: "User cancelled".to_string(),
+                        bytes_written: total_bytes_written,
+                    });
+
+                    let total_duration = session_start.elapsed().as_secs_f64();
+                    let avg_throughput = if total_duration > 0.0 {
+                        (total_bytes_written as f64 / (1024.0 * 1024.0)) / total_duration
+                    } else {
+                        0.0
+                    };
+
+                    return Ok(WipeResult {
+                        session_id,
+                        device_path: self.drive_info.path.clone(),
+                        device_serial: self.drive_info.serial.clone(),
+                        device_model: self.drive_info.model.clone(),
+                        device_capacity: total_bytes,
+                        method_id: self.method.id().to_string(),
+                        method_name: self.method.name().to_string(),
+                        outcome: WipeOutcome::Cancelled,
+                        passes: pass_results,
+                        total_bytes_written,
+                        total_duration_secs: total_duration,
+                        average_throughput_mbps: avg_throughput,
+                        verification_passed: None,
+                        started_at,
+                        completed_at: Utc::now(),
+                        hostname: hostname.clone(),
+                        operator: self.config.operator_name.clone(),
+                        warnings,
+                        errors: vec![],
+                    });
+                }
+
+                // Determine how many bytes to write this iteration.
+                // Round up to device block size for O_DIRECT compatibility — the
+                // extra bytes beyond `total_bytes` are zeros from the aligned buffer,
+                // which is safe for a wipe operation.
+                let remaining = total_bytes - bytes_written_this_pass;
+                let raw_write_len = (remaining as usize).min(buffer.len());
+                let write_len = if raw_write_len == 0 {
+                    break;
+                } else if raw_write_len < device_block_size {
+                    device_block_size.min(buffer.len())
+                } else {
+                    let aligned =
+                        (raw_write_len + device_block_size - 1) & !(device_block_size - 1);
+                    aligned.min(buffer.len())
+                };
+                let write_buf = &mut buffer[..write_len];
+
+                // Fill the buffer with the pattern bytes belonging at this
+                // offset. Keying the pattern to the absolute offset is what
+                // lets the pass be verified afterwards, and what keeps a
+                // resumed pass byte-identical to an uninterrupted one.
+                pattern.fill_at(bytes_written_this_pass, write_buf);
+
+                // Write to device at the current offset
+                if write_count == 1 {
+                    log::debug!(
+                        "[SESSION] First write: offset={}, len={}",
+                        bytes_written_this_pass,
+                        write_len
+                    );
+                }
+
+                // Use DeviceWrapper to safely pass &mut dyn RawDeviceIo across
+                // spawn_blocking boundaries. The aligned buffer is moved into
+                // the task and handed back, rather than copied, so the write
+                // sees the alignment O_DIRECT requires.
+                let device_wrapper = DeviceWrapper::new(device);
+                let send_buf = buffer;
+                let pass_offset = bytes_written_this_pass;
+
+                let write_res = tokio::task::spawn_blocking(move || {
+                    // SAFETY: device outlives this task; exclusive access is
+                    // maintained because we .await immediately after spawn.
+                    let device_ref = unsafe { device_wrapper.get_mut() };
+                    let res = device_ref.write_at(pass_offset, &send_buf[..write_len]);
+                    (res, send_buf) // Return buffer for reuse
+                })
+                .await
+                .map_err(|e| {
+                    DriveWipeError::IoGeneric(std::io::Error::other(format!(
+                        "Task join error: {e}"
+                    )))
+                })?;
+
+                match write_res {
+                    (Ok(n), returned_buf) => {
+                        buffer = returned_buf; // Reclaim the aligned buffer
+                        if write_count == 1 {
+                            log::debug!("[SESSION] First write SUCCESS: wrote {} bytes", n);
+                        }
+                        let effective_n = (n as u64).min(remaining);
+                        bytes_written_this_pass += effective_n;
+                        total_bytes_written += effective_n;
+                        throughput_bytes += effective_n;
+                    }
+                    (Err(e), returned_buf) => {
+                        let _ = returned_buf; // Not reused on error path
+                        log::debug!(
+                            "[SESSION ERROR] Write FAILED at offset {}: {}",
+                            bytes_written_this_pass,
+                            e
+                        );
+                        wipe_state.update_progress(
+                            pass_1idx,
+                            bytes_written_this_pass,
+                            total_bytes_written,
+                        );
+                        if let Err(save_err) = wipe_state.save(&sessions_dir) {
+                            log::warn!("Failed to save wipe state on write error: {}", save_err);
+                        }
+
+                        let msg = format!("Write error at offset {bytes_written_this_pass}: {e}");
+                        let _ = progress_tx.send(ProgressEvent::Error {
+                            session_id,
+                            message: msg,
+                        });
+
+                        return Err(e);
+                    }
+                }
+
+                // Send BlockWritten event only every 500ms to avoid channel saturation
+                // Calculate throughput over longer windows for stability
+                let elapsed_progress = last_progress_update.elapsed().as_secs_f64();
+                if elapsed_progress >= 0.5 {
+                    let elapsed_throughput = throughput_timer.elapsed().as_secs_f64();
+                    let throughput_bps = if elapsed_throughput > 0.1 {
+                        throughput_bytes as f64 / elapsed_throughput
+                    } else {
+                        0.0
+                    };
+
+                    let _ = progress_tx.send(ProgressEvent::BlockWritten {
+                        session_id,
+                        pass_number: pass_1idx,
+                        bytes_written: bytes_written_this_pass,
+                        total_bytes,
+                        throughput_bps,
+                    });
+                    last_progress_update = Instant::now();
+
+                    // Reset throughput measurement window after reporting
+                    // Use a 2-second window for smoother readings
+                    if elapsed_throughput >= 2.0 {
+                        throughput_timer = Instant::now();
+                        throughput_bytes = 0;
+                    }
+                }
+
+                // Periodically save state
+                if last_state_save.elapsed().as_secs_f64() >= state_save_interval as f64 {
+                    wipe_state.update_progress(
+                        pass_1idx,
+                        bytes_written_this_pass,
+                        total_bytes_written,
+                    );
+                    if let Err(e) = wipe_state.save(&sessions_dir) {
+                        log::warn!("Failed to save periodic wipe state: {}", e);
+                    }
+                    last_state_save = Instant::now();
+                }
+            }
+
+            // Sync the device after each pass
+            if let Err(e) = device.sync() {
+                let msg = format!("Sync warning after pass {pass_1idx}: {e}");
+                let _ = progress_tx.send(ProgressEvent::Warning {
+                    session_id,
+                    message: msg.clone(),
+                });
+                warnings.push(msg);
+            }
+
+            let pass_duration = pass_start.elapsed().as_secs_f64();
+            let throughput_mbps = if pass_duration > 0.0 {
+                (total_bytes as f64 / (1024.0 * 1024.0)) / pass_duration
+            } else {
+                0.0
+            };
+
+            let _ = progress_tx.send(ProgressEvent::PassCompleted {
+                session_id,
+                pass_number: pass_1idx,
+                duration_secs: pass_duration,
+                throughput_mbps,
+            });
+
+            // Per-pass verification: read the whole surface back and compare it
+            // against the bytes this pass should have written. The generator is
+            // reused rather than rebuilt, so random passes compare against the
+            // exact keystream that was written.
+            let mut pass_verified = None;
+            if self.verify_each_pass {
+                log::debug!("[SESSION] Verifying pass {}", pass_1idx);
+                let (passed, returned) = Self::verify_pattern(
+                    pattern,
+                    device,
+                    session_id,
+                    progress_tx,
+                    &mut warnings,
+                    Some(pass_1idx),
+                )
+                .await?;
+                pattern = returned;
+                pass_verified = Some(passed);
+            }
+
+            pass_results.push(PassResult {
+                pass_number: pass_1idx,
+                pattern_name: pattern_name.clone(),
+                bytes_written: total_bytes,
+                duration_secs: pass_duration,
+                throughput_mbps,
+                verified: pass_verified.is_some(),
+                verification_passed: pass_verified,
+            });
+
+            // Hold on to this pass's generator: if it turns out to be the last
+            // pass, the final verification needs this exact instance.
+            last_pattern = Some(pattern);
+
+            // Save state after each completed pass
+            wipe_state.update_progress(pass_1idx, total_bytes, total_bytes_written);
+            if let Err(e) = wipe_state.save(&sessions_dir) {
+                log::warn!("Failed to save wipe state after pass {}: {}", pass_1idx, e);
+            }
+        }
+
+        for note in self
+            .method
+            .after_passes(&self.drive_info, session_id, progress_tx)
+            .await
+        {
+            log::info!("[SESSION] post-pass: {}", note);
+            warnings.push(note);
+        }
+
+        // ── Verification phase ─────────────────────────────────────────
+        // Every pattern is offset-addressable and reproducible, so a single
+        // full-surface byte comparison covers all of them — including random
+        // passes, which previously could only be sampled. The generator from
+        // the final pass is reused so its keystream matches what was written.
+        let verification_passed = if self.verify_after {
+            match last_pattern.take() {
+                Some(pattern) => {
+                    // Already verified as part of the pass loop; don't read the
+                    // whole device a second time for no new information. The
+                    // session only passes if *every* pass did — a failure on an
+                    // earlier pass still means the wipe is not sound.
+                    if self.verify_each_pass {
+                        Some(
+                            pass_results
+                                .iter()
+                                .all(|p| p.verification_passed == Some(true)),
+                        )
+                    } else {
+                        let (passed, _) = Self::verify_pattern(
+                            pattern,
+                            device,
+                            session_id,
+                            progress_tx,
+                            &mut warnings,
+                            None,
+                        )
+                        .await?;
+
+                        if let Some(last_pass) = pass_results.last_mut() {
+                            last_pass.verified = true;
+                            last_pass.verification_passed = Some(passed);
+                        }
+                        Some(passed)
+                    }
+                }
+                None => {
+                    // No pass ran (a fully resumed session that had already
+                    // finished every pass). Nothing was written, so there is
+                    // no generator to compare against.
+                    warnings.push(
+                        "Verification skipped: no pass was executed in this session".to_string(),
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Send all warnings as progress events so they're visible in the UI
+        for warning in &warnings {
+            let _ = progress_tx.send(ProgressEvent::Warning {
+                session_id,
+                message: warning.clone(),
+            });
+        }
+
+        // Determine outcome
+        let outcome = match verification_passed {
+            Some(true) => WipeOutcome::Success,
+            Some(false) => WipeOutcome::Failed,
+            None => {
+                if warnings.is_empty() {
+                    WipeOutcome::Success
+                } else {
+                    WipeOutcome::SuccessWithWarnings
+                }
+            }
+        };
+
+        let total_duration = session_start.elapsed().as_secs_f64();
+        let avg_throughput = if total_duration > 0.0 {
+            (total_bytes_written as f64 / (1024.0 * 1024.0)) / total_duration
+        } else {
+            0.0
+        };
+
+        let _ = progress_tx.send(ProgressEvent::Completed {
+            session_id,
+            outcome,
+            duration_secs: total_duration,
+        });
+
+        // Clean up state file on completion
+        if let Err(e) = wipe_state.cleanup(&sessions_dir) {
+            log::warn!("Failed to clean up state file: {}", e);
+        }
+
+        Ok(WipeResult {
+            session_id,
+            device_path: self.drive_info.path.clone(),
+            device_serial: self.drive_info.serial.clone(),
+            device_model: self.drive_info.model.clone(),
+            device_capacity: total_bytes,
+            method_id: self.method.id().to_string(),
+            method_name: self.method.name().to_string(),
+            outcome,
+            passes: pass_results,
+            total_bytes_written,
+            total_duration_secs: total_duration,
+            average_throughput_mbps: avg_throughput,
+            verification_passed,
+            started_at,
+            completed_at: Utc::now(),
+            hostname,
+            operator: self.config.operator_name.clone(),
+            warnings,
+            errors: vec![],
+        })
+    }
+}

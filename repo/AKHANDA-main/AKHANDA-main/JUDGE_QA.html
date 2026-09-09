@@ -1,0 +1,429 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>Akhanda, Questions and Answers</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+@page { size: A4; margin: 16mm 15mm 15mm 15mm; }
+*{box-sizing:border-box}
+body{margin:0;background:#fff;color:#14181F;
+  font-family:"Public Sans",Arial,sans-serif;font-size:10.4pt;line-height:1.5}
+.wrap{max-width:180mm;margin:0 auto;padding:0 0 10mm}
+h1,h2,h3,h4{font-family:Newsreader,Georgia,serif;margin:0;font-weight:600;letter-spacing:-.01em}
+h1{font-size:26pt;line-height:1.08}
+h2{font-size:16pt;line-height:1.18;margin:0 0 2mm}
+h3{font-size:12pt;margin:0 0 1.5mm}
+h4{font-size:10.8pt;margin:0 0 1mm}
+p{margin:0 0 2.6mm}
+.m,code{font-family:"IBM Plex Mono",monospace;font-size:.9em}
+code{background:#EEF1F6;border:1px solid #D8DEE8;border-radius:2px;padding:.04em .3em}
+
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:7.6pt;font-weight:600;letter-spacing:.16em;
+  text-transform:uppercase;color:#27409E;margin:0 0 2mm}
+header{border-bottom:2px solid #27409E;padding-bottom:5mm;margin-bottom:7mm}
+.lede{font-size:11.4pt;color:#3A4351;margin-top:3mm}
+
+section{margin:0 0 8mm}
+.page-break{page-break-before:always}
+.avoid{page-break-inside:avoid}
+
+.qa{margin:0 0 4.5mm;page-break-inside:avoid}
+.q{font-weight:700;color:#14181F;margin:0 0 1.2mm;font-size:10.6pt}
+.q::before{content:"Q  ";font-family:"IBM Plex Mono",monospace;color:#27409E;font-weight:600}
+.a{color:#333B47;margin:0 0 1.5mm;padding-left:6mm;border-left:2px solid #DDE2EA}
+.a strong{color:#14181F}
+.say{background:#F2F5FB;border-left:3px solid #27409E;padding:2.5mm 3.5mm;margin:1.5mm 0 0 6mm;
+  font-style:italic;color:#22314F;font-size:10pt}
+
+.role{border:1px solid #D3D9E2;border-radius:2px;padding:4mm 5mm;margin:0 0 6mm;page-break-inside:avoid}
+.role .who{font-family:"IBM Plex Mono",monospace;font-size:8pt;letter-spacing:.12em;
+  text-transform:uppercase;color:#27409E;margin-bottom:1mm}
+.role .owns{color:#5A6472;font-size:9.6pt;margin:0 0 3mm}
+
+table{border-collapse:collapse;width:100%;font-size:9.4pt;margin:3mm 0;page-break-inside:avoid}
+th{text-align:left;padding:2mm 2.5mm;background:#EEF1F6;border-bottom:1px solid #C9D0DA;
+  font-family:"IBM Plex Mono",monospace;font-size:7.6pt;letter-spacing:.09em;text-transform:uppercase;color:#5A6472}
+td{padding:2mm 2.5mm;border-bottom:1px solid #E4E8EF;vertical-align:top}
+tr:last-child td{border-bottom:0}
+
+.box{border:1px solid #D3D9E2;border-left:3px solid #6B7482;background:#FAFBFD;
+  padding:3mm 4mm;margin:3mm 0;page-break-inside:avoid}
+.box.ok{border-left-color:#0C6A47;background:#F1F8F4}
+.box.stop{border-left-color:#A3322A;background:#FDF4F3}
+.box.warn{border-left-color:#94600A;background:#FDF8EF}
+.box h4{font-family:"Public Sans",sans-serif;font-size:8pt;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;color:#5A6472;margin:0 0 1.5mm}
+.box p:last-child{margin-bottom:0}
+
+ul{margin:0 0 2.6mm;padding-left:5mm}
+li{margin-bottom:1.2mm}
+.foot{border-top:1px solid #D3D9E2;padding-top:3mm;margin-top:8mm;color:#6B7482;font-size:8.6pt}
+</style></head><body><div class="wrap">
+
+<header>
+  <p class="eyebrow">Akhanda &middot; SIH26149 &middot; Syntax Squad &middot; GITAM Hyderabad</p>
+  <h1>Questions and answers for the judges</h1>
+  <p class="lede">What each member will be asked and what to answer, then a full set for
+    whoever presents. Written in plain words: no answer here needs a technical background to
+    say or to understand.</p>
+</header>
+
+<!-- ══════════ THE ONE-PAGE VERSION ══════════ -->
+<section>
+  <p class="eyebrow">Read this first</p>
+  <h2>The whole project in six sentences</h2>
+  <p>Anyone on the team should be able to say this without notes.</p>
+  <div class="box ok">
+    <p><strong>1.</strong> Two things are needed in forensics and they pull in opposite
+      directions: sometimes you must destroy data so nobody can ever recover it, and sometimes
+      you must recover data that somebody tried to destroy.</p>
+    <p><strong>2.</strong> Today those are sold as separate products, so the two halves of a
+      case never share one record.</p>
+    <p><strong>3.</strong> We built one tool that does both, and writes every action into a
+      single register where each entry is locked to the one before it.</p>
+    <p><strong>4.</strong> Remove a page from that register and the tool does not just say
+      &ldquo;invalid&rdquo;. It says <em>which page</em> is missing.</p>
+    <p><strong>5.</strong> A second computer, held by a second person, signs every action, so
+      one operator alone cannot produce a record that looks complete.</p>
+    <p><strong>6.</strong> It prints the two-signature certificate Indian courts have required
+      since July 2024, and it refuses to claim more than it actually did.</p>
+  </div>
+
+  <h3>The numbers, all of them checked</h3>
+  <table>
+    <tr><th>Figure</th><th>What it means</th></tr>
+    <tr><td><strong>630 tests pass, none skipped</strong></td><td>every claim we make is checked by an automatic test</td></tr>
+    <tr><td><strong>11 of 11</strong> automated checks green</td><td>the full check suite, run end to end</td></tr>
+    <tr><td><strong>8 of 8</strong> claims survived</td><td>we tried to disprove our own claims and could not</td></tr>
+    <tr><td><strong>4 of 4</strong> files returned byte for byte</td><td>recovery is exact, or we do not claim it</td></tr>
+    <tr><td><strong>3</strong> separate checkers agree</td><td>written in three languages so one shared mistake cannot hide</td></tr>
+    <tr><td><strong>37 thousandths of a second</strong></td><td>time to find a tampered record among 500</td></tr>
+    <tr><td><strong>0</strong> serious security findings</td><td>from an automated security scan of our own code</td></tr>
+  </table>
+
+  <div class="box stop">
+    <h4>The three things we must never claim</h4>
+    <p><strong>We do not claim the highest trust level.</strong> We reach the second highest.
+      The highest needs a presence device we designed but did not build.</p>
+    <p><strong>We do not claim the strongest wipe grade on pen drives.</strong> Flash memory
+      keeps blocks no computer can address. We report the honest lower grade.</p>
+    <p><strong>We do not claim the record proves nothing was hidden.</strong> It proves nothing
+      was <em>changed</em>. No register in the world can prove what was never written down.</p>
+  </div>
+</section>
+
+<!-- ══════════ PER MEMBER ══════════ -->
+<section class="page-break">
+  <p class="eyebrow">Part two</p>
+  <h2>What each member will be asked</h2>
+  <p>Judges often split up and question people separately. Each person should know their own
+    section cold, and the six sentences above.</p>
+
+  <!-- PULKIT -->
+  <div class="role">
+    <div class="who">Pulkit &middot; Team lead and core engineering</div>
+    <p class="owns">Owns the whole system, the cryptography, and the final answer to anything
+      nobody else can field.</p>
+
+    <div class="qa"><p class="q">What exactly did you build?</p>
+      <div class="a">One tool that securely erases data and recovers deleted files, and writes
+        every action into a single register where each entry carries the fingerprint of the one
+        before it. A second computer co-signs each action.</div></div>
+
+    <div class="qa"><p class="q">Why is that hard? Isn&rsquo;t it just hashing?</p>
+      <div class="a">Hashing a file is easy. Three things are not. <strong>One:</strong> making
+        the tool refuse to run when the second party is missing, instead of quietly recording
+        something weaker. <strong>Two:</strong> doing that check <em>before</em> the destructive
+        step, because wiping cannot be undone. <strong>Three:</strong> making sure the record
+        can never say more than actually happened.</div></div>
+
+    <div class="qa"><p class="q">How much of this is your own work?</p>
+      <div class="a">The forensic tool is new. It builds on AetherProof, my own open-source
+        project published before this problem statement was released. We declare that openly on
+        the last slide rather than have it discovered.</div></div>
+
+    <div class="qa"><p class="q">What does not work yet?</p>
+      <div class="a">The strongest wipe grade on solid-state drives. The code is written and
+        tested, but proving it needs a drive we are allowed to destroy, and we could not obtain
+        one. We marked it <strong>not tested</strong> rather than claim it.
+      <div class="say">&ldquo;We would rather show you a gap than have you find one.&rdquo;</div></div></div>
+  </div>
+
+  <!-- AADYA -->
+  <div class="role">
+    <div class="who">Aadya Pandey &middot; Frontend</div>
+    <p class="owns">Owns the screens: the register view, the certificate, and the live
+      integrity check.</p>
+
+    <div class="qa"><p class="q">Is the screen just showing pre-written results?</p>
+      <div class="a"><strong>No.</strong> The page recalculates every fingerprint itself, in the
+        browser, using the browser&rsquo;s own cryptography. It never asks a server whether the
+        record is valid.
+      <div class="say">&ldquo;Press F12 and you can watch each fingerprint being computed on
+        your own machine.&rdquo;</div></div></div>
+
+    <div class="qa"><p class="q">Why do the check in the browser at all?</p>
+      <div class="a">Because if our program says &ldquo;this is valid&rdquo;, you are trusting
+        us. When the page recomputes it in front of you, you are trusting arithmetic.</div></div>
+
+    <div class="qa"><p class="q">What happens when you press Inject Tamper?</p>
+      <div class="a">One signed field is changed in memory only. Every fingerprint is then
+        recomputed. That record no longer matches, and every record after it fails too, because
+        each one is locked to the one before. The file on disk is never touched.</div></div>
+
+    <div class="qa"><p class="q">What did you build it with?</p>
+      <div class="a">React and TypeScript, built with Vite, styled with Tailwind. It has no
+        network calls at all and no security warnings in its dependencies.</div></div>
+  </div>
+
+  <!-- KARTHIK -->
+  <div class="role">
+    <div class="who">Karthik &middot; Testing and quality</div>
+    <p class="owns">Owns the 630 tests, the automated check suite, and the evidence that the
+      numbers are real.</p>
+
+    <div class="qa"><p class="q">How do we know the tests actually test something?</p>
+      <div class="a">Two ways. First, none are skipped: a skipped test is never counted as a
+        pass anywhere in this project. Second, we ran an adversarial audit that actively tries
+        to disprove each of our claims. Eight claims, eight survived.</div></div>
+
+    <div class="qa"><p class="q">Have you ever found a real bug?</p>
+      <div class="a">Yes, and it is the best thing we can tell you. Hours before the deadline
+        we found the recovery tool producing a broken archive while reporting it as complete.
+        620 tests passed anyway, because they only covered the three file types where the
+        problem could not occur. We fixed it, added ten tests, and it now returns four of four
+        files perfectly.
+      <div class="say">&ldquo;A team that finds its own bugs is worth more than one that never
+        reports any.&rdquo;</div></div></div>
+
+    <div class="qa"><p class="q">Does it work on a fresh machine, or only yours?</p>
+      <div class="a">We extracted a clean copy into an empty folder and ran everything against
+        it. That caught a real fault: on Windows the line endings changed on checkout and four
+        tests failed. Fixed, and re-verified.</div></div>
+  </div>
+
+  <!-- ANKIT -->
+  <div class="role">
+    <div class="who">Ankit &middot; Presentation</div>
+    <p class="owns">Owns the deck, the demo flow, and the room. Full question set in Part three.</p>
+
+    <div class="qa"><p class="q">Show me it working, in two minutes.</p>
+      <div class="a">Register view, point at the refused row. Then the live check, press Inject
+        Tamper, it names the exact record. Then Restore. Then the certificate with its stated
+        limits. That is the whole demo and it needs no internet.</div></div>
+
+    <div class="qa"><p class="q">What is the single most important thing on screen?</p>
+      <div class="a">The refused row. It is an operation that <em>did not happen</em>, recorded
+        permanently.
+      <div class="say">&ldquo;Ask any other tool to show you the log entry for a job it refused
+        to perform. There isn&rsquo;t one.&rdquo;</div></div></div>
+  </div>
+
+  <!-- ROHAN -->
+  <div class="role">
+    <div class="who">B Rohan &middot; Legal and compliance</div>
+    <p class="owns">Owns the mapping to Indian law and to the international standard.</p>
+
+    <div class="qa"><p class="q">Which law makes this necessary?</p>
+      <div class="a">Section 63(4) of the Bharatiya Sakshya Adhiniyam 2023, in force since July
+        2024. It requires a certificate for electronic evidence signed by both the person in
+        charge of the device and an expert. Our certificate has both parts, and each field is
+        marked with the clause it answers.</div></div>
+
+    <div class="qa"><p class="q">And the sanitization side?</p>
+      <div class="a">NIST Special Publication 800-88 Revision 2, finalised 26 September 2025.
+        It defines the wipe grades and, new in Revision 2, a formal validation step. We
+        implement the grades honestly and never record a stronger one than achieved. There is
+        also the Digital Personal Data Protection Act 2023, section 8(7), which requires
+        organisations to erase personal data.</div></div>
+
+    <div class="qa"><p class="q">Is this admissible in court?</p>
+      <div class="a">That is for the court, not for us. What we can say is that the certificate
+        contains what the section requires, field by field, with each clause named.
+      <div class="say">&ldquo;We claim the form is right. We do not claim the verdict.&rdquo;</div></div></div>
+
+    <div class="qa"><p class="q">You mention outside timestamping. Is that legally recognised?</p>
+      <div class="a">Not in Indian courts, and we do not say it is. It provides the same class
+        of cryptographic guarantee that courts increasingly accept. Nothing stronger than that.</div></div>
+  </div>
+
+  <!-- KANISHQ -->
+  <div class="role">
+    <div class="who">Kanishq &middot; Research and field</div>
+    <p class="owns">Owns the competitor picture, the market numbers, and the laboratory
+      relationship.</p>
+
+    <div class="qa"><p class="q">Who else does this, and why are you different?</p>
+      <div class="a">Blancco and BitRaser are government-certified wiping tools; each certificate
+        is signed on its own, with nothing linking one job to the next. EnCase and FTK are
+        strong at copying and examining disks but print no certificate built for Indian evidence
+        law. None of them cross from wiping into recovery.
+      <div class="say">&ldquo;The parts exist. The combination does not.&rdquo;</div></div></div>
+
+    <div class="qa"><p class="q">How big is the market?</p>
+      <div class="a">About 650 million dollars of Indian demand is within reach, growing near
+        40 percent a year, on Deloitte and DSCI figures. We cite the published numbers rather
+        than model our own.</div></div>
+
+    <div class="qa"><p class="q">Have you tested with a real forensic laboratory?</p>
+      <div class="a">No. We could not get laboratory access in the window, and hackathon rules
+        stop us leaving during the event. A pilot with one laboratory is the first item on our
+        next-steps list, because it turns &ldquo;it works on our laptops&rdquo; into &ldquo;it
+        works on their evidence&rdquo;.</div></div>
+  </div>
+</section>
+
+<!-- ══════════ PRESENTER MASTER SET ══════════ -->
+<section class="page-break">
+  <p class="eyebrow">Part three</p>
+  <h2>The presenter&rsquo;s full set</h2>
+  <p>Judges vary. Some know cryptography deeply, some are senior people from an earlier era of
+    computing who care whether the thing is real and useful. Answer both without changing the
+    facts.</p>
+
+  <h3>For a judge who knows quantum computing</h3>
+
+  <div class="qa"><p class="q">Your signatures are Ed25519. A quantum computer breaks that. Why should a court trust this in 2040?</p>
+    <div class="a">It would, and that is exactly why we did not stop there. Every entry can also
+      carry an <strong>ML-DSA-65</strong> signature, the scheme NIST standardised as FIPS 204 in
+      2024. It is built on lattice problems, which no known quantum algorithm solves
+      efficiently. Ed25519 remains for today; the second signature is what survives.</div></div>
+
+  <div class="qa"><p class="q">Why does that matter more for forensics than elsewhere?</p>
+    <div class="a">Because evidence has to stay checkable for decades. A case sealed today may
+      be challenged in twenty years. Everywhere else, a broken signature scheme means you
+      re-sign and move on. Here, the thing being protected is a claim about the past, and you
+      cannot re-sign the past.
+    <div class="say">&ldquo;An integrity guarantee with a known expiry date is not preserved
+      integrity.&rdquo;</div></div></div>
+
+  <div class="qa"><p class="q">What about the hashes? Grover&rsquo;s algorithm.</p>
+    <div class="a">Grover gives a square-root speed-up, so SHA-256 keeps roughly 128 bits of
+      collision resistance against a quantum attacker. That is still comfortably sufficient, and
+      NIST&rsquo;s own guidance treats SHA-256 as adequate. The urgent problem was the
+      signatures, not the hash, and that is where we spent the effort.</div></div>
+
+  <div class="qa"><p class="q">So is it quantum-proof?</p>
+    <div class="a"><strong>No, and we do not say that.</strong> We say the signature layer is
+      quantum-ready: the scheme is standardised, it is attached additively so nothing breaks,
+      and stripping it is detectable. Anyone claiming a whole system is quantum-proof today is
+      overselling.</div></div>
+
+  <h3 class="avoid">For computer science judges</h3>
+
+  <div class="qa"><p class="q">Why length-prefix the fields? Why not just join them?</p>
+    <div class="a">Because joining with a separator is not injective. Two different records can
+      produce the same bytes to sign, which is a forgery primitive rather than a formatting
+      choice. Every field carries its own four-byte length first, so the encoding is
+      unambiguous. There is a regression test for exactly this and it must never be deleted.</div></div>
+
+  <div class="qa"><p class="q">Why implement verification three times?</p>
+    <div class="a">Two implementations by one author can share a misreading of the specification
+      and agree while both are wrong. A third, in a language with different string and integer
+      behaviour, catches that class of error. A test asserts all three produce identical
+      fingerprints and identical verdicts.</div></div>
+
+  <div class="qa"><p class="q">What is the complexity of verification?</p>
+    <div class="a">Linear in the number of entries: one hash and one comparison each. Measured
+      at 37 milliseconds for 500 entries, and it reports the first failing sequence number
+      rather than a boolean.</div></div>
+
+  <div class="qa"><p class="q">You check the co-signer before wiping. What about the gap between the check and the write?</p>
+    <div class="a">A genuine race, and we do not pretend otherwise. No tool that destroys data
+      can close it: something can always change between the check and the irreversible act. We
+      narrow it to a single operation, mark that operation degraded when it happens, and state
+      it rather than deny it.</div></div>
+
+  <div class="qa"><p class="q">Why not a blockchain?</p>
+    <div class="a">A distributed ledger solves disagreement between many mutually distrusting
+      parties. Here there are two parties who both want a correct record, and the evidence must
+      never leave the laboratory. A hash chain with an independent co-signer gives the integrity
+      property without publishing case data or requiring a network.</div></div>
+
+  <h3 class="avoid">For senior judges who want to know it is real</h3>
+
+  <div class="qa"><p class="q">Explain it without the jargon.</p>
+    <div class="a">Think of a bound register with numbered pages, where each page repeats a
+      summary of the previous page. Tear one out and the next page no longer matches. Today&rsquo;s
+      tools issue loose certificates instead: take one away and the rest look perfectly fine.
+      We also make a second officer, sitting at a different desk, countersign every page.</div></div>
+
+  <div class="qa"><p class="q">Who would actually use this, and for what?</p>
+    <div class="a">A forensic laboratory examining a seized drive. A police cyber cell recovering
+      deleted messages. A bank disposing of old drives that must be provably wiped. A defence
+      establishment doing both. In each case somebody must later prove what was done, to
+      somebody who was not in the room.</div></div>
+
+  <div class="qa"><p class="q">What does it cost to run?</p>
+    <div class="a">Two ordinary laptops and one power socket. Competing tools charge thousands of
+      dollars per person per year. Ours is open, runs offline, and needs no server, no
+      subscription and no special hardware.</div></div>
+
+  <div class="qa"><p class="q">Is this a student project or something real?</p>
+    <div class="a">It runs, it is tested, and the two-computer signing was proven on real
+      hardware on 3 September 2026. It is a working prototype, not a product: it has no
+      government certification yet and has not been piloted in a laboratory. We say that plainly
+      because the alternative is being caught overstating it.</div></div>
+
+  <h3 class="avoid">Market, competitors, and what makes us different</h3>
+  <table>
+    <tr><th>Who</th><th>What they do well</th><th>What they cannot do</th></tr>
+    <tr><td><strong>Blancco, BitRaser</strong></td><td>certified wiping, trusted, established</td><td>each certificate signed alone; no link between jobs; no recovery side</td></tr>
+    <tr><td><strong>EnCase, FTK</strong></td><td>imaging and analysis at scale</td><td>no certificate built for Indian evidence law; foreign, with export exposure; costly per seat</td></tr>
+    <tr><td><strong>Autopsy (free)</strong></td><td>capable open-source carving</td><td>no signed chain, no certificate, no second party</td></tr>
+    <tr><td><strong>Akhanda</strong></td><td>both halves in one signed register, two parties, statute-native certificate</td><td>not certified yet, not laboratory-piloted yet</td></tr>
+  </table>
+
+  <div class="box ok">
+    <h4>Why the established players cannot simply copy this</h4>
+    <p>Blancco and BitRaser hold government certification. Changing the certificate structure
+      means re-certification, which takes years and money, so a certified vendor moves slowly by
+      design. EnCase and FTK are foreign products, and building a certificate native to one
+      country&rsquo;s evidence law is poor economics for them. And none of them cross the line
+      between wiping and recovery, because those are separate product lines with separate
+      buyers inside their own companies.</p>
+  </div>
+
+  <h3 class="avoid">The hostile questions</h3>
+
+  <div class="qa"><p class="q">This is just a hash chain. Where is the innovation?</p>
+    <div class="a">The hash chain is the easy part and we do not claim it. The innovation is the
+      conjunction: erasure and recovery in one register, a second party on a physically separate
+      machine, a certificate native to Indian evidence law, and a tool that blocks and records
+      the block rather than downgrading itself. Each piece exists somewhere. The combination
+      does not.</div></div>
+
+  <div class="qa"><p class="q">Your record cannot prove somebody did not do something off the books.</p>
+    <div class="a">Correct, and we say so on the certificate itself. It proves nothing was
+      <em>changed</em> after being written. It cannot prove nothing was <em>withheld</em>.
+      Recording refused attempts narrows the gap; nothing closes it. No register can.</div></div>
+
+  <div class="qa"><p class="q">What if I unplug the second laptop?</p>
+    <div class="a">The tool stops, and writes down that it stopped. That is the entire design.
+      If a missing witness simply meant a weaker record, unplugging it would be a way to do
+      unwatched work. Because the refusal is recorded, unplugging it becomes a way to leave a
+      mark rather than avoid one.</div></div>
+
+  <div class="qa"><p class="q">Did AI write this?</p>
+    <div class="a">We used AI tooling while building, as most teams now do. The design decisions,
+      the honesty rules and the architecture are ours, and we can defend any line of it. The
+      product itself calls no AI at runtime: it is deterministic, works offline, and you can
+      check that with a text search.</div></div>
+
+  <div class="box stop">
+    <h4>Never say these</h4>
+    <ul>
+      <li>&ldquo;Legally guaranteed&rdquo; &mdash; say the certificate contains what the section requires.</li>
+      <li>&ldquo;Unhackable&rdquo; or &ldquo;quantum-proof&rdquo; &mdash; say quantum-ready signature layer.</li>
+      <li>&ldquo;Fully tested&rdquo; &mdash; three things are marked not tested and we name them.</li>
+      <li>&ldquo;Blockchain&rdquo; loosely &mdash; it is a hash chain with an independent co-signer, and the difference matters to anyone who knows.</li>
+      <li>Any invented case number, officer name or device serial. Everything we show is real output.</li>
+    </ul>
+  </div>
+</section>
+
+<p class="foot"><strong>Akhanda</strong> &middot; Syntax Squad &middot; GITAM (Deemed to be
+  University), Hyderabad &middot; Smart India Hackathon 2026, problem statement SIH26149,
+  sponsored by the National Technical Research Organisation. Every figure in this document was
+  measured on the team&rsquo;s own machines before it was written down.</p>
+
+</div></body></html>

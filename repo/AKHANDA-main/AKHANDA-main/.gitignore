@@ -1,0 +1,72 @@
+# ---------------------------------------------------------------------------
+# Keys and live chain state. Never commit these.
+# ---------------------------------------------------------------------------
+*.pem
+*.key
+*.pfx
+*.p12
+witness_token
+.env
+.env.*
+keys/
+.akhanda/
+.akhanda-witness/
+_akhanda_home/
+
+# Generated demo output. A real run writes a real operator private key into it.
+demo_bundle/
+demo_bundle_g1/
+
+# ---------------------------------------------------------------------------
+# Test corpora. NIST CFReDS is about 53 MB of third party data and is fetched,
+# not committed. See akhanda/tests/test_recovery_nist.py for download commands.
+# ---------------------------------------------------------------------------
+akhanda/tests/data/
+akhanda/validation/reassembly/corpus/*.png
+akhanda/evidence/stress_tmp/
+akhanda/evidence/scale_tmp/
+akhanda/evidence/*.tmp
+*.ots
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+.session/
+
+# ---------------------------------------------------------------------------
+# Rust
+# ---------------------------------------------------------------------------
+target/
+akhanda/rust/**/target/
+
+# ---------------------------------------------------------------------------
+# Node / frontend
+# ---------------------------------------------------------------------------
+node_modules/
+dist/
+build/
+.cache/
+.vite/
+*.tsbuildinfo
+vite.config.*.timestamp-*
+
+# ---------------------------------------------------------------------------
+# Editors and OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+*-debug.log*
+
+# Local test fixtures, not shipped.
+# test_zip_reassembly.py needs two or more real .docx files here (any will do);
+# these are ZIP containers used to exercise fragmented-archive reassembly.
+akhanda/research/

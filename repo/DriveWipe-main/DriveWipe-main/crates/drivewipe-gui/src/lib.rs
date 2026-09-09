@@ -1,0 +1,987 @@
+//! DriveWipe Graphical User Interface (GUI)
+//!
+//! A cross-platform desktop application built on the `iced` framework,
+//! providing a visual-first workflow over all DriveWipe features for operators
+//! who do not want a terminal.
+
+pub mod screens;
+pub mod theme;
+
+use iced::futures::SinkExt;
+use iced::widget::{column, container, text};
+use iced::{Element, Length, Task as IcedTask};
+
+/// Application screen states.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Screen {
+    Menu,
+    DriveSelect,
+    MethodSelect,
+    Confirm,
+    WipeProgress,
+    Health,
+    Clone,
+    Partition,
+    Forensic,
+    Settings,
+}
+
+/// All messages the application can handle.
+#[derive(Debug, Clone)]
+pub enum Message {
+    // Navigation
+    NavigateToMenu,
+    NavigateBack,
+    Navigate(Screen),
+
+    // Drive selection
+    ToggleDrive(usize),
+    RefreshDrives,
+    DrivesLoaded(Result<Vec<drivewipe_core::types::DriveInfo>, String>),
+    ProceedToMethodSelect,
+
+    // Method selection
+    SelectMethod(usize),
+    ProceedToConfirm,
+
+    // Confirmation
+    ConfirmInput(String),
+    StartWipe,
+    CancelWipe,
+    WipeEvent(drivewipe_core::progress::ProgressEvent),
+
+    // Health
+    ViewDriveHealth(usize),
+    HealthLoaded(Result<Vec<String>, String>),
+
+    // Clone
+    SelectCloneDrive(usize),
+    CloneConfirmInput(String),
+    StartClone,
+    CancelClone,
+    CloneEvent(drivewipe_core::progress::ProgressEvent),
+
+    // Partition
+    ViewPartitions(usize),
+    PartitionsLoaded(Result<Vec<String>, String>),
+
+    // Forensic
+    RunForensicScan(usize),
+    ForensicEvent(drivewipe_core::progress::ProgressEvent),
+    ForensicCompleted(Result<Vec<String>, String>),
+
+    // Settings
+    ToggleSetting(String, bool),
+}
+
+/// Application state.
+struct DriveWipeApp {
+    screen: Screen,
+    previous_screen: Option<Screen>,
+    drives: Vec<drivewipe_core::types::DriveInfo>,
+    selected_drives: Vec<bool>,
+
+    // Status / error messaging
+    status_message: Option<String>,
+
+    // Method selection
+    methods: Vec<(String, String, u32)>,
+    selected_method: Option<usize>,
+
+    // Confirmation
+    confirm_text: String,
+
+    // Wipe progress
+    wipe_device: String,
+    wipe_method_name: String,
+    wipe_fraction: f32,
+    wipe_throughput: String,
+    wipe_pass_info: String,
+    wipe_complete: bool,
+    wipe_running: bool,
+    selected_method_id: String,
+    selected_device_paths: Vec<std::path::PathBuf>,
+    cancel_token: std::sync::Arc<drivewipe_core::session::CancellationToken>,
+
+    // Health
+    health_info: Vec<String>,
+    health_loading: bool,
+
+    // Clone
+    clone_source: Option<usize>,
+    clone_target: Option<usize>,
+    clone_mode: String,
+    clone_confirm_text: String,
+    clone_cancel_token: std::sync::Arc<drivewipe_core::session::CancellationToken>,
+
+    // Partition
+    partition_info: Vec<String>,
+    partition_loading: bool,
+
+    // Forensic
+    forensic_results: Vec<String>,
+    forensic_running: bool,
+    forensic_progress: f32,
+    forensic_loading: bool,
+
+    // Clone progress
+    clone_running: bool,
+    clone_progress: f32,
+    clone_throughput: String,
+    clone_complete: bool,
+
+    // Settings
+    setting_auto_report: bool,
+    setting_notifications: bool,
+    setting_sleep_prevention: bool,
+    setting_auto_health: bool,
+}
+
+impl Default for DriveWipeApp {
+    fn default() -> Self {
+        let registry = drivewipe_core::wipe::WipeMethodRegistry::new();
+        let methods: Vec<(String, String, u32)> = registry
+            .list()
+            .iter()
+            .map(|m| (m.id().to_string(), m.name().to_string(), m.pass_count()))
+            .collect();
+
+        let status_message = if !drivewipe_core::platform::privilege::is_elevated() {
+            Some(format!(
+                "Warning: Not running with elevated privileges. {}",
+                drivewipe_core::platform::privilege::elevation_hint()
+            ))
+        } else {
+            None
+        };
+
+        Self {
+            screen: Screen::Menu,
+            previous_screen: None,
+            drives: Vec::new(),
+            selected_drives: Vec::new(),
+            status_message,
+            methods,
+            selected_method: None,
+            confirm_text: String::new(),
+            wipe_device: String::new(),
+            wipe_method_name: String::new(),
+            wipe_fraction: 0.0,
+            wipe_throughput: String::new(),
+            wipe_pass_info: String::new(),
+            wipe_complete: false,
+            wipe_running: false,
+            selected_method_id: String::new(),
+            selected_device_paths: Vec::new(),
+            cancel_token: std::sync::Arc::new(drivewipe_core::session::CancellationToken::new()),
+            health_info: Vec::new(),
+            health_loading: false,
+            clone_source: None,
+            clone_target: None,
+            clone_mode: "Block".into(),
+            clone_confirm_text: String::new(),
+            clone_cancel_token: std::sync::Arc::new(
+                drivewipe_core::session::CancellationToken::new(),
+            ),
+            partition_info: Vec::new(),
+            partition_loading: false,
+            forensic_results: Vec::new(),
+            forensic_running: false,
+            forensic_progress: 0.0,
+            forensic_loading: false,
+            clone_running: false,
+            clone_progress: 0.0,
+            clone_throughput: String::new(),
+            clone_complete: false,
+            setting_auto_report: false,
+            setting_notifications: true,
+            setting_sleep_prevention: true,
+            setting_auto_health: true,
+        }
+    }
+}
+
+impl DriveWipeApp {
+    fn new() -> (Self, IcedTask<Message>) {
+        let app = Self::default();
+        let task = IcedTask::perform(
+            async {
+                let enumerator = drivewipe_core::drive::create_enumerator();
+                enumerator.enumerate().await.map_err(|e| e.to_string())
+            },
+            Message::DrivesLoaded,
+        );
+        (app, task)
+    }
+
+    fn title(&self) -> String {
+        match self.screen {
+            Screen::Menu => "DriveWipe".into(),
+            Screen::DriveSelect => "DriveWipe - Select Drives".into(),
+            Screen::MethodSelect => "DriveWipe - Select Method".into(),
+            Screen::Confirm => "DriveWipe - Confirm".into(),
+            Screen::WipeProgress => "DriveWipe - Wiping".into(),
+            Screen::Health => "DriveWipe - Drive Health".into(),
+            Screen::Clone => "DriveWipe - Drive Clone".into(),
+            Screen::Partition => "DriveWipe - Partition Manager".into(),
+            Screen::Forensic => "DriveWipe - Forensic Analysis".into(),
+            Screen::Settings => "DriveWipe - Settings".into(),
+        }
+    }
+
+    fn update(&mut self, message: Message) -> IcedTask<Message> {
+        match message {
+            Message::NavigateToMenu => {
+                self.previous_screen = Some(self.screen.clone());
+                self.screen = Screen::Menu;
+                IcedTask::none()
+            }
+            Message::NavigateBack => {
+                let target = self.previous_screen.take().unwrap_or(match self.screen {
+                    Screen::MethodSelect => Screen::DriveSelect,
+                    Screen::Confirm => Screen::MethodSelect,
+                    _ => Screen::Menu,
+                });
+                self.screen = target;
+                IcedTask::none()
+            }
+            Message::Navigate(screen) => {
+                self.previous_screen = Some(self.screen.clone());
+                // Auto-refresh drives when navigating to DriveSelect with empty list
+                let task = if screen == Screen::DriveSelect && self.drives.is_empty() {
+                    IcedTask::perform(
+                        async {
+                            let enumerator = drivewipe_core::drive::create_enumerator();
+                            enumerator.enumerate().await.map_err(|e| e.to_string())
+                        },
+                        Message::DrivesLoaded,
+                    )
+                } else {
+                    IcedTask::none()
+                };
+                self.screen = screen;
+                task
+            }
+
+            // Drive selection
+            Message::ToggleDrive(i) => {
+                // Prevent selecting boot drives — safety check
+                if let Some(drive) = self.drives.get(i)
+                    && drive.is_boot_drive
+                {
+                    self.status_message = Some("Cannot select boot drive".to_string());
+                    return IcedTask::none();
+                }
+                if let Some(val) = self.selected_drives.get_mut(i) {
+                    *val = !*val;
+                }
+                IcedTask::none()
+            }
+            Message::RefreshDrives => IcedTask::perform(
+                async {
+                    let enumerator = drivewipe_core::drive::create_enumerator();
+                    enumerator.enumerate().await.map_err(|e| e.to_string())
+                },
+                Message::DrivesLoaded,
+            ),
+            Message::DrivesLoaded(result) => {
+                match result {
+                    Ok(drives) => {
+                        self.drives = drives;
+                        self.selected_drives = vec![false; self.drives.len()];
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("Failed to load drives: {e}"));
+                    }
+                }
+                IcedTask::none()
+            }
+            Message::ProceedToMethodSelect => {
+                if self.selected_drives.iter().any(|s| *s) {
+                    self.screen = Screen::MethodSelect;
+                }
+                IcedTask::none()
+            }
+
+            // Method selection
+            Message::SelectMethod(i) => {
+                self.selected_method = Some(i);
+                IcedTask::none()
+            }
+            Message::ProceedToConfirm => {
+                if self.selected_method.is_some() {
+                    self.confirm_text.clear();
+                    self.screen = Screen::Confirm;
+                }
+                IcedTask::none()
+            }
+
+            // Confirmation
+            Message::ConfirmInput(val) => {
+                self.confirm_text = val;
+                IcedTask::none()
+            }
+            Message::CancelWipe => {
+                self.cancel_token.cancel();
+                self.wipe_running = false;
+                self.wipe_pass_info = "Cancelled".into();
+                IcedTask::none()
+            }
+            Message::StartWipe => {
+                if self.confirm_text.trim() == "YES" {
+                    self.wipe_fraction = 0.0;
+                    self.wipe_complete = false;
+                    self.wipe_running = true;
+                    self.cancel_token =
+                        std::sync::Arc::new(drivewipe_core::session::CancellationToken::new());
+
+                    if let Some(mi) = self.selected_method
+                        && let Some((id, name, _)) = self.methods.get(mi)
+                    {
+                        self.selected_method_id = id.clone();
+                        self.wipe_method_name = name.clone();
+                    }
+
+                    self.selected_device_paths = self
+                        .drives
+                        .iter()
+                        .zip(self.selected_drives.iter())
+                        .filter(|(_, sel)| **sel)
+                        .map(|(d, _)| d.path.clone())
+                        .collect();
+
+                    self.wipe_device = self
+                        .selected_device_paths
+                        .iter()
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    self.screen = Screen::WipeProgress;
+
+                    let method_id = self.selected_method_id.clone();
+                    let device_paths = self.selected_device_paths.clone();
+                    let cancel_token = self.cancel_token.clone();
+                    let auto_report = self.setting_auto_report;
+                    let notifications = self.setting_notifications;
+                    let sleep_prevention = self.setting_sleep_prevention;
+                    let auto_health = self.setting_auto_health;
+
+                    return IcedTask::run(
+                        iced::stream::channel(
+                            100,
+                            move |output: iced::futures::channel::mpsc::Sender<Message>| async move {
+                                let (tx, rx) = crossbeam_channel::unbounded();
+
+                                let mut output_clone = output.clone();
+                                tokio::spawn(async move {
+                                    while let Ok(event) = rx.recv() {
+                                        let _ = output_clone.send(Message::WipeEvent(event)).await;
+                                    }
+                                });
+
+                                for path in device_paths {
+                                    let path_str = path.to_string_lossy().to_string();
+                                    let error_id = uuid::Uuid::new_v4();
+
+                                    let enumerator = drivewipe_core::drive::create_enumerator();
+                                    let drive_info = match enumerator.inspect(&path).await {
+                                        Ok(info) => info,
+                                        Err(e) => {
+                                            let _ = tx.send(
+                                                drivewipe_core::progress::ProgressEvent::Error {
+                                                    session_id: error_id,
+                                                    message: format!(
+                                                        "Failed to inspect {}: {}",
+                                                        path_str, e
+                                                    ),
+                                                },
+                                            );
+                                            continue;
+                                        }
+                                    };
+
+                                    let local_reg = drivewipe_core::wipe::WipeMethodRegistry::new();
+                                    let method = match local_reg.into_method(&method_id) {
+                                        Some(m) => m,
+                                        None => {
+                                            let _ = tx.send(
+                                                drivewipe_core::progress::ProgressEvent::Error {
+                                                    session_id: error_id,
+                                                    message: format!(
+                                                        "Unknown wipe method '{}' for {}",
+                                                        method_id, path_str
+                                                    ),
+                                                },
+                                            );
+                                            continue;
+                                        }
+                                    };
+
+                                    let wipe_config = drivewipe_core::config::DriveWipeConfig {
+                                        auto_report_json: auto_report,
+                                        notifications_enabled: notifications,
+                                        sleep_prevention_enabled: sleep_prevention,
+                                        auto_health_pre_wipe: auto_health,
+                                        ..Default::default()
+                                    };
+
+                                    // Clear HPA/DCO before opening the device, so the
+                                    // wipe covers the hidden sectors.
+                                    let mut drive_info = drive_info;
+                                    if !method.is_firmware() {
+                                        let outcome = drivewipe_core::hidden::prepare_for_wipe(
+                                            &mut drive_info,
+                                            wipe_config.remove_hidden_areas,
+                                        );
+                                        for note in outcome.notes {
+                                            let _ = tx.send(
+                                                drivewipe_core::progress::ProgressEvent::Warning {
+                                                    session_id: error_id,
+                                                    message: note,
+                                                },
+                                            );
+                                        }
+                                    }
+
+                                    let session = drivewipe_core::session::WipeSession::new(
+                                        drive_info,
+                                        method,
+                                        wipe_config,
+                                    );
+
+                                    let mut device =
+                                        match drivewipe_core::io::open_device(&path, true) {
+                                            Ok(d) => d,
+                                            Err(e) => {
+                                                let _ = tx.send(
+                                                    drivewipe_core::progress::ProgressEvent::Error {
+                                                        session_id: error_id,
+                                                        message: format!(
+                                                            "Failed to open {}: {}",
+                                                            path_str, e
+                                                        ),
+                                                    },
+                                                );
+                                                continue;
+                                            }
+                                        };
+
+                                    let _ = session
+                                        .execute(device.as_mut(), &tx, &cancel_token, None)
+                                        .await;
+                                }
+                            },
+                        ),
+                        |msg| msg,
+                    );
+                }
+                IcedTask::none()
+            }
+            Message::WipeEvent(event) => {
+                use drivewipe_core::progress::ProgressEvent;
+                match event {
+                    ProgressEvent::SessionStarted { .. } => {
+                        self.wipe_pass_info = "Started".into();
+                    }
+                    ProgressEvent::PassStarted { pass_number, .. } => {
+                        self.wipe_pass_info = format!("Pass {}", pass_number);
+                    }
+                    ProgressEvent::BlockWritten {
+                        bytes_written,
+                        total_bytes,
+                        throughput_bps,
+                        ..
+                    } => {
+                        self.wipe_fraction = bytes_written as f32 / total_bytes as f32;
+                        self.wipe_throughput =
+                            format!("{:.1} MB/s", throughput_bps / (1024.0 * 1024.0));
+                    }
+                    ProgressEvent::Error { message, .. } => {
+                        self.status_message = Some(format!("Wipe error: {message}"));
+                        self.wipe_pass_info = format!("Error: {message}");
+                    }
+                    ProgressEvent::Completed { .. } => {
+                        self.wipe_fraction = 1.0;
+                        self.wipe_complete = true;
+                        self.wipe_running = false;
+                        self.wipe_pass_info = "Completed".into();
+                    }
+                    _ => {}
+                }
+                IcedTask::none()
+            }
+
+            // Health
+            Message::ViewDriveHealth(i) => {
+                self.health_info.clear();
+                self.health_loading = true;
+                if let Some(drive) = self.drives.get(i) {
+                    let path = drive.path.clone();
+                    return IcedTask::perform(
+                        async move {
+                            let snapshot =
+                                drivewipe_core::health::get_health(&path).await.map_err(
+                                    |e: drivewipe_core::error::DriveWipeError| e.to_string(),
+                                )?;
+                            let mut lines = Vec::new();
+                            lines.push(format!("Model: {}", snapshot.device_model));
+                            if let Some(temp) = snapshot.temperature_celsius {
+                                lines.push(format!("Temperature: {}°C", temp));
+                            }
+                            if let Some(smart) = snapshot.smart_data {
+                                lines.push(format!("SMART Healthy: {}", smart.healthy));
+                            }
+                            Ok(lines)
+                        },
+                        Message::HealthLoaded,
+                    );
+                }
+                IcedTask::none()
+            }
+            Message::HealthLoaded(result) => {
+                self.health_loading = false;
+                match result {
+                    Ok(lines) => self.health_info = lines,
+                    Err(e) => self.health_info = vec![format!("Error: {}", e)],
+                }
+                IcedTask::none()
+            }
+
+            // Clone
+            Message::SelectCloneDrive(i) => {
+                if self.clone_source.is_none() {
+                    self.clone_source = Some(i);
+                } else if self.clone_target.is_none() && self.clone_source != Some(i) {
+                    self.clone_target = Some(i);
+                } else {
+                    // Reset selection
+                    self.clone_source = Some(i);
+                    self.clone_target = None;
+                }
+                IcedTask::none()
+            }
+            Message::CloneConfirmInput(val) => {
+                self.clone_confirm_text = val;
+                IcedTask::none()
+            }
+            Message::CancelClone => {
+                self.clone_cancel_token.cancel();
+                self.clone_running = false;
+                IcedTask::none()
+            }
+            Message::StartClone => {
+                if self.clone_confirm_text.trim() != "YES" {
+                    self.status_message = Some("Type YES to confirm clone operation".to_string());
+                    return IcedTask::none();
+                }
+                if let (Some(src_idx), Some(tgt_idx)) = (self.clone_source, self.clone_target)
+                    && let (Some(src_drive), Some(tgt_drive)) =
+                        (self.drives.get(src_idx), self.drives.get(tgt_idx))
+                {
+                    self.clone_running = true;
+                    self.clone_progress = 0.0;
+                    self.clone_complete = false;
+                    self.clone_throughput.clear();
+                    self.clone_cancel_token =
+                        std::sync::Arc::new(drivewipe_core::session::CancellationToken::new());
+
+                    let source_path = src_drive.path.clone();
+                    let target_path = tgt_drive.path.clone();
+                    let cancel_token = self.clone_cancel_token.clone();
+
+                    return IcedTask::run(
+                        iced::stream::channel(
+                            100,
+                            move |output: iced::futures::channel::mpsc::Sender<Message>| async move {
+                                let (tx, rx) = crossbeam_channel::unbounded();
+
+                                let mut output_clone = output.clone();
+                                tokio::spawn(async move {
+                                    while let Ok(event) = rx.recv() {
+                                        let _ = output_clone.send(Message::CloneEvent(event)).await;
+                                    }
+                                });
+
+                                let config = drivewipe_core::clone::CloneConfig {
+                                    source: source_path.clone(),
+                                    target: target_path.clone(),
+                                    mode: drivewipe_core::clone::CloneMode::Block,
+                                    compression: drivewipe_core::clone::CompressionMode::None,
+                                    encrypt: false,
+                                    password: None,
+                                    verify: true,
+                                    block_size: 4 * 1024 * 1024,
+                                    bandwidth_limit_bps: None,
+                                };
+
+                                let mut source_dev =
+                                    match drivewipe_core::io::open_device(&source_path, false) {
+                                        Ok(d) => d,
+                                        Err(_) => return,
+                                    };
+                                let mut target_dev =
+                                    match drivewipe_core::io::open_device(&target_path, true) {
+                                        Ok(d) => d,
+                                        Err(_) => return,
+                                    };
+
+                                let _ = drivewipe_core::clone::block::clone_block(
+                                    source_dev.as_mut(),
+                                    target_dev.as_mut(),
+                                    &config,
+                                    &tx,
+                                    &cancel_token,
+                                )
+                                .await;
+                            },
+                        ),
+                        |msg| msg,
+                    );
+                }
+                IcedTask::none()
+            }
+            Message::CloneEvent(event) => {
+                use drivewipe_core::progress::ProgressEvent;
+                match event {
+                    ProgressEvent::CloneStarted { .. } => {}
+                    ProgressEvent::CloneProgress {
+                        bytes_copied,
+                        total_bytes,
+                        throughput_bps,
+                        ..
+                    } => {
+                        self.clone_progress = bytes_copied as f32 / total_bytes.max(1) as f32;
+                        self.clone_throughput =
+                            format!("{:.1} MB/s", throughput_bps / (1024.0 * 1024.0));
+                    }
+                    ProgressEvent::CloneCompleted { .. } => {
+                        self.clone_progress = 1.0;
+                        self.clone_complete = true;
+                        self.clone_running = false;
+                    }
+                    _ => {}
+                }
+                IcedTask::none()
+            }
+
+            // Partition
+            Message::ViewPartitions(i) => {
+                self.partition_info.clear();
+                self.partition_loading = true;
+                if let Some(drive) = self.drives.get(i) {
+                    let path = drive.path.clone();
+                    return IcedTask::perform(
+                        async move {
+                            let mut device = drivewipe_core::io::open_device(&path, false)
+                                .map_err(|e: drivewipe_core::error::DriveWipeError| {
+                                    e.to_string()
+                                })?;
+                            let mut buf = vec![0u8; 34 * 512];
+                            device.read_at(0, &mut buf).map_err(|e| e.to_string())?;
+                            let table = drivewipe_core::partition::PartitionTable::parse(&buf)
+                                .map_err(|e| e.to_string())?;
+
+                            let mut lines = Vec::new();
+                            lines.push(format!("Table: {:?}", table.table_type()));
+                            for part in table.partitions() {
+                                lines.push(format!(
+                                    "  #{}: {} - {} ({})",
+                                    part.index,
+                                    part.start_lba,
+                                    part.end_lba,
+                                    drivewipe_core::format_bytes(part.size_bytes)
+                                ));
+                            }
+                            Ok(lines)
+                        },
+                        Message::PartitionsLoaded,
+                    );
+                }
+                IcedTask::none()
+            }
+            Message::PartitionsLoaded(result) => {
+                self.partition_loading = false;
+                match result {
+                    Ok(lines) => self.partition_info = lines,
+                    Err(e) => self.partition_info = vec![format!("Error: {}", e)],
+                }
+                IcedTask::none()
+            }
+
+            // Forensic
+            Message::RunForensicScan(i) => {
+                self.forensic_results.clear();
+                self.forensic_running = true;
+                self.forensic_loading = true;
+                self.forensic_progress = 0.0;
+                if let Some(drive) = self.drives.get(i) {
+                    let path = drive.path.clone();
+                    let serial = drive.serial.clone();
+                    self.forensic_results
+                        .push(format!("Scanning {}...", drive.path.display()));
+
+                    return IcedTask::perform(
+                        async move {
+                            let enumerator = drivewipe_core::drive::create_enumerator();
+                            let _drive_info =
+                                enumerator.inspect(&path).await.map_err(|e| e.to_string())?;
+
+                            let config = drivewipe_core::forensic::ForensicConfig::default();
+                            let session = drivewipe_core::forensic::ForensicSession::new(config);
+                            let cancel_token = drivewipe_core::session::CancellationToken::new();
+                            let (tx, _rx) = crossbeam_channel::unbounded();
+
+                            let mut device = drivewipe_core::io::open_device(&path, false)
+                                .map_err(|e| e.to_string())?;
+
+                            let result = session
+                                .execute(
+                                    device.as_mut(),
+                                    &path.to_string_lossy(),
+                                    &serial,
+                                    &tx,
+                                    &cancel_token,
+                                )
+                                .await
+                                .map_err(|e| e.to_string())?;
+
+                            // Format results as lines
+                            let mut lines = Vec::new();
+                            lines.push(format!("Scan completed in {:.1}s", result.duration_secs));
+
+                            if let Some(ref entropy) = result.entropy_stats {
+                                lines.push(format!(
+                                    "Entropy: avg={:.2}, zero={:.1}%, high={:.1}%",
+                                    entropy.average_entropy,
+                                    entropy.zero_pct,
+                                    entropy.high_entropy_pct
+                                ));
+                            }
+
+                            if !result.signature_hits.is_empty() {
+                                lines.push(format!(
+                                    "{} file signatures found",
+                                    result.signature_hits.len()
+                                ));
+                                for hit in result.signature_hits.iter().take(10) {
+                                    lines.push(format!(
+                                        "  {} at offset {}",
+                                        hit.file_type, hit.offset
+                                    ));
+                                }
+                                if result.signature_hits.len() > 10 {
+                                    lines.push(format!(
+                                        "  ... and {} more",
+                                        result.signature_hits.len() - 10
+                                    ));
+                                }
+                            } else {
+                                lines.push("No file signatures detected".to_string());
+                            }
+
+                            if let Some(ref sampling) = result.sampling_result {
+                                lines.push(format!(
+                                    "Sampling: {:.1}% zero, {:.1}% random, {:.1}% data remnants (confidence: {:.0}%)",
+                                    sampling.zero_pct,
+                                    sampling.high_entropy_pct,
+                                    sampling.data_remnant_pct,
+                                    sampling.confidence * 100.0
+                                ));
+                            }
+
+                            if let Some(ref hidden) = result.hidden_areas {
+                                lines.push(format!("Hidden areas: {}", hidden.summary));
+                            }
+
+                            Ok(lines)
+                        },
+                        Message::ForensicCompleted,
+                    );
+                }
+                IcedTask::none()
+            }
+            Message::ForensicEvent(event) => {
+                use drivewipe_core::progress::ProgressEvent;
+                match event {
+                    ProgressEvent::ForensicScanStarted { .. } => {
+                        self.forensic_running = true;
+                        self.forensic_progress = 0.0;
+                    }
+                    ProgressEvent::ForensicScanProgress {
+                        bytes_scanned,
+                        total_bytes,
+                        ..
+                    } => {
+                        if total_bytes > 0 {
+                            self.forensic_progress = bytes_scanned as f32 / total_bytes as f32;
+                        }
+                    }
+                    ProgressEvent::ForensicScanCompleted { .. } => {
+                        self.forensic_running = false;
+                        self.forensic_progress = 1.0;
+                    }
+                    _ => {}
+                }
+                IcedTask::none()
+            }
+            Message::ForensicCompleted(result) => {
+                self.forensic_running = false;
+                self.forensic_loading = false;
+                match result {
+                    Ok(lines) => self.forensic_results = lines,
+                    Err(e) => self.forensic_results = vec![format!("Error: {}", e)],
+                }
+                IcedTask::none()
+            }
+
+            // Settings
+            Message::ToggleSetting(key, val) => {
+                match key.as_str() {
+                    "auto_report" => self.setting_auto_report = val,
+                    "notifications" => self.setting_notifications = val,
+                    "sleep_prevention" => self.setting_sleep_prevention = val,
+                    "auto_health" => self.setting_auto_health = val,
+                    _ => {}
+                }
+                IcedTask::none()
+            }
+        }
+    }
+
+    fn view(&self) -> Element<'_, Message> {
+        match self.screen {
+            Screen::Menu => self.view_menu(),
+            Screen::DriveSelect => screens::drive_select::view(
+                &self.drives,
+                &self.selected_drives,
+                self.status_message.as_deref(),
+            ),
+            Screen::MethodSelect => screens::method_select::view(
+                &self.methods,
+                self.selected_method,
+                self.status_message.as_deref(),
+            ),
+            Screen::Confirm => {
+                let method_name = self
+                    .selected_method
+                    .and_then(|i| self.methods.get(i))
+                    .map(|(_, n, _)| n.as_str())
+                    .unwrap_or("Unknown");
+                let device_paths: Vec<String> = self
+                    .drives
+                    .iter()
+                    .zip(self.selected_drives.iter())
+                    .filter(|(_, sel)| **sel)
+                    .map(|(d, _)| d.path.to_string_lossy().into_owned())
+                    .collect();
+                screens::confirm::view(&device_paths, method_name, &self.confirm_text)
+            }
+            Screen::WipeProgress => screens::wipe_progress::view(
+                &self.wipe_device,
+                &self.wipe_method_name,
+                self.wipe_fraction,
+                &self.wipe_throughput,
+                &self.wipe_pass_info,
+                self.wipe_complete,
+                self.wipe_running,
+            ),
+            Screen::Health => {
+                screens::health::view(&self.drives, &self.health_info, self.health_loading)
+            }
+            Screen::Clone => screens::clone::view(&screens::clone::CloneViewState {
+                drives: &self.drives,
+                source: self.clone_source,
+                target: self.clone_target,
+                mode: &self.clone_mode,
+                running: self.clone_running,
+                progress: self.clone_progress,
+                throughput: &self.clone_throughput,
+                complete: self.clone_complete,
+                confirm_text: &self.clone_confirm_text,
+            }),
+            Screen::Partition => {
+                screens::partition::view(&self.drives, &self.partition_info, self.partition_loading)
+            }
+            Screen::Forensic => {
+                screens::forensic::view(&self.drives, &self.forensic_results, self.forensic_loading)
+            }
+            Screen::Settings => screens::settings::view(
+                self.setting_auto_report,
+                self.setting_notifications,
+                self.setting_sleep_prevention,
+                self.setting_auto_health,
+            ),
+        }
+    }
+
+    fn view_menu(&self) -> Element<'_, Message> {
+        use iced::widget::button;
+
+        let title = text("DriveWipe")
+            .size(theme::FONT_SIZE_TITLE)
+            .color(theme::PRIMARY);
+        let subtitle = text("Secure Drive Management")
+            .size(theme::FONT_SIZE_LG)
+            .color(theme::PRIMARY_DARK);
+
+        let version_text = text(format!("v{}", env!("CARGO_PKG_VERSION")))
+            .size(theme::FONT_SIZE_SM)
+            .color(theme::TEXT_MUTED);
+
+        let menu_items: Vec<(&str, Screen, iced::Color)> = vec![
+            ("Secure Wipe", Screen::DriveSelect, theme::DANGER),
+            ("Drive Health", Screen::Health, theme::STATUS_HEALTHY),
+            ("Drive Clone", Screen::Clone, theme::STATUS_INFO),
+            ("Partition Manager", Screen::Partition, theme::SECONDARY),
+            ("Forensic Analysis", Screen::Forensic, theme::STATUS_WARNING),
+            ("Settings", Screen::Settings, theme::TEXT_SECONDARY),
+        ];
+
+        let mut menu_col = column![].spacing(theme::SPACING_MD);
+        for (label, screen, color) in menu_items {
+            menu_col = menu_col.push(
+                button(text(label).size(theme::FONT_SIZE_LG).color(color))
+                    .on_press(Message::Navigate(screen))
+                    .width(Length::Fixed(300.0)),
+            );
+        }
+
+        let mut content = column![title, subtitle, version_text, menu_col]
+            .spacing(theme::SPACING_LG)
+            .padding(theme::SPACING_XL)
+            .align_x(iced::Alignment::Center);
+
+        if let Some(ref msg) = self.status_message {
+            content = content.push(
+                text(msg.as_str())
+                    .size(theme::FONT_SIZE_MD)
+                    .color(theme::WARNING),
+            );
+        }
+
+        container(content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
+            .style(|_theme| container::Style {
+                background: Some(iced::Background::Color(theme::BG_DARK)),
+                ..Default::default()
+            })
+            .into()
+    }
+
+    fn subscription(&self) -> iced::Subscription<Message> {
+        iced::Subscription::none()
+    }
+}
+
+/// Open the desktop window and run until the user closes it.
+pub fn run() -> iced::Result {
+    iced::application(DriveWipeApp::new, DriveWipeApp::update, DriveWipeApp::view)
+        .title(DriveWipeApp::title)
+        .subscription(DriveWipeApp::subscription)
+        .window_size((900.0, 650.0))
+        .run()
+}

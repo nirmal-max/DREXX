@@ -1,0 +1,82 @@
+{
+  "generated_utc": "2026-09-06T05:55:13.168927+00:00",
+  "generator": "scripts/demo_bundle.py",
+  "real_operations": true,
+  "steps": [
+    {
+      "step": "init",
+      "ok": true,
+      "detail": "operator key + empty chain"
+    },
+    {
+      "step": "build_image",
+      "ok": true,
+      "detail": "4 real files embedded in 22.7 KB image"
+    },
+    {
+      "step": "recover",
+      "ok": true,
+      "detail": "carved into recovered/"
+    },
+    {
+      "step": "byte_identical_proof",
+      "ok": true,
+      "detail": "4/4 embedded files recovered byte-identical"
+    },
+    {
+      "step": "erase_files",
+      "ok": true,
+      "detail": "3 files securely erased + verified"
+    },
+    {
+      "step": "refused_entry",
+      "ok": true,
+      "detail": "blocked at preflight, REFUSED written to chain (exit 3)"
+    },
+    {
+      "step": "certify",
+      "ok": true,
+      "detail": "certificate.json + .txt"
+    },
+    {
+      "step": "verify_clean",
+      "ok": true,
+      "detail": "chain verified"
+    },
+    {
+      "step": "verify_tampered",
+      "ok": true,
+      "detail": "tamper detected and localised: entry content altered: hash mismatch"
+    },
+    {
+      "step": "static_evidence",
+      "ok": true,
+      "detail": "copied 5: adversarial_audit.json, run_all.json, chain_benchmark.json, stress_scale.json, g24_crosslink_confirmed.json"
+    }
+  ],
+  "all_steps_ok": true,
+  "files": [
+    "adversarial_audit.json",
+    "byte_identical_proof.json",
+    "certificate.json",
+    "certificate.txt",
+    "chain.json",
+    "chain_benchmark.json",
+    "chain_tampered.json",
+    "erase_result.json",
+    "g24_crosslink_confirmed.json",
+    "recover_result.json",
+    "run_all.json",
+    "seized_media.dd",
+    "stress_scale.json",
+    "verify_ok.json",
+    "verify_tampered.json"
+  ],
+  "for_frontend": {
+    "chain.json": "the Console view",
+    "certificate.json": "the Certificate Viewer view",
+    "verify_ok.json / verify_tampered.json / chain_tampered.json": "the TamperDemo view",
+    "byte_identical_proof.json": "the recovery evidence wall",
+    "erase_result.json / recover_result.json": "per-operation detail panels"
+  }
+}

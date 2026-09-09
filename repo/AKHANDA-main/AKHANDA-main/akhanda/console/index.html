@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<!--
+  Attestation console - WORKING REFERENCE. OWNER: role 4 (extend and restyle).
+
+  Acceptance test (docs/TEAM_ROLES.md): renders correct state from a chain.json the lead
+  provides, WITHOUT the backend running. That is satisfied here - open this file, load a
+  chain.json, and everything renders.
+
+  Why the verification here is worth something: this page re-implements the entry
+  encoding independently, in JavaScript, and recomputes every entry hash with the
+  browser's own SHA-256. It does not trust a "verified" flag from Python. An encoding bug
+  on either side shows up as a red row. That is a second implementation checking the
+  first, which is the only kind of self-check worth showing a judge.
+
+  What it does NOT do: verify Ed25519 signatures. That is the key-bound layer and runs in
+  `python -m cli verify`. This page says so rather than implying full verification.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Akhanda - Console</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #14171a; --muted: #5b6570; --line: #e2e6ea;
+    --ok: #0f7b3f; --ok-bg: #e8f5ed; --bad: #b3261e; --bad-bg: #fdeceb;
+    --warn: #8a5a00; --warn-bg: #fdf3e0; --accent: #1a4d8f; --card: #f7f9fb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171a; --fg: #e8eaed; --muted: #9aa4ae; --line: #2c3237;
+      --ok: #6ee7a0; --ok-bg: #14312280; --bad: #ff8a80; --bad-bg: #3a1c1a80;
+      --warn: #f0c26b; --warn-bg: #3a2e1580; --accent: #7fb0f0; --card: #1b1f23;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1.25rem; background: var(--bg); color: var(--fg);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 1.45rem; margin: 0 0 .15rem; letter-spacing: -.01em; }
+  .sub { color: var(--muted); margin: 0 0 1.5rem; font-size: .9rem; }
+  .bar { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap;
+         padding: .85rem 1rem; background: var(--card); border: 1px solid var(--line);
+         border-radius: 10px; margin-bottom: 1.25rem; }
+  button, label.file {
+    font: inherit; padding: .45rem .9rem; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+  }
+  button:hover, label.file:hover { border-color: var(--accent); color: var(--accent); }
+  input[type=file] { display: none; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+          gap: .75rem; margin-bottom: 1.5rem; }
+  .stat { padding: .8rem 1rem; border: 1px solid var(--line); border-radius: 10px;
+          background: var(--card); }
+  .stat .k { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em;
+             color: var(--muted); }
+  .stat .v { font-size: 1.05rem; margin-top: .2rem; font-weight: 600; }
+  .mono { font-family: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
+          font-size: .8rem; word-break: break-all; }
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; min-width: 860px; }
+  th, td { text-align: left; padding: .6rem .75rem; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  th { font-size: .72rem; text-transform: uppercase; letter-spacing: .06em;
+       color: var(--muted); font-weight: 600; background: var(--card); }
+  tr:last-child td { border-bottom: 0; }
+  .badge { display: inline-block; padding: .12rem .5rem; border-radius: 999px;
+           font-size: .72rem; font-weight: 600; white-space: nowrap; }
+  .b-ok { background: var(--ok-bg); color: var(--ok); }
+  .b-bad { background: var(--bad-bg); color: var(--bad); }
+  .b-warn { background: var(--warn-bg); color: var(--warn); }
+  .note { padding: .9rem 1.1rem; border-left: 3px solid var(--accent);
+          background: var(--card); border-radius: 0 8px 8px 0; margin: 1.5rem 0;
+          font-size: .88rem; }
+  .note b { color: var(--accent); }
+  .empty { padding: 3rem 1rem; text-align: center; color: var(--muted); }
+  details { margin-top: 1.25rem; } summary { cursor: pointer; font-weight: 600; }
+  pre { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+        padding: 1rem; overflow-x: auto; font-size: .78rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Akhanda &mdash; Console</h1>
+  <p class="sub">Unbroken chain of custody. Every entry below is re-hashed in this browser
+     from its own fields &mdash; nothing here trusts a flag written by the tool.</p>
+
+  <div class="bar">
+    <label class="file">Load chain.json<input type="file" id="file" accept=".json"></label>
+    <button id="reload">Fetch ./chain.json</button>
+    <button id="cert">Certificate preview</button>
+    <span id="status" class="mono" style="color:var(--muted)">no chain loaded</span>
+  </div>
+
+  <div class="grid" id="stats"></div>
+  <div id="body"><div class="empty">Load a <span class="mono">chain.json</span> to begin.</div></div>
+
+  <div class="note" id="limits" hidden></div>
+
+  <details id="raw" hidden>
+    <summary>Raw chain JSON</summary>
+    <pre id="rawjson"></pre>
+  </details>
+</div>
+
+<script>
+"use strict";
+
+// The field list and its ORDER are part of the signing contract. This must stay
+// identical to HASHED_FIELDS in src/attestation/core.py. If the two drift apart, every
+// row goes red - which is the correct failure, not a silent pass.
+const FIELDS_V3 = [
+  "entry_version", "chain_id", "seq", "prev_hash", "op_type", "target_ref",
+  "timestamp", "method", "result_hash", "operator_decl", "concur_decl",
+  "custody_tier", "outcome", "presence_ref", "operator_key_id",
+  // Added in ENTRY_VERSION 3: every entry names the build that wrote it. This verifier
+  // hashes the value and does not interpret it, deciding whether a build is the RIGHT
+  // build is a question for a human holding a validation report, not for a re-hasher.
+  "tool_ref",
+];
+
+// Added in ENTRY_VERSION 4. place_ref answers the BSA 2023 s.63(4) Schedule, which asks
+// for the PLACE of the operation; the three amend_* fields let one entry supersede an
+// earlier one without mutating it.
+const FIELDS_V4 = FIELDS_V3.concat([
+  "place_ref", "amends_seq", "amends_hash", "amend_reason",
+]);
+
+// Keyed by version, so an entry is re-hashed under the field list it was WRITTEN under.
+// One global list would re-hash old entries with fields they never signed and report the
+// mismatch as tampering, an authentic v3 chain would go red for the crime of being old.
+const FIELDS_BY_VERSION = { "3": FIELDS_V3, "4": FIELDS_V4 };
+
+// The list this build writes. tests/test_console_contract.py pins it to HASHED_FIELDS in
+// src/attestation/core.py, so the two implementations cannot drift apart unnoticed.
+const HASHED_FIELDS = FIELDS_V4;
+
+function fieldsFor(version) {
+  const f = FIELDS_BY_VERSION[String(version)];
+  if (!f) {
+    // Refuse rather than guess. Falling back to the newest list would produce a
+    // confident wrong answer about an entry whose format this build does not know.
+    throw new Error("entry_version " + JSON.stringify(version) + " is not a version " +
+      "this verifier understands (" + Object.keys(FIELDS_BY_VERSION).join(", ") + ")");
+  }
+  return f;
+}
+const ENTRY_DOMAIN = "akhanda.entry.v2";
+const ZERO = "0".repeat(64);
+
+const enc = new TextEncoder();
+
+/** Length-prefixed canonical encoding: 4-byte big-endian length, then the bytes. */
+function encodeEntry(e) {
+  const parts = [enc.encode(ENTRY_DOMAIN)];
+  for (const name of fieldsFor(e.entry_version)) {
+    const raw = enc.encode(String(e[name] ?? ""));
+    const len = new Uint8Array(4);
+    new DataView(len.buffer).setUint32(0, raw.length, false);  // big-endian
+    parts.push(len, raw);
+  }
+  const total = parts.reduce((n, p) => n + p.length, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) { out.set(p, off); off += p.length; }
+  return out;
+}
+
+async function sha256Hex(bytes) {
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** The key-free verification layer, re-implemented independently of Python. */
+async function verifyChain(chain) {
+  const rows = [];
+  let expectedPrev = ZERO;
+  let broken = null;
+  const chainId = chain.entries.length ? chain.entries[0].chain_id : "";
+
+  for (let i = 0; i < chain.entries.length; i++) {
+    const e = chain.entries[i];
+    const problems = [];
+    if (e.seq !== i) problems.push("sequence out of order");
+    if (e.chain_id !== chainId) problems.push("belongs to a different chain");
+    if (e.prev_hash !== expectedPrev) problems.push("does not link to the previous entry");
+
+    // An entry_version this build has no field list for must fail the row, not throw out
+    // of the whole walk, one unreadable entry should not blank the page for the rest.
+    let recomputed = "";
+    try {
+      recomputed = await sha256Hex(encodeEntry(e));
+      if (recomputed !== e.entry_hash) problems.push("content altered: hash mismatch");
+    } catch (err) {
+      problems.push(err.message);
+    }
+
+    if (problems.length && broken === null) broken = e.seq;
+    rows.push({ entry: e, problems, recomputed });
+    expectedPrev = e.entry_hash;
+  }
+  return { rows, broken, chainId };
+}
+
+/** How well the operation went, as a colour. An UNVERIFIED wipe must not look like a
+    clean one, that was the whole reason `outcome` became a signed field. */
+function outcomeClass(o) {
+  if (o === "VERIFIED") return "b-ok";
+  if (o === "NOT_PERFORMED") return "b-warn";
+  return "b-bad";                       // UNVERIFIED and PARTIAL both need to stand out
+}
+
+const esc = s => String(s ?? "").replace(/[&<>"]/g,
+  c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const short = h => h ? esc(h.slice(0, 12)) + "…" + esc(h.slice(-8)) : ", ";
+
+let CURRENT = null;
+
+function renderStats(chain, result) {
+  const dual = chain.entries.filter(e => e.operator_sig && e.concur_sig).length;
+  const witnessed = chain.entries.filter(e => e.witness_head_hash).length;
+  const tiers = chain.entries.map(e => e.custody_tier);
+  const order = ["SOFTWARE_KEY", "PRESENCE_CONFIRMED", "WITNESS_COSIGNED", "FULL_CUSTODY"];
+  const weakest = tiers.length
+    ? tiers.reduce((a, b) => order.indexOf(a) <= order.indexOf(b) ? a : b) : ", ";
+  const ok = result.broken === null;
+  const notClean = chain.entries.filter(
+    e => e.outcome && e.outcome !== "VERIFIED" && e.outcome !== "NOT_PERFORMED").length;
+
+  document.getElementById("stats").innerHTML = `
+    <div class="stat"><div class="k">Chain</div>
+      <div class="v mono">${esc(chain.chain_id)}</div></div>
+    <div class="stat"><div class="k">Entries</div>
+      <div class="v">${chain.entries.length}</div></div>
+    <div class="stat"><div class="k">Chain integrity</div>
+      <div class="v"><span class="badge ${ok ? "b-ok" : "b-bad"}">
+        ${ok ? "VERIFIED" : "BROKEN at seq " + result.broken}</span></div></div>
+    <div class="stat"><div class="k">Dual-signed</div>
+      <div class="v">${dual} of ${chain.entries.length}</div></div>
+    <div class="stat"><div class="k">Not fully verified</div>
+      <div class="v"><span class="badge ${notClean ? "b-bad" : "b-ok"}">${notClean}</span></div></div>
+    <div class="stat"><div class="k">Weakest custody tier</div>
+      <div class="v" style="font-size:.9rem">${esc(weakest)}</div></div>
+    <div class="stat"><div class="k">Workstation head</div>
+      <div class="v mono" style="font-size:.78rem">${short(
+        chain.entries.length ? chain.entries[chain.entries.length - 1].entry_hash : "")}</div></div>
+    <div class="stat"><div class="k">Witness head (last recorded)</div>
+      <div class="v mono" style="font-size:.78rem">${short(
+        witnessed ? chain.entries.filter(e => e.witness_head_hash).pop().witness_head_hash : "")}</div></div>
+  `;
+}
+
+function renderTable(result) {
+  if (!result.rows.length) {
+    document.getElementById("body").innerHTML =
+      '<div class="empty">This chain has no entries.</div>';
+    return;
+  }
+  const rows = result.rows.map(({ entry: e, problems }) => {
+    const ok = problems.length === 0;
+    const dual = e.operator_sig && e.concur_sig;
+    return `<tr>
+      <td class="mono">${e.seq}</td>
+      <td><span class="badge ${ok ? "b-ok" : "b-bad"}">${ok ? "OK" : "BROKEN"}</span>
+          ${problems.length ? `<div style="color:var(--bad);font-size:.78rem;margin-top:.25rem">
+            ${problems.map(esc).join("<br>")}</div>` : ""}</td>
+      <td>${esc(e.op_type)}</td>
+      <td>${esc(e.method)}</td>
+      <td class="mono" style="font-size:.78rem">${esc(e.target_ref)}</td>
+      <td class="mono" style="font-size:.75rem">${esc(e.timestamp)}</td>
+      <td><span class="badge ${dual ? "b-ok" : "b-warn"}">${dual ? "dual" : "operator only"}</span></td>
+      <td><span class="badge ${outcomeClass(e.outcome)}">${esc(e.outcome || ", ")}</span></td>
+      <td style="font-size:.78rem">${esc(e.custody_tier)}
+          ${e.presence_ref ? '<br><span style="color:var(--muted)">presence confirmed</span>' : ""}</td>
+      <td class="mono" style="font-size:.72rem">${short(e.entry_hash)}</td>
+      <td class="mono" style="font-size:.72rem">${short(e.witness_head_hash)}</td>
+    </tr>`;
+  }).join("");
+
+  document.getElementById("body").innerHTML = `<div class="scroll"><table>
+    <thead><tr>
+      <th>Seq</th><th>Integrity</th><th>Operation</th><th>Method</th><th>Target</th>
+      <th>Timestamp (UTC)</th><th>Signatures</th><th>Outcome</th><th>Custody tier</th>
+      <th>Entry hash</th><th>Witness head</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function renderLimits(chain, result) {
+  const dual = chain.entries.filter(e => e.operator_sig && e.concur_sig).length;
+  const items = [
+    "This page verifies the <b>key-free</b> layer: every entry is re-hashed here and " +
+    "every link is re-walked. It does <b>not</b> verify Ed25519 signatures &mdash; run " +
+    "<span class='mono'>python -m cli verify</span> for that.",
+    "A green chain proves nothing was <b>altered, reordered, or removed from the " +
+    "middle</b>. It does not prove an operation was never <b>withheld</b> from the " +
+    "record, and no single-operator ledger can.",
+    "Dropping the <b>most recent</b> entries leaves a shorter, self-consistent chain. " +
+    "Only the witness node's independent head record distinguishes that case.",
+  ];
+  const degraded = chain.entries.filter(
+    e => e.outcome === "UNVERIFIED" || e.outcome === "PARTIAL");
+  if (degraded.length) {
+    items.push(`<b>${degraded.length}</b> operation(s) completed but did <b>not</b> pass ` +
+      "their own verification (seq " + degraded.map(e => e.seq).join(", ") +
+      "). The outcome is a signed field, so this cannot be edited away.");
+  }
+  if (dual < chain.entries.length) {
+    items.push(`<b>${chain.entries.length - dual}</b> entr` +
+      (chain.entries.length - dual === 1 ? "y carries" : "ies carry") +
+      " only the operator's signature. Those do not have the two-party shape that " +
+      "BSA s.63(4) contemplates.");
+  }
+  const el = document.getElementById("limits");
+  el.innerHTML = "<b>What this view does and does not establish</b><ul style='margin:.5rem 0 0;padding-left:1.15rem'>" +
+    items.map(i => `<li style="margin-bottom:.35rem">${i}</li>`).join("") + "</ul>";
+  el.hidden = false;
+}
+
+async function load(chain) {
+  CURRENT = chain;
+  const result = await verifyChain(chain);
+  renderStats(chain, result);
+  renderTable(result);
+  renderLimits(chain, result);
+  document.getElementById("rawjson").textContent = JSON.stringify(chain, null, 2);
+  document.getElementById("raw").hidden = false;
+  document.getElementById("status").textContent =
+    `${chain.entries.length} entries · ` +
+    (result.broken === null ? "chain verified in-browser" : `BROKEN at seq ${result.broken}`);
+}
+
+function parse(text) {
+  const data = JSON.parse(text);
+  if (!data || !Array.isArray(data.entries)) {
+    throw new Error("not an Akhanda chain file: expected {chain_id, entries[]}");
+  }
+  return data;
+}
+
+document.getElementById("file").addEventListener("change", async ev => {
+  const f = ev.target.files[0];
+  if (!f) return;
+  try { await load(parse(await f.text())); }
+  catch (err) { document.getElementById("status").textContent = "error: " + err.message; }
+});
+
+document.getElementById("reload").addEventListener("click", async () => {
+  try {
+    const resp = await fetch("chain.json", { cache: "no-store" });
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    await load(parse(await resp.text()));
+  } catch (err) {
+    document.getElementById("status").textContent =
+      "could not fetch ./chain.json (" + err.message +
+      "), use the file picker, or serve this directory over HTTP";
+  }
+});
+
+document.getElementById("cert").addEventListener("click", () => {
+  if (!CURRENT) { alert("Load a chain first."); return; }
+  const dual = CURRENT.entries.filter(e => e.operator_sig && e.concur_sig).length;
+  alert(
+    "Certificate preview\n\n" +
+    "Chain: " + CURRENT.chain_id + "\n" +
+    "Entries: " + CURRENT.entries.length + "  (dual-signed: " + dual + ")\n\n" +
+    "The full NIST SP 800-88 Rev. 2 + BSA s.63(4) certificate is produced by:\n" +
+    "  python -m cli certify --out certificates/\n\n" +
+    "It is generated there rather than here because it must state the witness " +
+    "comparison and anchor status, which this page cannot check."
+  );
+});
+
+// Convenience: try the sibling chain.json on load, silently.
+fetch("chain.json", { cache: "no-store" })
+  .then(r => r.ok ? r.text() : null)
+  .then(t => { if (t) load(parse(t)); })
+  .catch(() => {});
+</script>
+</body>
+</html>

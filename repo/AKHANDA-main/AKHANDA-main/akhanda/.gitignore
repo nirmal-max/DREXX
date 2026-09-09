@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.ots
+keys/
+.env
+tests/data/
+rust/**/target/
+.session/
+evidence/*.tmp
+*.egg-info/
+validation/reassembly/corpus/*.png
+
+# Generated demo output. Contains a real operator private key. Never commit.
+demo_bundle/
+demo_bundle_g1/
+*.pem
+evidence/stress_tmp/

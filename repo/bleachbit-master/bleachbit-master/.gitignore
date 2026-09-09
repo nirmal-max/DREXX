@@ -1,0 +1,70 @@
+# dynamically created during build
+bleachbit/Revision.py
+
+# test/code coverage
+.coverage*
+htmlcov
+docker-artifacts/
+.pytest_cache/
+
+# Byte-compiled / optimized / DLL files
+*.py[cod]
+__pycache__/
+
+# Compiled language files
+po/*.mo
+po/bleachbit.pot.old
+po/cleanerml.pot
+po/desktop.pot
+po/diff.pot
+po/metainfo.pot
+po/nsis.pot
+locale/
+
+# Windows build
+build/
+dist/
+BleachBit-Portable/
+BleachBit-*-portable.zip
+upx/
+windows/vcpkg_installed/
+windows/BleachBit*.exe
+windows/BleachBit*.zip
+windows/NsisInclude/FilesToInstall.nsh
+windows/NsisInclude/FilesToUninstall.nsh
+windows/NsisInclude/LocaleToInstall.nsh
+windows/NsisInclude/LocaleToUninstall.nsh
+
+# AppImage
+appimage-build/
+*.AppImage
+linuxdeploy-plugin-gtk.sh
+
+# editor backups and temporary files
+*~
+*.bak
+*.swp
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.history
+
+# Python package metadata
+*.egg-info/
+*.egg
+
+# Python virtual environments
+.venv/
+venv/
+
+# Visual Studio Code
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.history

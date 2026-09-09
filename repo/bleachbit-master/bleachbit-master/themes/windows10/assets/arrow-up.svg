@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="7mm" height="6mm" viewBox="0 0 7 6">
+  <path fill="none" d="M0 .5V0h3l-.125.375Q2.75.75 2.5 1l-.5.5-.5.5-.5.5q-.25.25-.625.375L0 3z" style="fill:#000;fill-opacity:0"/>
+  <path d="M3.5 3.2e-7 7 3.0000003v3L3.5 3.2583525 2e-8 6.0000003v-3" style="fill:gray;fill-opacity:1"/>
+  <path fill="none" d="M4.125.375 4 0h3v3l-.375-.125Q6.25 2.75 6 2.5L5.5 2 5 1.5 4.5 1Q4.25.75 4.125.375M3 3.5q.25-.25.5-.25t.5.25l.5.5.5.5.5.5q.25.25.375.625L6 6H1l.125-.375Q1.25 5.25 1.5 5l.5-.5.5-.5z" style="fill:#000;fill-opacity:0"/>
+</svg>

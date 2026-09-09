@@ -1,0 +1,35 @@
+{
+  "method": "SHA-256 of the embedded file vs the carved file",
+  "note": "byte-identical or it is not claimed",
+  "comparisons": [
+    {
+      "original": "evidence_photo.png",
+      "original_sha256": "11fbb38d6f425fd7086f333c50b5008bdd16658e033282e6213cb5287aa70fe1",
+      "carved_as": "carved_000000004096.png",
+      "byte_identical": true
+    },
+    {
+      "original": "scene.jpg",
+      "original_sha256": "06bb067faa42a3ceff95489f1bb50f1d12f28027a3f4d9aa5f87bcaf6e19e492",
+      "carved_as": "carved_000000008473.jpg",
+      "byte_identical": true
+    },
+    {
+      "original": "case_notes.zip",
+      "original_sha256": "6ab23f5f664ebbe6c3e9b46fd9ca113c266776f67e707b6353746f3ef41b3196",
+      "carved_as": "carved_000000013395.zip",
+      "byte_identical": true
+    },
+    {
+      "original": "report.pdf",
+      "original_sha256": "d0f6a58a134ccc32dc91addecc5973cef73c22ba29eb43162cf289504f6b9293",
+      "carved_as": "carved_000000017762.pdf",
+      "byte_identical": true
+    }
+  ],
+  "summary": {
+    "embedded": 4,
+    "byte_identical": 4,
+    "carved_total": 4
+  }
+}

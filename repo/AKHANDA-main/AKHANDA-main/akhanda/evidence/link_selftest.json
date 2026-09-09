@@ -1,0 +1,15 @@
+{
+  "check": "witness node reachability over Wi-Fi hotspot",
+  "ran_at": "2026-09-01",
+  "transport": "wifi-hotspot",
+  "this_laptop_wifi_ip": "172.26.227.140",
+  "gateway": "172.26.224.1",
+  "subnet_prefix": 21,
+  "witness_node_bound": "0.0.0.0:8000",
+  "reachable_on_loopback": true,
+  "reachable_on_lan_ip": true,
+  "pubkey_key_id": "8a4e9851799e02c8",
+  "verdict": "THIS_HALF_WORKS",
+  "meaning": "The witness node is live and answers on this laptop's Wi-Fi address, so the operator laptop can reach it at http://172.26.227.140:8000 provided the hotspot does not isolate clients. The remaining test needs the second laptop and is one command.",
+  "next": "On the OTHER laptop, joined to the same hotspot: python scripts/prep/g24_link_check.py --witness http://172.26.227.140:8000 --transport wifi-hotspot"
+}

@@ -1,0 +1,62 @@
+{
+  "targets": [
+    {
+      "path": "D:\\akhanda-demobuild\\to_erase\\draft_0.txt",
+      "size": 950,
+      "method_used": "Clear",
+      "outcome": "VERIFIED",
+      "reason": "overwritten on exfat, read-back matched the written pattern, name scrubbed, truncated, unlinked",
+      "streams": {
+        "supported": true,
+        "found": 0,
+        "erased": 0,
+        "failed": 0,
+        "bytes": 0,
+        "details": [],
+        "note": "no named alternate data streams on this file"
+      }
+    },
+    {
+      "path": "D:\\akhanda-demobuild\\to_erase\\draft_1.txt",
+      "size": 950,
+      "method_used": "Clear",
+      "outcome": "VERIFIED",
+      "reason": "overwritten on exfat, read-back matched the written pattern, name scrubbed, truncated, unlinked",
+      "streams": {
+        "supported": true,
+        "found": 0,
+        "erased": 0,
+        "failed": 0,
+        "bytes": 0,
+        "details": [],
+        "note": "no named alternate data streams on this file"
+      }
+    },
+    {
+      "path": "D:\\akhanda-demobuild\\to_erase\\draft_2.txt",
+      "size": 950,
+      "method_used": "Clear",
+      "outcome": "VERIFIED",
+      "reason": "overwritten on exfat, read-back matched the written pattern, name scrubbed, truncated, unlinked",
+      "streams": {
+        "supported": true,
+        "found": 0,
+        "erased": 0,
+        "failed": 0,
+        "bytes": 0,
+        "details": [],
+        "note": "no named alternate data streams on this file"
+      }
+    }
+  ],
+  "method_used": "Clear",
+  "outcome": "VERIFIED",
+  "verified": true,
+  "performed": 3,
+  "filesystem": "exfat",
+  "limitations": [
+    "NIST SP 800-88 Rev. 2 Purge is unreachable from userspace; this module records Clear and never Purge.",
+    "Filesystem-internal metadata (NTFS MFT records, ext4 inode tables, journal copies, snapshots) may retain traces that cannot be reached from userspace.",
+    "Small files stored resident inside a filesystem metadata record are not reached by a data-stream overwrite."
+  ]
+}

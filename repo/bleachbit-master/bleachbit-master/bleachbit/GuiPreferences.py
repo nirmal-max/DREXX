@@ -1,0 +1,1037 @@
+# vim: ts=4:sw=4:expandtab
+
+# BleachBit
+# Copyright (C) 2008-2025 Andrew Ziem
+# https://www.bleachbit.org
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+"""
+Preferences dialog
+"""
+
+# standard imports
+import logging
+
+# first party imports
+from bleachbit import GuiBasic, ProtectedPath, IS_POSIX, IS_WINDOWS
+from bleachbit import online_update_notification_enabled
+from bleachbit.PathUtils import normalize_path
+from bleachbit.Constant import EMPTY_SPACE_WARNING, REQUIRES_EXPERT_MODE
+from bleachbit.General import sanitize_surrogates
+from bleachbit.GtkShim import Gtk, GLib
+from bleachbit.GuiCookie import CookieManagerPane
+from bleachbit.GuiUtil import (detect_dark_background, flush_gtk_events,
+                               load_icon_or_fallback,
+                               should_show_dark_mode_warning)
+from bleachbit.Language import get_active_language_code, get_supported_language_code_name_dict, setup_translation
+from bleachbit.Language import get_text as _, pget_text as _p
+from bleachbit.Options import options
+
+logger = logging.getLogger(__name__)
+
+LOCATIONS_WHITELIST = 1
+LOCATIONS_CUSTOM = 2
+# TRANSLATORS: Shown as a tooltip in the preferences window and as
+# a description in a confirmation dialog.
+EXPERT_MODE_DESCRIPTION = _(
+    'Expert mode enables advanced features and relaxes guardrails. '
+    'Use extra caution in expert mode.')
+
+# TRANSLATORS: Used both as (1) a checkbox label in the preferences dialog
+# to bypass some safety guardails for advanced users and (2) the title of
+# dialog asking to confirm this choice.
+EXPERT_MODE_MSG = _('Expert mode')
+
+# TRANSLATORS: Notice shown in an infobar after changing a preference
+# that requires starting the application to be effective.
+RESTART_APP_MSG = _("Restart BleachBit for full effect.")
+
+
+class PreferencesDialog:
+
+    """Present the preferences dialog and save changes"""
+
+    def __init__(self, parent, cb_refresh_operations, cb_set_windows10_theme):
+        self.cb_refresh_operations = cb_refresh_operations
+        self.cb_set_windows10_theme = cb_set_windows10_theme
+
+        self.parent = parent
+        # TRANSLATORS: Title for the preferences dialog
+        self.dialog = Gtk.Dialog(title=_("Preferences"),
+                                 transient_for=parent,
+                                 modal=True,
+                                 destroy_with_parent=True)
+        self.dialog.set_default_size(760, 520)
+
+        self._locations_notice_css_provider = None
+        self._default_options_box = None
+        self._cookie_page_loaded = False
+        self._cookie_page_container = None
+
+        # Add InfoBar for non-blocking messages
+        self.infobar = Gtk.InfoBar()
+        self.infobar.set_show_close_button(True)
+        self.infobar.connect('response', self._on_infobar_response)
+        self.infobar_label = Gtk.Label()
+        self.infobar_label.set_line_wrap(True)
+        self.infobar.get_content_area().add(self.infobar_label)
+        self.dialog.get_content_area().pack_start(self.infobar, False, False, 0)
+        self._infobar_timeout_id = None
+
+        content_box = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=18)
+        content_box.set_border_width(12)
+
+        self.page_stack = Gtk.Stack()
+        self.page_stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        self.page_stack.set_hhomogeneous(False)
+        self.page_stack.set_vhomogeneous(False)
+        self.page_stack.connect('notify::visible-child-name',
+                                self.__on_stack_page_changed)
+
+        sidebar = Gtk.StackSidebar()
+        sidebar.set_stack(self.page_stack)
+        sidebar.set_vexpand(True)
+        sidebar.set_margin_end(6)
+
+        pages = [
+            # TRANSLATORS: Sidebar label for the general settings page of the preferences dialog.
+            (self.__general_page, 'general', _("General"), True),
+            # TRANSLATORS: Sidebar label for the software updates page of the preferences dialog.
+            (self.__updates_page, 'updates', _("Updates"),
+             online_update_notification_enabled),
+            # TRANSLATORS: Sidebar label for the "Languages" page in the Preferences dialog.
+            (self.__languages_page, 'languages', _("Languages"), True),
+            # TRANSLATORS: Sidebar label for the page managing browser cookies in
+            # the Preferences dialog.
+            (self.__cookies_page, 'cookies', _("Cookies"), True),
+            (lambda: self.__locations_page(LOCATIONS_WHITELIST),
+             # TRANSLATORS: Sidebar label for the "keep list" (whitelist) page of
+             # the preferences dialog. This page lists paths that will be preserved
+             # (not deleted) during cleaning.
+             'keep-list', _("Keep list"), True),
+            (lambda: self.__locations_page(LOCATIONS_CUSTOM),
+             # TRANSLATORS: Sidebar label for the page where users add their own paths to clean.
+             # Short label meaning "Custom locations".
+             'custom', _("Custom"), True),
+            # TRANSLATORS: Sidebar label for the drives page of the preferences dialog.
+            (self.__drives_page, 'drives', _("Drives"), True),
+        ]
+
+        for page_func, page_id, page_title, condition in pages:
+            if condition:
+                self.page_stack.add_titled(page_func(), page_id, page_title)
+
+        content_box.pack_start(sidebar, False, False, 0)
+        content_box.pack_start(self.page_stack, True, True, 0)
+
+        # pack_start parameters: child, expand (reserve space), fill (actually fill it), padding
+        self.dialog.get_content_area().pack_start(content_box, True, True, 0)
+        self.dialog.add_button(Gtk.STOCK_CLOSE, Gtk.ResponseType.CLOSE)
+
+        self.refresh_operations = False
+
+    def select_page(self, page_name):
+        """Show the requested preferences page."""
+        if not page_name:
+            return
+        self.page_stack.set_visible_child_name(page_name)
+        if page_name == 'cookies':
+            self.__ensure_cookie_page()
+
+    def _create_checkbox(self, label, option_id, vbox=None, tooltip=None,
+                         requires_option=None, store_as_attr=None):
+        """Helper to create a checkbox with common patterns.
+
+        Args:
+            label: The checkbox label text
+            option_id: The option ID to connect to
+            vbox: Optional vbox to pack the checkbox into
+            tooltip: Optional tooltip text
+            requires_option: Optional option ID that must be enabled for sensitivity
+            store_as_attr: Optional attribute name to store checkbox as self.{name}
+
+        Returns:
+            The created Gtk.CheckButton
+        """
+        cb = Gtk.CheckButton(label=label)
+        cb.set_active(options.get(option_id))
+        cb.connect('toggled', self.__toggle_callback, option_id)
+
+        if tooltip:
+            cb.set_tooltip_text(tooltip)
+
+        if requires_option is not None and not options.get(requires_option):
+            cb.set_sensitive(False)
+        elif options.has_override(option_id):
+            cb.set_sensitive(False)
+
+        if store_as_attr:
+            setattr(self, store_as_attr, cb)
+
+        if vbox is None:
+            vbox = self._default_options_box
+        vbox.pack_start(cb, False, True, 0)
+
+        return cb
+
+    def __del__(self):
+        """Destructor called when the dialog is closing"""
+        if self.refresh_operations:
+            # refresh the list of cleaners
+            self.cb_refresh_operations()
+
+    def _on_infobar_response(self, _infobar, _response_id):
+        """Handle InfoBar close button click"""
+        if self._infobar_timeout_id:
+            GLib.source_remove(self._infobar_timeout_id)
+            self._infobar_timeout_id = None
+        self.infobar.hide()
+
+    def _hide_infobar(self):
+        """Hide the InfoBar (used for auto-dismiss timeout)"""
+        self._infobar_timeout_id = None
+        self.infobar.hide()
+        return False  # Remove from GLib timeout
+
+    def show_infobar(self, message, message_type=Gtk.MessageType.ERROR):
+        """Show a non-blocking InfoBar message that auto-dismisses
+
+        Args:
+            message: The message to display
+            message_type: Gtk.MessageType (ERROR, WARNING, INFO, etc.)
+        """
+        # Cancel any existing timeout
+        if self._infobar_timeout_id:
+            GLib.source_remove(self._infobar_timeout_id)
+            self._infobar_timeout_id = None
+        self.infobar_label.set_text(message)
+        self.infobar.set_message_type(message_type)
+        self.infobar.show_all()
+        self._infobar_timeout_id = GLib.timeout_add_seconds(
+            15, self._hide_infobar)
+
+    def __on_expert_mode_toggled(self, cb):
+        """Callback for expert mode checkbox"""
+        new_value = cb.get_active()
+        if new_value:
+            from bleachbit.GuiBasic import warning_confirm_dialog
+            confirmed, _remember_choice = warning_confirm_dialog(
+                self.dialog,
+                EXPERT_MODE_MSG,
+                EXPERT_MODE_DESCRIPTION,
+                show_checkbox=False
+            )
+            if not confirmed:
+                cb.set_active(False)
+                return
+        options.set('expert_mode', new_value)
+        self.reset_warnings_button.set_sensitive(new_value)
+        if hasattr(self, 'cb_delete_confirmation'):
+            self.cb_delete_confirmation.set_sensitive(new_value)
+        if hasattr(self, 'cb_refresh_operations') and self.cb_refresh_operations:
+            self.refresh_operations = True
+
+    def __toggle_callback(self, _cell, path):
+        """Callback function to toggle option"""
+        options.toggle(path)
+        if online_update_notification_enabled:
+            self.cb_beta.set_sensitive(options.get('check_online_updates'))
+            if IS_WINDOWS:
+                self.cb_winapp2.set_sensitive(
+                    options.get('check_online_updates'))
+        if 'auto_hide' == path:
+            self.refresh_operations = True
+        if 'dark_mode' == path:
+            logger.debug("Toggling dark mode to %s", options.get('dark_mode'))
+            theme_widget = self.parent or self.dialog
+            before_dark = detect_dark_background(theme_widget)
+            if IS_WINDOWS and options.get('win10_theme'):
+                self.cb_set_windows10_theme()
+
+            settings = self.dialog.get_settings()
+            if settings:
+                settings.set_property(
+                    'gtk-application-prefer-dark-theme', options.get('dark_mode'))
+            else:
+                logger.warning("Could not get GTK settings to apply dark mode")
+
+            flush_gtk_events()
+            after_dark = detect_dark_background(theme_widget)
+
+            if not IS_WINDOWS and should_show_dark_mode_warning(before_dark, after_dark):
+                self.show_infobar(
+                    # TRANSLATORS: Notice shown in an infobar when toggling
+                    # dark mode on Linux.
+                    _("Some GTK themes do not support both light and dark modes."),
+                    Gtk.MessageType.WARNING)
+        if 'win10_theme' == path:
+            self.cb_set_windows10_theme()
+        if 'debug' == path:
+            from bleachbit.Log import set_root_log_level
+            set_root_log_level(options.get('debug'))
+        if 'kde_shred_menu_option' == path:
+            from bleachbit.DesktopMenuOptions import install_kde_service_menu_file
+            install_kde_service_menu_file()
+        if 'use_fontconfig_backend' == path:
+            self.show_infobar(RESTART_APP_MSG, Gtk.MessageType.INFO)
+
+    def __reset_warning_preferences(self, _button):
+        """Reset saved warning confirmations."""
+        options.clear_warning_preferences()
+        self.show_infobar(
+            # TRANSLATORS: Success message shown in the infobar.
+            _("Warning confirmations reset."),
+            Gtk.MessageType.INFO)
+
+    def __create_update_widgets(self, vbox):
+        """Create and configure update-related checkboxes."""
+        if not online_update_notification_enabled:
+            return
+        self._create_checkbox(
+            # TRANSLATORS: Checkbox label in the preferences dialog.
+            _("Check periodically for software updates via the Internet"),
+            'check_online_updates',
+            vbox=vbox,
+            # TRANSLATORS: Tooltip for the online updates checkbox in the preferences dialog.
+            tooltip=_("If an update is found, you will be given the option to view information about it.  Then, you may manually download and install the update."))
+
+        updates_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        updates_box.set_margin_start(18)
+
+        self._create_checkbox(
+            # TRANSLATORS: Checkbox label in the preferences dialog.
+            _("Check for new beta releases"),
+            'check_beta',
+            vbox=updates_box,
+            requires_option='check_online_updates',
+            store_as_attr='cb_beta')
+
+        if IS_WINDOWS:
+            self._create_checkbox(
+                # TRANSLATORS: Checkbox label in the preferences dialog.
+                # Winapp2.ini is a set of cleaning rules from this project:
+                # https://github.com/MoscaDotTo/Winapp2
+                _("Download and update cleaners from community (winapp2.ini)"),
+                'update_winapp2',
+                vbox=updates_box,
+                requires_option='check_online_updates',
+                store_as_attr='cb_winapp2')
+        vbox.pack_start(updates_box, False, True, 0)
+
+    def __create_language_widgets(self, vbox, supported_langs):
+        """Create and configure language selection widgets.
+
+        supported_langs maps language code to native name, or is None if
+        the scan failed.
+        """
+        lang_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        is_auto_detect = options.get("auto_detect_lang")
+        # TRANSLATORS: Checkbutton label in the preferences dialog.
+        self.cb_auto_lang = Gtk.CheckButton(label=_("Auto-detect language"))
+        self.cb_auto_lang.set_active(is_auto_detect)
+        self.cb_auto_lang.set_tooltip_text(
+            # TRANSLATORS: Tooltip explaining the auto-detect language option.
+            _("Automatically detect the system language"))
+        lang_box.pack_start(self.cb_auto_lang, False, True, 0)
+
+        self.lang_select_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        # TRANSLATORS: Label for the language selection dropdown.
+        lang_label = Gtk.Label(label=_("Language:"))
+        lang_label.set_margin_start(20)  # Add some indentation
+        self.lang_select_box.pack_start(lang_label, False, True, 5)
+
+        self.lang_combo = Gtk.ComboBoxText()
+        current_lang_code = get_active_language_code()
+        # Add available languages
+        active_language_idx = None
+        if supported_langs is None:
+            lang_items = [('en_us', 'English')]
+        else:
+            lang_items = supported_langs.items()
+        for lang_idx, (lang_code, native) in enumerate(lang_items):
+            if native:
+                self.lang_combo.append_text(f"{native} ({lang_code})")
+            else:
+                self.lang_combo.append_text(lang_code)
+            if lang_code == current_lang_code:
+                active_language_idx = lang_idx
+        if active_language_idx is not None:
+            self.lang_combo.set_active(active_language_idx)
+        # set_wrap_width() prevents infinite space to scroll up.
+        # https://github.com/bleachbit/bleachbit/issues/1764
+        self.lang_combo.set_wrap_width(1)
+        self.lang_select_box.pack_start(self.lang_combo, False, True, 0)
+        lang_box.pack_start(self.lang_select_box, False, True, 0)
+
+        vbox.pack_start(lang_box, False, True, 0)
+        self.lang_select_box.set_sensitive(not is_auto_detect)
+        self.cb_auto_lang.connect('toggled', self.on_auto_detect_toggled)
+        self.lang_combo.connect('changed', self.on_lang_changed)
+
+    def on_lang_changed(self, widget):
+        """Callback for when the language combobox is changed."""
+        text = widget.get_active_text()
+        # Extract language code from the format "Native Name (lang_code)"
+        lang_code = text.split("(")[-1].rstrip(")")
+        if lang_code:
+            options.set("forced_language", lang_code, section="bleachbit")
+        else:
+            logger.warning(
+                "No language code found in combobox for text %s", text)
+        setup_translation()
+        self.refresh_operations = True
+        self.show_infobar(RESTART_APP_MSG, Gtk.MessageType.INFO)
+
+    def on_auto_detect_toggled(self, _widget):
+        """Callback for when the auto-detect language checkbox is toggled."""
+        self.__toggle_callback(None, 'auto_detect_lang')
+        is_auto_detect = options.get("auto_detect_lang")
+        self.lang_select_box.set_sensitive(not is_auto_detect)
+        if is_auto_detect:
+            options.set("forced_language", "", section="bleachbit")
+        setup_translation()
+        self.refresh_operations = True
+        self.show_infobar(RESTART_APP_MSG, Gtk.MessageType.INFO)
+
+    def __create_general_checkboxes(self, vbox):
+        """Create and configure general checkboxes."""
+        # TRANSLATORS: Overwriting is the same as shredding.  It is a way
+        # to prevent recovery of the data. You could also translate
+        # 'Shred files to prevent recovery.'
+        self._create_checkbox(
+            # TRANSLATORS: Checkbox label in the preferences dialog.
+            _("Overwrite contents of files to prevent recovery"),
+            'shred',
+            vbox=vbox,
+            # TRANSLATORS: Tooltip for the shred checkbox in the preferences dialog.
+            tooltip=_("Overwriting is ineffective on some file systems and with certain BleachBit operations.  Overwriting is significantly slower."))
+
+        self._create_checkbox(
+            # TRANSLATORS: Checkbox label in the preferences dialog.
+            _("Exit after cleaning"),
+            'exit_done',
+            vbox=vbox)
+
+        self._create_checkbox(
+            # TRANSLATORS: Checkbox label in the preferences dialog.
+            # Ask for confirmation before deleting items.
+            _("Confirm before delete"),
+            'delete_confirmation',
+            vbox=vbox,
+            tooltip=REQUIRES_EXPERT_MODE,
+            requires_option='expert_mode',
+            store_as_attr='cb_delete_confirmation')
+
+        self.reset_warnings_button = Gtk.Button.new_with_label(
+            # TRANSLATORS: Button label in the preferences. 'Reset' is a verb.
+            label=_("Reset warning confirmations"))
+        self.reset_warnings_button.set_halign(Gtk.Align.START)
+        self.reset_warnings_button.set_margin_top(6)
+        self.reset_warnings_button.set_tooltip_text(REQUIRES_EXPERT_MODE)
+        self.reset_warnings_button.connect(
+            'clicked', self.__reset_warning_preferences)
+        self.reset_warnings_button.set_sensitive(options.get('expert_mode'))
+        vbox.pack_start(self.reset_warnings_button, False, True, 0)
+
+        self._create_checkbox(
+            # TRANSLATORS: This means to hide cleaners which would do
+            # nothing. For example, if Firefox were never used on
+            # this system, this option would hide Firefox to simplify
+            # the list of cleaners.
+            _("Hide irrelevant cleaners"),
+            'auto_hide',
+            vbox=vbox)
+
+        self._create_checkbox(
+            # TRANSLATORS: Checkbox label in the preferences.
+            _("Use IEC sizes (1 KiB = 1024 bytes) instead of SI (1 kB = 1000 bytes)"),
+            "units_iec",
+            vbox=vbox)
+
+    def __create_page_box(self):
+        """Create a standard page container box with consistent spacing and padding."""
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        vbox.set_border_width(12)
+        return vbox
+
+    def __create_section(self, parent, title):
+        """Create a titled section with a bold heading and indented body."""
+        section = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        heading = Gtk.Label()
+        heading.set_markup('<b>%s</b>' % GLib.markup_escape_text(title))
+        heading.set_xalign(0)
+        section.pack_start(heading, False, False, 0)
+
+        body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        body.set_margin_start(12)
+        section.pack_start(body, False, False, 0)
+        parent.pack_start(section, False, False, 0)
+        return body
+
+    def __updates_page(self):
+        """Return widget containing the updates page."""
+        page = self.__create_page_box()
+
+        # TRANSLATORS: Section title on the preferences updates page.
+        updates_box = self.__create_section(page, _("Update notifications"))
+        self.__create_update_widgets(updates_box)
+        return page
+
+    def __cookies_page(self):
+        """Return widget containing the cookies page (lazy-loaded)."""
+        page = self.__create_page_box()
+
+        self._cookie_page_container = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        page.pack_start(self._cookie_page_container, True, True, 0)
+        return page
+
+    def __ensure_cookie_page(self):
+        """Lazy-load the cookie manager pane when first accessed."""
+        if self._cookie_page_loaded:
+            return
+        cookie_page = CookieManagerPane()
+        cookie_page.set_border_width(12)
+        self._cookie_page_container.pack_start(cookie_page, True, True, 0)
+        self._cookie_page_container.show_all()
+        self._cookie_page_loaded = True
+
+    def __on_stack_page_changed(self, stack, _param):
+        """Callback when the visible page in the stack changes."""
+        if stack.get_visible_child_name() == 'cookies':
+            self.__ensure_cookie_page()
+
+    def __general_page(self):
+        """Return a widget containing the general page"""
+
+        page = self.__create_page_box()
+
+        # TRANSLATORS: Section title (noun) on the Preferences - General page
+        # for options related to cleaning stored data.
+        cleaning_box = self.__create_section(page, _("Cleaning"))
+        self._default_options_box = cleaning_box
+        self.__create_general_checkboxes(cleaning_box)
+
+        # TRANSLATORS: Section title in Preferences for user interface options
+        # such as dark mode and window behavior.
+        interface_box = self.__create_section(page, _("Interface"))
+        self._create_checkbox(
+            # TRANSLATORS: Checkbox label to remember the window size and position
+            # between application launches.
+            _("Remember window geometry"),
+            'remember_geometry',
+            vbox=interface_box)
+
+        self._create_checkbox(
+            # TRANSLATORS: Checkbox label to enable dark mode in the UI.
+            _("Dark mode"),
+            'dark_mode',
+            vbox=interface_box)
+
+        if IS_WINDOWS:
+            self._create_checkbox(
+                # TRANSLATORS: Checkbox label to use the Windows 10-style visual theme
+                # for the application interface.
+                _("Windows 10 theme"),
+                'win10_theme',
+                vbox=interface_box)
+
+            self._create_checkbox(
+                # TRANSLATORS: Checkbox label to use the Fontconfig text rendering backend
+                # instead of the default Windows renderer. The option may improve blurry text.
+                # Fontconfig, which is software, is a proper noun.
+                _("Use Fontconfig text rendering backend"),
+                'use_fontconfig_backend',
+                vbox=interface_box,
+                # TRANSLATORS: Tooltip for the fontconfig text rendering checkbox in the preferences dialog.
+                tooltip=_("May fix blurry or unreadable text. Requires restart."))
+
+        integration_box = self.__create_section(
+            # TRANSLATORS: Section title on the preferences general page,
+            # labelling options for OS integration and advanced/developer features.
+            page, _("Integration and advanced"))
+
+        if not IS_WINDOWS:
+            self._create_checkbox(
+                # TRANSLATORS: Checkbox label in the preferences dialog.
+                # 'Shred' means securely delete a file to prevent data recovery.
+                # 'Context menu' is the menu shown on right-click.
+                # 'KDE Plasma' is a Linux desktop environment (proper noun, do not translate).
+                _("Add the shred context menu to KDE Plasma"),
+                'kde_shred_menu_option',
+                vbox=integration_box)
+
+        self._create_checkbox(
+            # TRANSLATORS: Checkbox label to show diagnostic log messages for
+            # troubleshooting.
+            _("Show debug messages"),
+            'debug',
+            vbox=integration_box)
+
+        self._create_checkbox(
+            EXPERT_MODE_MSG,
+            'expert_mode',
+            vbox=integration_box,
+            tooltip=EXPERT_MODE_DESCRIPTION,
+            store_as_attr='cb_expert')
+        self.cb_expert.connect('toggled', self.__on_expert_mode_toggled)
+
+        return page
+
+    def __drives_page(self):
+        """Return widget containing the drives page"""
+
+        def add_drive_cb(button):
+            """Callback for adding a drive"""
+            # TRANSLATORS: Title of a folder chooser dialog.
+            title = _("Choose a folder")
+            pathname = GuiBasic.browse_folder(
+                self.parent, title, multiple=False, stock_button=Gtk.STOCK_ADD)
+            if pathname:
+                liststore.append([pathname])
+                pathnames.append(pathname)
+                options.set_list('shred_drives', pathnames)
+
+        def remove_drive_cb(button):
+            """Callback for removing a drive"""
+            treeselection = treeview.get_selection()
+            (model, _iter) = treeselection.get_selected()
+            if _iter is None:
+                # nothing selected
+                return
+            pathname = model[_iter][0]
+            liststore.remove(_iter)
+            pathnames.remove(pathname)
+            options.set_list('shred_drives', pathnames)
+
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        vbox.set_border_width(12)
+
+        # TRANSLATORS: 'empty' means 'unallocated'.
+        # The user should decide which drives to wipe. Then, for each
+        # chosen drive, the user should specify one folder per drive.
+        # For example, to wipe C:\, the user may choose %TEMP% which
+        # is a folder anywhere on C:.
+        drive_instruction_label = _("Choose a writable folder for each drive for "
+                                    "which to wipe empty space.")
+        notice = Gtk.Label(label=drive_instruction_label)
+        notice.set_line_wrap(True)
+        notice.set_xalign(0.0)
+        notice.set_margin_start(12)
+        notice.set_margin_end(12)
+        vbox.pack_start(notice, False, True, 0)
+
+        notice2 = Gtk.Label(label=EMPTY_SPACE_WARNING)
+        notice2.set_line_wrap(True)
+        notice2.set_xalign(0.0)
+        notice2.set_margin_start(12)
+        notice2.set_margin_end(12)
+        vbox.pack_start(notice2, False, True, 0)
+
+        liststore = Gtk.ListStore(str)
+
+        pathnames = sorted(options.get_list('shred_drives') or [])
+        for pathname in pathnames:
+            liststore.append([pathname])
+        treeview = Gtk.TreeView.new_with_model(liststore)
+        crt = Gtk.CellRendererText()
+        tvc = Gtk.TreeViewColumn(None, crt, text=0)
+        treeview.append_column(tvc)
+
+        vbox.pack_start(treeview, True, True, 0)
+
+        # TRANSLATORS: In the preferences dialog, this button adds a path to
+        # the list of paths
+        button_add = Gtk.Button.new_with_label(label=_p('button', 'Add'))
+        button_add.connect("clicked", add_drive_cb)
+        # TRANSLATORS: In the preferences dialog, this button removes a path
+        # from the list of paths
+        button_remove = Gtk.Button.new_with_label(label=_p('button', 'Remove'))
+        button_remove.connect("clicked", remove_drive_cb)
+
+        button_box = Gtk.ButtonBox(orientation=Gtk.Orientation.HORIZONTAL)
+        button_box.set_layout(Gtk.ButtonBoxStyle.START)
+        button_box.pack_start(button_add, True, True, 0)
+        button_box.pack_start(button_remove, True, True, 0)
+        vbox.pack_start(button_box, False, True, 0)
+
+        return vbox
+
+    def __languages_page(self):
+        """Return widget containing the languages page"""
+
+        def keep_lang_toggled_cb(cell, path, liststore):
+            """Callback for toggling the 'keep' column"""
+            __iter = liststore.get_iter_from_string(path)
+            value = not liststore.get_value(__iter, 0)
+            liststore.set(__iter, 0, value)
+            langid = liststore[path][1]
+            options.set_language(langid, value)
+
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        vbox.set_border_width(12)
+
+        ui_language_box = self.__create_section(
+            vbox,
+            # TRANSLATORS: Section title on the preferences languages page.
+            _("BleachBit interface language"))
+
+        try:
+            supported_langs = get_supported_language_code_name_dict()
+        except Exception as e:
+            logger.error("Failed to get list of supported languages: %s", e)
+            supported_langs = None
+
+        self.__create_language_widgets(ui_language_box, supported_langs)
+
+        # Windows does not have locale cleaner.
+        if not IS_POSIX:
+            return vbox
+
+        cleanup_box = self.__create_section(
+            vbox,
+            # TRANSLATORS: Section title on the preferences languages page.
+            _("Language files to keep when cleaning applications"))
+
+        # populate data
+        liststore = Gtk.ListStore('gboolean', str, str)
+        if supported_langs is None:
+            # There is no English fallback here, so let the failure propagate.
+            supported_langs = get_supported_language_code_name_dict()
+        for lang, native in supported_langs.items():
+            liststore.append([(options.get_language(lang)), lang, native])
+
+        # create treeview
+        treeview = Gtk.TreeView.new_with_model(liststore)
+
+        # create column views
+        self.renderer0 = Gtk.CellRendererToggle()
+        self.renderer0.set_property('activatable', True)
+        self.renderer0.connect('toggled', keep_lang_toggled_cb, liststore)
+        # TRANSLATORS: Column header in the languages treeview.
+        # This column controls whether to keep the language.
+        self.column0 = Gtk.TreeViewColumn(_("Keep"),
+                                          self.renderer0, active=0)
+        treeview.append_column(self.column0)
+
+        self.renderer1 = Gtk.CellRendererText()
+        # TRANSLATORS: Column header in the languages treeview showing the
+        # language code (e.g., 'en_US').
+        self.column1 = Gtk.TreeViewColumn(_("Code"), self.renderer1, text=1)
+        treeview.append_column(self.column1)
+
+        self.renderer2 = Gtk.CellRendererText()
+        # TRANSLATORS: Column header in the languages treeview showing the
+        # native name of the language.
+        self.column2 = Gtk.TreeViewColumn(_("Name"), self.renderer2, text=2)
+        treeview.append_column(self.column2)
+        treeview.set_search_column(2)
+
+        # finish
+        swindow = Gtk.ScrolledWindow()
+        swindow.set_overlay_scrolling(False)
+        swindow.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        swindow.set_size_request(300, 200)
+        swindow.add(treeview)
+        cleanup_box.pack_start(swindow, True, True, 0)
+        return vbox
+
+    def _check_path_exists(self, pathname):
+        """Check if a path exists in either keep lists or custom lists
+        Returns True if path exists, False otherwise"""
+        whitelist_paths = options.get_whitelist_paths()
+        custom_paths = options.get_custom_paths()
+
+        # Check in whitelist
+        for path in whitelist_paths:
+            if pathname != path[1]:
+                continue
+            # TRANSLATORS: Error message shown in the infobar.
+            msg = _("This path already exists in the keep list.")
+            self.show_infobar(msg, Gtk.MessageType.ERROR)
+            return True
+
+        # Check in custom
+        for path in custom_paths:
+            if pathname != path[1]:
+                continue
+            # TRANSLATORS: Error message shown in the infobar.
+            msg = _("This path already exists in the custom list.")
+            self.show_infobar(msg, Gtk.MessageType.ERROR)
+            return True
+
+        return False
+
+    def _check_protected_path(self, pathname):
+        """Check if path is protected and warn user if so.
+
+        Returns True if it's safe to proceed, False if user cancelled.
+        """
+        logger.debug("Checking protected path: %s", pathname)
+        match_info = ProtectedPath.check_protected_path(pathname)
+        if match_info is None:
+            return True
+
+        if not options.get('expert_mode'):
+            self.show_infobar(
+                # TRANSLATORS: Error message shown in the infobar.
+                _("This path is protected. To bypass protection, enable expert mode."),
+                Gtk.MessageType.WARNING)
+            return False
+
+        # Check if user already confirmed this path
+        normalized = normalize_path(
+            pathname, case_sensitive=match_info['case_sensitive'])
+        warning_key = 'protected_path:' + normalized
+        if options.get_warning_preference(warning_key):
+            return True
+
+        # Calculate impact
+        # FIXME later: this can be very slow with many objects
+        logger.debug("Checking protected path impact: %s", pathname)
+        impact = ProtectedPath.calculate_impact(pathname)
+
+        # Generate warning message
+        warning_msg = ProtectedPath.get_warning_message(pathname, impact)
+
+        # Show warning dialog
+        confirmed, remember = GuiBasic.warning_confirm_dialog(
+            self.dialog,
+            # TRANSLATORS: Title of warning dialog shown when adding a protected path.
+            _("Protected Path"),
+            warning_msg
+        )
+
+        if confirmed and remember:
+            options.remember_warning_preference(warning_key)
+
+        return confirmed
+
+    def _add_path(self, pathname, path_type, page_type, liststore, pathnames):
+        """Common function to add a path to either whitelist or custom list"""
+        if self._check_path_exists(pathname):
+            return
+
+        # Check for protected paths when adding to custom (delete) list
+        if page_type == LOCATIONS_CUSTOM:
+            if not self._check_protected_path(pathname):
+                return
+
+        # TRANSLATORS: Noun used as a column header in the preferences dialog.
+        type_str_file = _('File')
+        # TRANSLATORS: Noun used as a column header in the preferences dialog.
+        type_str_folder = _('Folder')
+        type_str = type_str_file if path_type == 'file' else type_str_folder
+        display_path = sanitize_surrogates(pathname)
+        liststore.append([type_str, display_path])
+        pathnames.append([path_type, pathname])
+
+        if page_type == LOCATIONS_WHITELIST:
+            options.set_whitelist_paths(pathnames)
+        else:
+            options.set_custom_paths(pathnames)
+
+        # TRANSLATORS: %s is a file or folder path that was just added
+        self.show_infobar(_("Added: %s") % display_path,
+                          Gtk.MessageType.INFO)
+
+    def _remove_path(self, treeview, liststore, pathnames, page_type):
+        """Common function to remove a path from either whitelist or custom list"""
+        treeselection = treeview.get_selection()
+        (model, _iter) = treeselection.get_selected()
+        if _iter is None:
+            return
+        tree_path = model.get_path(_iter)
+        row_index = tree_path.get_indices()[0]
+        display_path = model[_iter][1]
+        liststore.remove(_iter)
+        pathnames.pop(row_index)
+        if page_type == LOCATIONS_WHITELIST:
+            options.set_whitelist_paths(pathnames)
+        else:
+            options.set_custom_paths(pathnames)
+        # TRANSLATORS: %s is a file or folder path that was just removed
+        self.show_infobar(_("Removed: %s") % display_path,
+                          Gtk.MessageType.INFO)
+
+    def __locations_page(self, page_type):
+        """Return a widget containing a list of files and folders"""
+
+        vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        vbox.set_border_width(12)
+
+        # load data
+        pathnames = []
+        if LOCATIONS_WHITELIST == page_type:
+            pathnames = options.get_whitelist_paths()
+        elif LOCATIONS_CUSTOM == page_type:
+            pathnames = options.get_custom_paths()
+        else:
+            raise RuntimeError("Invalid page type: '%s'" % page_type)
+        liststore = Gtk.ListStore(str, str)
+        for paths in pathnames:
+            type_code = paths[0]
+            type_str = None
+            if type_code == 'file':
+                type_str = _('File')
+            elif type_code == 'folder':
+                type_str = _('Folder')
+            else:
+                raise RuntimeError("Invalid type code: '%s'" % type_code)
+            path = paths[1]
+            display_path = sanitize_surrogates(path)
+            liststore.append([type_str, display_path])
+
+        if not self._locations_notice_css_provider:
+            self._locations_notice_css_provider = Gtk.CssProvider()
+            self._locations_notice_css_provider.load_from_data(b"""
+                .bb-locations-notice-whitelist {
+                    background-color: rgba(46, 139, 87, 0.12);
+                    border-radius: 6px;
+                    padding: 6px;
+                }
+                .bb-locations-notice-custom {
+                    background-color: rgba(210, 120, 0, 0.12);
+                    border-radius: 6px;
+                    padding: 6px;
+                }
+            """)
+
+        if LOCATIONS_WHITELIST == page_type:
+            # TRANSLATORS: Notice label at the top of the keeplist (whitelist)
+            # page in the preferences dialog.
+            # "Paths" is used generically to refer to both files and folders.
+            notice_text = _("These paths will not be deleted or modified.")
+            notice_icon = "emblem-readonly"
+            notice_class = "bb-locations-notice-whitelist"
+        elif LOCATIONS_CUSTOM == page_type:
+            # TRANSLATORS: Notice label at the top of the custom (delete)
+            # page in the preferences dialog.
+            notice_text = _("These locations can be selected for deletion.")
+            notice_icon = "edit-delete"
+            notice_class = "bb-locations-notice-custom"
+        else:
+            raise RuntimeError(f"Invalid page type: {page_type}")
+
+        notice_label = Gtk.Label(label=notice_text)
+        notice_label.set_line_wrap(True)
+        notice_label.set_xalign(0.0)
+
+        notice_image = load_icon_or_fallback(
+            notice_icon, Gtk.IconSize.MENU)
+        notice_image.set_valign(Gtk.Align.START)
+
+        notice_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        notice_box.pack_start(notice_image, False, False, 0)
+        notice_box.pack_start(notice_label, True, True, 0)
+
+        notice_frame = Gtk.EventBox()
+        notice_frame.set_visible_window(True)
+        notice_frame.add(notice_box)
+        notice_frame.set_margin_bottom(6)
+        notice_frame.set_margin_top(6)
+        style_context = notice_frame.get_style_context()
+        style_context.add_provider(
+            self._locations_notice_css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        style_context.add_class(notice_class)
+        vbox.pack_start(notice_frame, False, False, 0)
+
+        # create treeview
+        treeview = Gtk.TreeView.new_with_model(liststore)
+
+        # create column views
+        self.renderer0 = Gtk.CellRendererText()
+        # TRANSLATORS: Column header in the preferences dialog showing whether
+        # the item is a file or folder.
+        self.column0 = Gtk.TreeViewColumn(_("Type"), self.renderer0, text=0)
+        treeview.append_column(self.column0)
+
+        self.renderer1 = Gtk.CellRendererText()
+        # TRANSLATORS: In the tree view "Path" is used generically to refer to a
+        # file, a folder, or a pattern describing either
+        self.column1 = Gtk.TreeViewColumn(_("Path"), self.renderer1, text=1)
+        treeview.append_column(self.column1)
+        treeview.set_search_column(1)
+
+        # finish tree view
+        swindow = Gtk.ScrolledWindow()
+        swindow.set_overlay_scrolling(False)
+        swindow.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        swindow.set_size_request(300, 200)
+        swindow.add(treeview)
+
+        vbox.pack_start(swindow, True, True, 0)
+
+        # buttons that modify the list
+        def add_file_cb(button):
+            """Callback for adding a file"""
+            # TRANSLATORS: Title of a file chooser dialog.
+            title = _("Choose a file")
+            pathname = GuiBasic.browse_file(self.parent, title)
+            if pathname:
+                self._add_path(pathname, 'file', page_type,
+                               liststore, pathnames)
+
+        def add_folder_cb(button):
+            """Callback for adding a folder"""
+            # TRANSLATORS: Title of a folder chooser dialog.
+            title = _("Choose a folder")
+            pathname = GuiBasic.browse_folder(self.parent, title,
+                                              multiple=False, stock_button=Gtk.STOCK_ADD)
+            if pathname:
+                self._add_path(pathname, 'folder', page_type,
+                               liststore, pathnames)
+
+        def remove_path_cb(button):
+            """Callback for removing a path"""
+            self._remove_path(treeview, liststore, pathnames, page_type)
+
+        button_add_file = Gtk.Button.new_with_label(
+            # TRANSLATORS: Button label in the preferences for adding a file.
+            label=_p('button', 'Add file'))
+        button_add_file.connect("clicked", add_file_cb)
+
+        button_add_folder = Gtk.Button.new_with_label(
+            # TRANSLATORS: Button label in the preferences for adding a folder.
+            label=_p('button', 'Add folder'))
+        button_add_folder.connect("clicked", add_folder_cb)
+
+        button_remove = Gtk.Button.new_with_label(label=_p('button', 'Remove'))
+        button_remove.connect("clicked", remove_path_cb)
+
+        button_box = Gtk.ButtonBox(orientation=Gtk.Orientation.HORIZONTAL)
+        button_box.set_layout(Gtk.ButtonBoxStyle.START)
+        button_box.pack_start(button_add_file, True, True, 0)
+        button_box.pack_start(button_add_folder, True, True, 0)
+        button_box.pack_start(button_remove, True, True, 0)
+        vbox.pack_start(button_box, False, True, 0)
+
+        # return page
+        return vbox
+
+    def run(self, page_name=None):
+        """Run the dialog, optionally opening to a specific page.
+
+        Args:
+            page_name: Optional page ID to select (e.g., 'cookies', 'custom').
+        """
+        self.dialog.show_all()
+        self.infobar.hide()
+        self.select_page(page_name)
+        self.dialog.run()
+        self.dialog.destroy()

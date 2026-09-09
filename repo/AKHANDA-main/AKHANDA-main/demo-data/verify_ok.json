@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "broken_seq": null,
+  "reason": "chain verified",
+  "witness": {
+    "checked": false,
+    "diverged": false,
+    "reason": "no witness in this run (--no-witness)"
+  }
+}

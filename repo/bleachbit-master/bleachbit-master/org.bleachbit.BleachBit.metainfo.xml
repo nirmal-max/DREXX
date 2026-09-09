@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.bleachbit.BleachBit</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0</project_license>
+  <name translate="no">BleachBit</name>
+  <developer id="org.bleachbit">
+    <!-- TRANSLATORS: Name of the developers -->
+    <name>Andrew Ziem and contributors</name>
+    <url>https://github.com/bleachbit/bleachbit/graphs/contributors</url>
+  </developer>
+  <!-- Empty content_rating element indicates BleachBit is free of potentially offensive content (like most software tools). -->
+  <content_rating type="oars-1.0" />
+  <launchable type="desktop-id">org.bleachbit.BleachBit.desktop</launchable>
+  <summary>Free space and maintain privacy</summary>
+  <description>
+     <p>BleachBit frees disk space and maintains privacy by quickly removing unnecessary files such as cache, cookies, browser history, temporary files, and system logs. It can also shred files and clean free disk space to prevent data recovery.</p>
+  </description>
+  <screenshots>
+    <screenshot type="default">
+      <!-- TRANSLATORS: Caption for screenshot -->
+      <caption>Default dark mode, showing found junk files</caption>
+      <image>https://www.bleachbit.org/images/bleachbit320_windows10_preview.png</image>
+    </screenshot>
+  </screenshots>
+  <translation type="gettext">bleachbit</translation>
+  <url type="homepage">https://www.bleachbit.org/</url>
+  <url type="bugtracker">https://github.com/bleachbit/bleachbit/issues</url>
+  <url type="help">https://docs.bleachbit.org/</url>
+  <url type="donation">https://www.bleachbit.org/contribute</url>
+  <url type="translate">https://www.bleachbit.org/contribute/translate</url>
+  <update_contact>andrew@bleachbit.org</update_contact>
+  <provides>
+    <binary>bleachbit</binary>
+  </provides>
+</component>

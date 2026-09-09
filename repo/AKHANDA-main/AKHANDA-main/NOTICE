@@ -1,0 +1,76 @@
+Akhanda
+Unbroken Chain of Custody for Digital Forensics
+
+Copyright 2026 Team Syntax Squad, GITAM (Deemed to be University), Hyderabad
+
+Developed for Smart India Hackathon 2026, problem statement SIH26149, sponsored
+by the National Technical Research Organisation (NTRO).
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+==========================================================================
+Prior work incorporated
+==========================================================================
+
+AetherProof, an open source attestation and receipt engine.
+  Sole author: Pulkit Kr Srivastava.
+  Licence: Apache-2.0 (v0.5.1).
+  The public repository and package predate the publication of SIH26149.
+
+Akhanda extends AetherProof. It is not a rename of it. Carried over are the
+injective encoding discipline, the RFC 6962 Merkle domain separation, and the
+split between verified and unverifiable reporting. New in Akhanda are dual party
+signing, the physically separate witness node, external anchoring, and the
+certificate generator written against the statutes.
+
+See akhanda/CONTRIBUTORS.md for the per component record of authorship.
+
+==========================================================================
+Standards and third party material referenced
+==========================================================================
+
+NIST SP 800-88 Rev. 2, "Guidelines for Media Sanitization", a United States
+Government publication and not subject to copyright in the United States.
+Referenced for the Certificate of Sanitization structure and for the Clear,
+Purge and Destroy vocabulary.
+
+The Bharatiya Sakshya Adhiniyam, 2023 (Act 47 of 2023), Section 63(4) and the
+Schedule. Text of Indian law, reproduced for compliance mapping.
+
+RFC 6962 (Certificate Transparency) and RFC 8032 (EdDSA), IETF.
+
+The NIST Computer Forensic Reference Data Set carving corpus is not committed to
+this repository. Tests that require it skip with an explicit message rather than
+passing silently. See akhanda/tests/test_recovery_nist.py for the download
+commands.
+
+==========================================================================
+What this software does not claim
+==========================================================================
+
+The chain proves that nothing was altered, reordered or removed after it was
+written. It cannot prove that no operation was withheld from the record
+entirely. That is integrity, not completeness.
+
+OpenTimestamps anchoring is a cryptographic guarantee. It is not, and is not
+claimed to be, legal recognition under Indian law.
+
+==========================================================================
+Authorship
+==========================================================================
+
+Akhanda was designed, engineered and built by Team Syntax Squad, GITAM (Deemed
+to be University), Hyderabad, for Smart India Hackathon 2026, problem statement
+SIH26149, sponsored by the National Technical Research Organisation (NTRO).
+
+Every part of this solution is the original, independent work of the six members
+of Team Syntax Squad. No part of the engineering was outsourced, contracted,
+purchased, or taken from another team or product.
+
+The single component carried in from outside this competition is AetherProof,
+the team lead's own prior open source project, published under Apache-2.0 before
+this problem statement existed. It is disclosed by name above.
+
+Attribution to Team Syntax Squad and to problem statement SIH26149 must be
+preserved in any fork, redistribution or derivative work, as Section 4 of the
+Apache License requires.

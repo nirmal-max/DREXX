@@ -1,0 +1,9 @@
+cryptography>=42.0
+pytest>=8.0
+fastapi>=0.110          # witness node only (runs on the Pi)
+uvicorn>=0.29           # witness node only (runs on the Pi)
+pyserial>=3.5           # presence device only; absence degrades to SOFTWARE_KEY
+# opentimestamps-client   install on the workstation for anchoring; absence is recorded,
+#                         not fatal -- the chain is simply reported as unanchored
+# node                    optional; without it tests/test_cross_implementation.py SKIPS
+#                         (and says so) instead of checking Python vs JavaScript agreement

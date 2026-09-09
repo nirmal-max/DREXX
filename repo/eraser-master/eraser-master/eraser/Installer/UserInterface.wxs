@@ -1,0 +1,49 @@
+﻿<!--
+ * $Id: UserInterface.wxs 2994 2023-12-07 08:36:59Z gtrant $
+ * Copyright 2008-2021 The Eraser Project
+ * Original Author: Joel Low <lowjoel@users.sourceforge.net>
+ * Modified By:
+ *
+ * This file is part of Eraser.
+ *
+ * Eraser is free software: you can redistribute it and/or modify it under the
+ * terms of the GNU General Public License as published by the Free Software
+ * Foundation, either version 3 of the License, or (at your option) any later
+ * version.
+ *
+ * Eraser is distributed in the hope that it will be useful, but WITHOUT ANY
+ * WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+ * A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+ *
+ * A copy of the GNU General Public License can be found at
+ * <http://www.gnu.org/licenses/>.
+-->
+
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+	<Fragment>
+		<Icon Id="Eraser.exe" SourceFile="..\Resources\Eraser.ico" />
+		
+		<!-- Add/Remove programs information -->
+		<Property Id="ARPCOMMENTS" Value="Secure Data Removal for Windows" />
+		<Property Id="ARPPRODUCTICON" Value="Eraser.exe" />
+		<Property Id="ARPHELPLINK" Value="https://eraser.heidi.ie/forum/" />
+		<Property Id="ARPURLINFOABOUT" Value="https://eraser.heidi.ie/" />
+
+		<UI>
+			<ui:WixUI Id="WixUI_Mondo" />
+			<UIRef Id="WixUI_ErrorProgressText" />
+			<Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="RunEraserExe" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX And Not INSTALLED" />
+		</UI>
+
+		<WixVariable Id="WixUILicenseRtf" Value="License.rtf" />
+		<WixVariable Id="WixUIBannerBmp" Value="Resources\Banner.bmp" />
+		<WixVariable Id="WixUIDialogBmp" Value="Resources\Dialog.bmp" />
+		<WixVariable Id="WixUIExclamationIco" Value="Resources\Exclamation.ico" />
+		<WixVariable Id="WixUIInfoIco" Value="Resources\Information.ico" />
+		<WixVariable Id="WixUINewIco" Value="Resources\New Folder.ico" />
+
+		<CustomAction Id="RunEraserExe" DllEntry="WixShellExec" Impersonate="yes" BinaryRef="Wix4UtilCA_X86" />
+		<Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Run Eraser" />
+		<Property Id="WixShellExecTarget" Value="[#EraserExe]" />
+	</Fragment>
+</Wix>

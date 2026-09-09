@@ -1,0 +1,15 @@
+{
+  "check": "G24 operator-to-witness link, CONFIRMED CROSS-LAPTOP",
+  "confirmed_on": "2026-09-01",
+  "transport": "wifi-hotspot",
+  "witness_laptop_ip": "172.26.227.140",
+  "witness_port": 8000,
+  "tested_from": "the SECOND laptop (operator side), joined to the same hotspot",
+  "method": "curl http://172.26.227.140:8000/witness/head, run on laptop B",
+  "response": {"head_hash": "0000000000000000000000000000000000000000000000000000000000000000", "seq": -1, "count": 0},
+  "client_isolation": false,
+  "verdict": "PASS_END_TO_END",
+  "meaning": "Laptop B reached laptop A's live witness node over the Wi-Fi hotspot and got a valid witness response. The two machines can see each other on this transport, so the co-signing handshake (G1) can run across them. This is the real end-to-end link proof; the earlier g24_link_check PASS was laptop A calling its own IP.",
+  "unblocks": "G1 - one dual-signed entry produced across two real machines",
+  "for_the_demo": "For LB-03 the witness must be the machine the operator cannot reach, so on the day the SECOND laptop should host the witness node (needs the repo) and the laptop with the repo acts as operator; the link direction proven here works either way."
+}

@@ -1,0 +1,30 @@
+{
+  "entries": 500,
+  "machine_note": "record the machine name in BUILD_LOG.md; timings are machine-specific",
+  "build_chain_ms": 20.285,
+  "build_per_entry_ms": 0.0406,
+  "verify_key_free": {
+    "repeats": 5,
+    "median_ms": 2.754,
+    "min_ms": 2.749,
+    "max_ms": 2.878
+  },
+  "verify_with_signatures": {
+    "repeats": 5,
+    "median_ms": 40.614,
+    "min_ms": 40.555,
+    "max_ms": 42.47
+  },
+  "verify_per_entry_us": 81.23,
+  "tamper_localisation": {
+    "repeats": 5,
+    "median_ms": 20.346,
+    "min_ms": 20.262,
+    "max_ms": 20.421,
+    "tampered_seq": 250,
+    "located_at_seq": 250,
+    "correctly_localised": true,
+    "reason": "entry content altered: hash mismatch"
+  },
+  "restored_verifies": true
+}

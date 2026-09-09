@@ -1,0 +1,2526 @@
+<title>Akhanda Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,700;1,6..72,400&family=Public+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+/* ─────────────────────────────────────────────────────────────────
+   Palette: archival forensic record. Cool blue-grey stock, record-ink
+   indigo, and three semantic hues that encode state rather than decorate.
+   Every colour is defined on bare :root first, then re-defined per theme,
+   so nothing depends on a media query to exist.
+   ───────────────────────────────────────────────────────────────── */
+:root {
+  --paper:      #F2F4F8;
+  --stock:      #E9ECF3;
+  --card:       #FBFCFE;
+  --rule:       #D2D8E4;
+  --rule-soft:  #E2E6EF;
+  --ink:        #13161E;
+  --ink-2:      #3A4155;
+  --muted:      #5A6078;
+  --accent:     #2B3A78;
+  --accent-dim: #6B79B4;
+  --accent-wash:#E4E8F5;
+  --seal:       #16603F;
+  --seal-wash:  #DFEDE6;
+  --caution:    #7C5210;
+  --caution-wash:#F4EBD8;
+  --oxide:      #94291D;
+  --oxide-wash: #F4E2DF;
+  --shadow:     0 1px 2px rgba(19,22,30,.05), 0 8px 24px -14px rgba(19,22,30,.22);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:      #0F1117;
+    --stock:      #14171F;
+    --card:       #171B25;
+    --rule:       #2A3040;
+    --rule-soft:  #21262F;
+    --ink:        #E4E7F0;
+    --ink-2:      #B4BBCC;
+    --muted:      #8C93A8;
+    --accent:     #9AACEC;
+    --accent-dim: #5F6EA8;
+    --accent-wash:#1C2340;
+    --seal:       #6FD09E;
+    --seal-wash:  #15291F;
+    --caution:    #E3B463;
+    --caution-wash:#2A2013;
+    --oxide:      #F08D7E;
+    --oxide-wash: #2C1715;
+    --shadow:     0 1px 2px rgba(0,0,0,.4), 0 10px 28px -16px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"] {
+  --paper:      #0F1117;
+  --stock:      #14171F;
+  --card:       #171B25;
+  --rule:       #2A3040;
+  --rule-soft:  #21262F;
+  --ink:        #E4E7F0;
+  --ink-2:      #B4BBCC;
+  --muted:      #8C93A8;
+  --accent:     #9AACEC;
+  --accent-dim: #5F6EA8;
+  --accent-wash:#1C2340;
+  --seal:       #6FD09E;
+  --seal-wash:  #15291F;
+  --caution:    #E3B463;
+  --caution-wash:#2A2013;
+  --oxide:      #F08D7E;
+  --oxide-wash: #2C1715;
+  --shadow:     0 1px 2px rgba(0,0,0,.4), 0 10px 28px -16px rgba(0,0,0,.7);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Public Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 16px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── shell ───────────────────────────────────────────────────── */
+.shell { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: 0; max-width: 1240px; margin: 0 auto; }
+@media (max-width: 900px) { .shell { grid-template-columns: minmax(0,1fr); } }
+
+/* ── index rail: exhibit tabs ────────────────────────────────── */
+.rail { position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
+        padding: 2.6rem 1.1rem 2rem 1.6rem; border-right: 1px solid var(--rule); }
+@media (max-width: 900px) { .rail { position: static; height: auto; border-right: 0;
+        border-bottom: 1px solid var(--rule); padding: 1.5rem 1.4rem; } }
+.rail-mark { font-family: "Newsreader", Georgia, serif; font-size: 1.18rem; font-weight: 700;
+             letter-spacing: -.01em; margin: 0 0 .1rem; }
+.rail-sub { font-size: .7rem; text-transform: uppercase; letter-spacing: .11em;
+            color: var(--muted); margin: 0 0 1.5rem; font-weight: 600; }
+.rail nav { display: flex; flex-direction: column; gap: .1rem; }
+.rail a { display: flex; gap: .55rem; align-items: baseline; text-decoration: none;
+          color: var(--ink-2); font-size: .845rem; padding: .3rem .45rem; border-radius: 4px;
+          border-left: 2px solid transparent; }
+.rail a:hover { color: var(--accent); background: var(--accent-wash); }
+.rail a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rail a .n { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .68rem;
+             color: var(--muted); font-variant-numeric: tabular-nums; min-width: 1.1em; }
+
+/* ── main column ─────────────────────────────────────────────── */
+main { padding: 2.6rem 2.2rem 6rem; min-width: 0; }
+@media (max-width: 640px) { main { padding: 2rem 1.2rem 4rem; } }
+
+.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 1.4rem; margin-bottom: 1.1rem; }
+.eyebrow { font-size: .7rem; text-transform: uppercase; letter-spacing: .13em; font-weight: 700;
+           color: var(--accent); margin: 0 0 .7rem; }
+h1 { font-family: "Newsreader", Georgia, serif; font-weight: 700; font-size: clamp(2.2rem, 5.2vw, 3.3rem);
+     line-height: 1.05; letter-spacing: -.022em; margin: 0 0 .5rem; text-wrap: balance; }
+h1 .deva { font-size: .52em; color: var(--muted); font-weight: 400; letter-spacing: 0; }
+.standfirst { font-family: "Newsreader", Georgia, serif; font-size: 1.16rem; line-height: 1.5;
+              color: var(--ink-2); max-width: 62ch; margin: 0; }
+.standfirst em { color: var(--ink); font-style: italic; }
+
+.byline { display: flex; flex-wrap: wrap; gap: .4rem 1.6rem; font-size: .78rem; color: var(--muted);
+          margin-bottom: 3.2rem; padding-top: .9rem; }
+.byline b { color: var(--ink-2); font-weight: 600; }
+
+section { margin-bottom: 3.6rem; scroll-margin-top: 1.5rem; }
+h2 { font-family: "Newsreader", Georgia, serif; font-size: 1.72rem; font-weight: 600; letter-spacing: -.015em;
+     margin: 0 0 .3rem; text-wrap: balance; display: flex; align-items: baseline; gap: .7rem; }
+h2 .num { font-family: "IBM Plex Mono", monospace; font-size: .72rem; color: var(--accent);
+          font-weight: 600; letter-spacing: .04em; }
+.section-lede { color: var(--muted); max-width: 66ch; margin: 0 0 1.5rem; font-size: .95rem; }
+h3 { font-size: .96rem; font-weight: 700; margin: 2rem 0 .55rem; letter-spacing: -.005em; }
+h4 { font-size: .74rem; font-weight: 700; text-transform: uppercase; letter-spacing: .1em;
+     color: var(--muted); margin: 1.7rem 0 .6rem; }
+p { max-width: 66ch; margin: 0 0 .95rem; }
+a { color: var(--accent); }
+code, .mono { font-family: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+              font-size: .845em; }
+code { background: var(--stock); padding: .1em .34em; border-radius: 3px; color: var(--ink-2); }
+
+/* ── evidence label card ─────────────────────────────────────── */
+.label-card { background: var(--card); border: 1px solid var(--rule); border-radius: 3px;
+              box-shadow: var(--shadow); overflow: hidden; }
+.label-strip { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 1rem;
+               padding: .5rem .95rem; background: var(--stock); border-bottom: 1px solid var(--rule);
+               font-size: .7rem; text-transform: uppercase; letter-spacing: .1em; font-weight: 700;
+               color: var(--muted); }
+.label-strip .id { font-family: "IBM Plex Mono", monospace; color: var(--accent); letter-spacing: .04em; }
+.label-body { padding: .95rem 1.1rem 1.05rem; }
+.label-body > :last-child { margin-bottom: 0; }
+.label-foot { padding: .7rem 1.1rem; background: var(--caution-wash); border-top: 1px solid var(--rule);
+              font-size: .845rem; color: var(--caution); }
+.label-foot b { text-transform: uppercase; letter-spacing: .07em; font-size: .72rem; }
+
+.stack { display: flex; flex-direction: column; gap: 1.1rem; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.1rem; }
+
+/* ── badges ──────────────────────────────────────────────────── */
+.badge { display: inline-block; padding: .1rem .48rem; border-radius: 2px; font-size: .68rem;
+         font-weight: 700; text-transform: uppercase; letter-spacing: .06em; white-space: nowrap;
+         border: 1px solid currentColor; }
+.b-built { color: var(--seal);    background: var(--seal-wash); }
+.b-plan  { color: var(--accent);  background: var(--accent-wash); }
+.b-gap   { color: var(--caution); background: var(--caution-wash); }
+.b-none  { color: var(--oxide);   background: var(--oxide-wash); }
+
+/* ── tables ──────────────────────────────────────────────────── */
+.scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 3px; background: var(--card); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: .875rem; }
+th, td { text-align: left; padding: .58rem .8rem; border-bottom: 1px solid var(--rule-soft);
+         vertical-align: top; }
+thead th { background: var(--stock); font-size: .68rem; text-transform: uppercase; letter-spacing: .09em;
+           color: var(--muted); font-weight: 700; border-bottom: 1px solid var(--rule); position: sticky; top: 0; }
+tbody tr:last-child td { border-bottom: 0; }
+td.mono, th.mono { font-family: "IBM Plex Mono", monospace; font-size: .8rem; }
+td.num { text-align: right; font-variant-numeric: tabular-nums;
+         font-family: "IBM Plex Mono", monospace; font-size: .8rem; color: var(--muted); }
+tbody tr:hover { background: var(--stock); }
+
+/* ── figures ─────────────────────────────────────────────────── */
+figure { margin: 1.6rem 0; }
+figure svg { display: block; width: 100%; max-width: 100%; height: auto; color: var(--ink-2); }
+.fig-frame { background: var(--card); border: 1px solid var(--rule); border-radius: 3px;
+             padding: 1.3rem 1.1rem; overflow-x: auto; }
+figcaption { font-size: .82rem; color: var(--muted); margin-top: .7rem; max-width: 70ch; }
+figcaption b { color: var(--ink-2); }
+
+/* ── callouts ────────────────────────────────────────────────── */
+.note { border-left: 3px solid var(--accent); background: var(--accent-wash); padding: .85rem 1.1rem;
+        border-radius: 0 3px 3px 0; margin: 1.3rem 0; font-size: .9rem; }
+.note.caution { border-left-color: var(--caution); background: var(--caution-wash); color: var(--caution); }
+.note.caution b, .note.caution code { color: var(--caution); }
+.note.deny { border-left-color: var(--oxide); background: var(--oxide-wash); color: var(--oxide); }
+.note.deny b, .note.deny code { color: var(--oxide); }
+.note > :last-child { margin-bottom: 0; }
+.note code { background: transparent; padding: 0; }
+
+/* ── stat row ────────────────────────────────────────────────── */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(126px, 1fr)); gap: 1px;
+         background: var(--rule); border: 1px solid var(--rule); border-radius: 3px; overflow: hidden;
+         margin: 1.4rem 0; }
+.stat { background: var(--card); padding: .8rem .9rem; }
+.stat .v { font-family: "Newsreader", Georgia, serif; font-size: 1.62rem; font-weight: 600;
+           line-height: 1.05; font-variant-numeric: tabular-nums; }
+.stat .k { font-size: .66rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted);
+           font-weight: 600; margin-top: .2rem; }
+
+/* ── ordered lifecycle (a real sequence, so it is numbered) ──── */
+ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 1.2rem 0; display: flex;
+           flex-direction: column; gap: .1rem; }
+ol.steps li { counter-increment: s; display: grid; grid-template-columns: 2.1rem minmax(0,1fr);
+              gap: .85rem; padding: .62rem 0; border-bottom: 1px solid var(--rule-soft); }
+ol.steps li:last-child { border-bottom: 0; }
+ol.steps li::before { content: counter(s, decimal-leading-zero);
+        font-family: "IBM Plex Mono", monospace; font-size: .74rem; font-weight: 600;
+        color: var(--accent); padding-top: .2rem; font-variant-numeric: tabular-nums; }
+ol.steps li b { display: block; font-size: .93rem; }
+ol.steps li span { font-size: .875rem; color: var(--muted); }
+ol.steps li.gate { background: var(--accent-wash); margin: 0 -.7rem; padding-left: .7rem;
+                   padding-right: .7rem; border-radius: 3px; }
+ol.steps li.gate::before { color: var(--accent); }
+ol.steps li.pnr { background: var(--oxide-wash); margin: 0 -.7rem; padding-left: .7rem;
+                  padding-right: .7rem; border-radius: 3px; }
+ol.steps li.pnr::before { color: var(--oxide); }
+ol.steps li.pnr b { color: var(--oxide); }
+
+ul.tight { margin: .5rem 0 1rem; padding-left: 1.15rem; }
+ul.tight li { margin-bottom: .38rem; }
+
+.hr { height: 1px; background: var(--rule); border: 0; margin: 3rem 0; }
+
+footer { border-top: 2px solid var(--ink); padding-top: 1.2rem; font-size: .82rem; color: var(--muted); }
+footer b { color: var(--ink-2); }
+
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="shell">
+
+<aside class="rail">
+  <p class="rail-mark">Akhanda</p>
+  <p class="rail-sub">Architecture</p>
+  <nav>
+    <a href="#idea"><span class="n">01</span> The core idea</a>
+    <a href="#tree"><span class="n">02</span> The repository</a>
+    <a href="#boundaries"><span class="n">03</span> Trust boundaries</a>
+    <a href="#lifecycle"><span class="n">04</span> Operation lifecycle</a>
+    <a href="#tiers"><span class="n">05</span> Custody tiers</a>
+    <a href="#failclosed"><span class="n">06</span> Fail-closed policy</a>
+    <a href="#outcome"><span class="n">07</span> The signed outcome</a>
+    <a href="#three"><span class="n">08</span> Three verifiers</a>
+    <a href="#validation"><span class="n">09</span> NIST validation</a>
+    <a href="#software"><span class="n">10</span> Software: every file</a>
+    <a href="#hardware"><span class="n">11</span> Hardware &amp; the adapters</a>
+    <a href="#legal"><span class="n">12</span> Standards mapping</a>
+    <a href="#attacks"><span class="n">13</span> Three attacks</a>
+    <a href="#aggregate"><span class="n">14</span> Case, signer, self</a>
+    <a href="#fragments"><span class="n">15</span> Fragment reassembly</a>
+    <a href="#coverage"><span class="n">16</span> PS26149 coverage</a>
+    <a href="#certificate"><span class="n">17</span> The certificate</a>
+    <a href="#longevity"><span class="n">18</span> Outliving the algorithm</a>
+    <a href="#platform"><span class="n">19</span> Platform reach</a>
+    <a href="#tests"><span class="n">20</span> Test surface</a>
+    <a href="#automation"><span class="n">21</span> Automation</a>
+    <a href="#positioning"><span class="n">22</span> Market &amp; moat</a>
+    <a href="#scope"><span class="n">23</span> Scope &amp; ownership</a>
+    <a href="#limits"><span class="n">24</span> What it cannot do</a>
+  </nav>
+</aside>
+
+<main>
+
+<header class="masthead">
+  <p class="eyebrow">Team Syntax Squad · SIH26149 · NTRO</p>
+  <h1>Akhanda <span class="deva">अखण्ड</span></h1>
+  <p class="standfirst">A forensic erasure and recovery tool where every operation is
+  recorded in a dual-signed, witness-anchored ledger. The engineering problem is not
+  cryptography, it is <em>refusing to claim more than was actually achieved</em>, and
+  making that refusal mechanical rather than a habit.</p>
+</header>
+
+<p class="byline">
+  <span><b>Status</b> software path complete, no hardware validation</span>
+  <span><b>Tests</b> 620 Python · 12 Rust</span>
+  <span><b>Languages</b> Python 3.11+ · Rust · JavaScript</span>
+</p>
+
+<!-- ══════════════════════════════════════════════════ 01 ═══ -->
+<section id="idea">
+  <h2><span class="num">01</span> The core idea</h2>
+  <p class="section-lede">One sentence, then the machinery that makes it true.</p>
+
+  <div class="note">
+    <p><b>Existing tools sign each certificate independently.</b> That proves one document
+    was not edited. It does not prove the sequence is complete, nothing stops a record
+    being removed from the middle of a pile of individually valid PDFs, and every
+    remaining signature still checks out.</p>
+    <p>Akhanda chains operations into one append-only ledger, requires two independent
+    parties to sign the same record, holds the second key in a separate security domain,
+    and anchors the chain to a witness outside the operator's control.</p>
+  </div>
+
+  <p>Four mechanisms carry that claim, and each one exists because a specific attack
+  defeats the mechanism below it:</p>
+
+  <ul class="tight">
+    <li><b>Length-prefixed injective encoding</b>, two different records can never
+      produce identical signing bytes, so one signature can never validate two documents.</li>
+    <li><b>Hash chaining with <code>prev_hash</code></b>, an edit, a reorder, or a
+      deletion from the middle breaks the link and names the sequence number.</li>
+    <li><b>Dual signature over the same entry hash</b>, the operator alone cannot
+      produce a complete record, which is also the shape BSA §63(4) asks for.</li>
+    <li><b>An independent witness head record</b>, the operator can rebuild the entire
+      chain from entry zero and re-sign it flawlessly; the witness still disagrees.</li>
+    <li><b>A signed outcome field</b>, an operation that completed but failed its own
+      verification cannot look like a clean one, because how well it went is inside the
+      signature rather than beside it.</li>
+  </ul>
+
+  <div class="stats">
+    <div class="stat"><div class="v">7,600</div><div class="k">lines, Python src</div></div>
+    <div class="stat"><div class="v">7,000</div><div class="k">lines, tests</div></div>
+    <div class="stat"><div class="v">620</div><div class="k">tests passing</div></div>
+    <div class="stat"><div class="v">16</div><div class="k">signed fields</div></div>
+    <div class="stat"><div class="v">3</div><div class="k">verifier languages</div></div>
+    <div class="stat"><div class="v">2</div><div class="k">standards mapped</div></div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 02 ═══ -->
+<section id="tree">
+  <h2><span class="num">02</span> The repository, as it actually is</h2>
+  <p class="section-lede">Generated from the working tree, not written from memory. Every
+  line count below is <code>wc -l</code> on the file beside it.</p>
+
+  <div class="scroll">
+<pre class="mono" style="font-size:12px;line-height:1.62;margin:0;padding:20px;
+     background:var(--stock);border:1px solid var(--rule);overflow-x:auto">
+akhanda/
+├─ <b>src/</b>                          6,615 lines, the tool
+│  ├─ attestation/                 the ledger and everything that reasons about it
+│  │  ├─ core.py              524   16 signed fields, injective encoding, verify walk
+│  │  ├─ certificate ↴
+│  │  ├─ case.py              288   Merkle root over MANY device chains  §14.1
+│  │  ├─ signers.py           251   key rotation; a signer may not change silently  §14.2
+│  │  ├─ corpus.py            233   every real run pinned as a permanent case  §14.4
+│  │  ├─ toolref.py           167   tool_ref, the entry names its own build  §14.3
+│  │  ├─ keys.py              153   operator key, passphrase at rest, witness cache
+│  │  ├─ store.py             148   atomic chain + result persistence
+│  │  ├─ policy.py            143   fail-closed preflight, REFUSED records
+│  │  ├─ tiers.py             129   SOFTWARE_KEY → FULL_CUSTODY, resolved in ONE place
+│  │  └─ canonical.py          37   THE digest rule. One implementation, two callers.
+│  ├─ erasure/                     module 1 + module 2 of the problem statement
+│  │  ├─ engine.py            712   drive eraser · six-gate guard · bad-sector skip-log
+│  │  ├─ file_eraser.py       500   file &amp; folder eraser, COW-aware, verified
+│  │  └─ streams.py           221   NTFS alternate data streams, residual traces  §19.2
+│  ├─ recovery/                    module 3 of the problem statement
+│  │  ├─ engine.py            676   signature carving, confidence, extent resolvers
+│  │  └─ reassemble.py        301   CRC-chained fragment reassembly  §15
+│  ├─ certificate/generator.py 694  NIST 800-88 + BSA 2023 §63(4) clause map
+│  ├─ cli.py                  704   the one entry point every module is reached through
+│  ├─ witness/                 367  co-signing node + client, divergence detection
+│  ├─ presence/client.py       175  ESP32 two-phase binding, DESIGNED, never run
+│  └─ anchor/ots.py            185  OpenTimestamps, RFC 6962 Merkle, CVE-2012-2459 fix
+│
+├─ <b>tests/</b>                        6,184 lines, 507 tests, ~94% of src by volume
+│  ├─ test_attestation.py           injectivity, delimiter injection, the canary
+│  ├─ test_three_implementations.py Python ≡ JavaScript ≡ Rust, byte for byte
+│  ├─ test_device_guard.py          29 tests; both halves, refused AND permitted
+│  ├─ test_reassembly.py            CFReDS L2 byte-identical, with the control
+│  ├─ test_recovery_nist.py         per-level scoreboard, never blended
+│  ├─ test_streams.py               the gap demonstrated, then closed
+│  ├─ test_signer_continuity.py     substitution caught; chain still verifies
+│  ├─ test_self_attestation.py      the digest moves when the code moves
+│  ├─ test_corpus.py                unavailable ≠ pass; drift ≠ verdict
+│  ├─ test_scale.py                 the scorer must be able to fail
+│  └─ …16 more                      fail-closed, custody, anchor, certificate, e2e
+│
+├─ <b>rust/akhanda-verify/</b>            653 lines, the independent verifier
+│  └─ src/lib.rs · main.rs          #![forbid(unsafe_code)], no network, no config
+│
+├─ <b>console/index.html</b>              the third implementation, in browser JavaScript
+│
+├─ <b>scripts/</b>
+│  ├─ adversarial_audit.py          attacks this project's own 8 claims
+│  ├─ stress_scale.py               GB-scale carve with planted ground truth
+│  ├─ stress_forensic.py            5-stage run over real CFReDS images
+│  ├─ pin_corpus.py                 pin real observations · replay the gate
+│  ├─ benchmark_chain.py            500-entry verification + tamper localisation
+│  ├─ demo_tamper.py                the three-act stage demo, no hardware
+│  └─ prep/                         hardware runbooks, each capturing its own evidence
+│     ├─ lb03_setup.ps1 · lb03_verify.ps1    witness account boundary
+│     ├─ g1_handshake.py                     live two-laptop dual signature
+│     ├─ g24_link_check.py                   the link, tested before the day
+│     ├─ g2b_usb_wipe.md                     virtual device AND one real stick
+│     └─ fs_matrix.ps1                       NTFS/FAT32/exFAT/ReFS on .vhdx files
+│
+├─ <b>corpus/carve/</b>                   5 pinned NIST cases the tool must keep reproducing
+├─ <b>evidence/</b>                       recorded runs, audit, scale, benchmark, forensic
+├─ <b>docs/</b>                           this file, BUILD_LOG, cosigner + hardware setup
+└─ <b>firmware/esp32/presence.ino</b>     written, never flashed
+</pre>
+  </div>
+
+  <div class="stats" style="margin-top:1.4rem">
+    <div class="stat"><div class="v">6,615</div><div class="k">lines, src</div></div>
+    <div class="stat"><div class="v">6,184</div><div class="k">lines, tests</div></div>
+    <div class="stat"><div class="v">653</div><div class="k">lines, Rust</div></div>
+    <div class="stat"><div class="v">507</div><div class="k">Python tests</div></div>
+    <div class="stat"><div class="v">12</div><div class="k">Rust tests</div></div>
+    <div class="stat"><div class="v">3</div><div class="k">verifier languages</div></div>
+  </div>
+
+  <p style="margin-top:1.3rem"><b>Tests are 94% of source by volume, and that ratio is the
+  design.</b> A forensic tool&rsquo;s claims are only worth what its tests can defend, and
+  §20 covers what those tests are actually built to catch &mdash; including the two that
+  were found guarding nothing.</p>
+
+  <h3>2.1&ensp;What is left</h3>
+  <p>Ordered by what blocks what. Everything above the rule is <b>software complete and
+  unproven on hardware</b>; nothing below it can start until a device exists.</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Outstanding</th><th>Blocked on</th><th>Ready</th></tr></thead>
+      <tbody>
+        <tr><td><b>LB-03</b>, witness key unreadable from the operator account</td>
+          <td>an elevated shell + a second Windows login</td>
+          <td class="mono">lb03_setup.ps1 · lb03_verify.ps1</td></tr>
+        <tr><td><b>G1</b>, one dual-signed entry on real hardware</td>
+          <td>the second laptop and a working link</td>
+          <td class="mono">g1_handshake.py</td></tr>
+        <tr><td><b>G24</b>, the operator↔witness link on the day&rsquo;s transport</td>
+          <td>a USB-Ethernet adapter</td>
+          <td class="mono">g24_link_check.py</td></tr>
+        <tr><td><b>G2b</b>, one real USB stick wiped end to end</td>
+          <td>a sacrificial stick</td>
+          <td class="mono">g2b_usb_wipe.md</td></tr>
+        <tr><td>Filesystem matrix, NTFS / FAT32 / exFAT / ReFS</td>
+          <td>an elevated shell only. <b>No physical disk.</b></td>
+          <td class="mono">fs_matrix.ps1</td></tr>
+        <tr><td><b>G5</b>, one real OpenTimestamps receipt</td>
+          <td>one window of internet</td>
+          <td class="mono">cli anchor</td></tr>
+        <tr class="accentrow"><td>Supply-chain hardening, bandit, pip-audit, cargo audit</td>
+          <td>nothing. Runnable now.</td><td>not started</td></tr>
+        <tr class="accentrow"><td>User manuals, a named PS deliverable</td>
+          <td>nothing. Runnable now.</td><td>not started</td></tr>
+        <tr class="accentrow"><td>Operator dashboard (the PS asks for a UI)</td>
+          <td>nothing blocking; owner is the frontend role</td>
+          <td>mock-backed only</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note caution">
+    <p style="margin:0"><b>The honest summary of this table.</b> Six of the nine rows are
+    waiting on a physical thing, and every one of those six already has a script that
+    captures its own evidence when it runs &mdash; the work is done, the run is not. The
+    three highlighted rows are blocked on nothing at all, which makes them the next
+    work rather than the hardest.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 02 ═══ -->
+<section id="boundaries">
+  <h2><span class="num">03</span> Trust boundaries</h2>
+  <p class="section-lede">The whole design is one question: which machine can forge which
+  claim? Everything else follows from the answer.</p>
+
+  <figure>
+    <div class="fig-frame">
+      <svg viewBox="0 0 860 400" role="img" aria-label="Three trust domains, workstation, co-signer, and external anchor, showing that the workstation can rewrite its own chain but cannot forge the co-signer's independent head record or the external timestamp.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+          <marker id="arA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/>
+          </marker>
+        </defs>
+
+        <!-- domain 1: operator -->
+        <rect x="14" y="40" width="256" height="330" rx="4" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="5 4" opacity=".5"/>
+        <text x="26" y="30" font-size="11" font-weight="700" letter-spacing="1.4" fill="currentColor">DOMAIN A, OPERATOR</text>
+
+        <rect x="36" y="62" width="212" height="46" rx="3" fill="var(--stock)" stroke="currentColor"/>
+        <text x="142" y="82" font-size="12.5" font-weight="600" text-anchor="middle" fill="currentColor">Workstation</text>
+        <text x="142" y="98" font-size="10.5" text-anchor="middle" fill="var(--muted)">erase · carve · chain · certificate</text>
+
+        <rect x="36" y="124" width="212" height="40" rx="3" fill="none" stroke="currentColor"/>
+        <text x="142" y="142" font-size="11.5" text-anchor="middle" fill="currentColor">operator key (software)</text>
+        <text x="142" y="156" font-size="10" text-anchor="middle" fill="var(--muted)">~/.akhanda/operator_key.pem</text>
+
+        <rect x="36" y="180" width="212" height="40" rx="3" fill="none" stroke="currentColor"/>
+        <text x="142" y="198" font-size="11.5" text-anchor="middle" fill="currentColor">chain.json + results/</text>
+        <text x="142" y="212" font-size="10" text-anchor="middle" fill="var(--muted)">fully rewritable by the operator</text>
+
+        <rect x="36" y="248" width="212" height="52" rx="3" fill="var(--oxide-wash)" stroke="var(--oxide)"/>
+        <text x="142" y="267" font-size="10.5" font-weight="700" text-anchor="middle" fill="var(--oxide)" letter-spacing=".7">CAN FORGE</text>
+        <text x="142" y="283" font-size="10.5" text-anchor="middle" fill="var(--oxide)">every entry, every hash,</text>
+        <text x="142" y="295" font-size="10.5" text-anchor="middle" fill="var(--oxide)">its own signatures</text>
+
+        <rect x="36" y="312" width="212" height="42" rx="3" fill="var(--seal-wash)" stroke="var(--seal)"/>
+        <text x="142" y="330" font-size="10.5" font-weight="700" text-anchor="middle" fill="var(--seal)" letter-spacing=".7">CANNOT FORGE</text>
+        <text x="142" y="345" font-size="10.5" text-anchor="middle" fill="var(--seal)">anything to the right of this line</text>
+
+        <!-- domain 2: co-signer -->
+        <rect x="316" y="40" width="238" height="330" rx="4" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="5 4" opacity=".5"/>
+        <text x="328" y="30" font-size="11" font-weight="700" letter-spacing="1.4" fill="currentColor">DOMAIN B, CO-SIGNER</text>
+
+        <rect x="336" y="62" width="198" height="46" rx="3" fill="var(--accent-wash)" stroke="var(--accent)"/>
+        <text x="435" y="82" font-size="12.5" font-weight="600" text-anchor="middle" fill="var(--accent)">Witness node</text>
+        <text x="435" y="98" font-size="10.5" text-anchor="middle" fill="var(--accent)">separate security domain</text>
+
+        <rect x="336" y="124" width="198" height="40" rx="3" fill="none" stroke="currentColor"/>
+        <text x="435" y="142" font-size="11.5" text-anchor="middle" fill="currentColor">concurring key</text>
+        <text x="435" y="156" font-size="10" text-anchor="middle" fill="var(--muted)">never leaves this domain</text>
+
+        <rect x="336" y="180" width="198" height="40" rx="3" fill="none" stroke="currentColor"/>
+        <text x="435" y="198" font-size="11.5" text-anchor="middle" fill="currentColor">own head record</text>
+        <text x="435" y="212" font-size="10" text-anchor="middle" fill="var(--muted)">append-only, published</text>
+
+        <rect x="336" y="248" width="198" height="106" rx="3" fill="var(--seal-wash)" stroke="var(--seal)"/>
+        <text x="435" y="270" font-size="10.5" font-weight="700" text-anchor="middle" fill="var(--seal)" letter-spacing=".7">THE ONE PROPERTY</text>
+        <text x="435" y="290" font-size="10.5" text-anchor="middle" fill="var(--seal)">a rewritten chain no longer</text>
+        <text x="435" y="304" font-size="10.5" text-anchor="middle" fill="var(--seal)">reproduces this head , </text>
+        <text x="435" y="318" font-size="10.5" text-anchor="middle" fill="var(--seal)">and the operator cannot</text>
+        <text x="435" y="332" font-size="10.5" text-anchor="middle" fill="var(--seal)">write here to fix that</text>
+
+        <!-- domain 3: anchor -->
+        <rect x="600" y="40" width="246" height="330" rx="4" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="5 4" opacity=".5"/>
+        <text x="612" y="30" font-size="11" font-weight="700" letter-spacing="1.4" fill="currentColor">DOMAIN C, EXTERNAL</text>
+
+        <rect x="620" y="62" width="206" height="46" rx="3" fill="var(--stock)" stroke="currentColor"/>
+        <text x="723" y="82" font-size="12.5" font-weight="600" text-anchor="middle" fill="currentColor">OpenTimestamps</text>
+        <text x="723" y="98" font-size="10.5" text-anchor="middle" fill="var(--muted)">Bitcoin calendar servers</text>
+
+        <rect x="620" y="124" width="206" height="40" rx="3" fill="none" stroke="currentColor"/>
+        <text x="723" y="142" font-size="11.5" text-anchor="middle" fill="currentColor">Merkle root of the chain</text>
+        <text x="723" y="156" font-size="10" text-anchor="middle" fill="var(--muted)">RFC 6962, domain-separated</text>
+
+        <rect x="620" y="180" width="206" height="40" rx="3" fill="none" stroke="currentColor"/>
+        <text x="723" y="198" font-size="11.5" text-anchor="middle" fill="currentColor">block height</text>
+        <text x="723" y="212" font-size="10" text-anchor="middle" fill="var(--muted)">nobody in A or B controls it</text>
+
+        <rect x="620" y="248" width="206" height="106" rx="3" fill="var(--caution-wash)" stroke="var(--caution)"/>
+        <text x="723" y="270" font-size="10.5" font-weight="700" text-anchor="middle" fill="var(--caution)" letter-spacing=".7">HONEST LIMIT</text>
+        <text x="723" y="290" font-size="10.5" text-anchor="middle" fill="var(--caution)">this fixes a time, not a</text>
+        <text x="723" y="304" font-size="10.5" text-anchor="middle" fill="var(--caution)">legal status. Not recognised</text>
+        <text x="723" y="318" font-size="10.5" text-anchor="middle" fill="var(--caution)">by Indian courts; the claim</text>
+        <text x="723" y="332" font-size="10.5" text-anchor="middle" fill="var(--caution)">stops at "same class".</text>
+
+        <!-- flows -->
+        <line x1="248" y1="85" x2="330" y2="85" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arA)"/>
+        <text x="289" y="76" font-size="9.5" text-anchor="middle" fill="var(--accent)">entry_hash</text>
+        <line x1="330" y1="105" x2="250" y2="105" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arA)"/>
+        <text x="289" y="120" font-size="9.5" text-anchor="middle" fill="var(--accent)">concur_sig + head</text>
+
+        <line x1="534" y1="95" x2="614" y2="95" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar)"/>
+        <text x="574" y="86" font-size="9.5" text-anchor="middle" fill="currentColor">merkle root</text>
+      </svg>
+    </div>
+    <figcaption><b>The forgery question, answered per domain.</b> Domain A can rewrite
+    anything it holds, that is assumed, not defended against. The design's entire value
+    is that a rewrite in A becomes visible from B, and that B is somewhere A cannot write.
+    Domain C fixes a time that neither A nor B can move.</figcaption>
+  </figure>
+
+  <div class="note caution">
+    <p><b>Say the threat model out loud.</b> This defends against an operator who alters
+    the record <i>after the fact</i>, and against a remote attacker who compromises one
+    domain. It does not defend against an insider who controls both domains at the moment
+    of writing. Separation is only as real as the administrative boundary between the two,
+    which is a deployment property, not a code property.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 03 ═══ -->
+<section id="lifecycle">
+  <h2><span class="num">04</span> Operation lifecycle</h2>
+  <p class="section-lede">This is a genuine ordered sequence, and the order is the security
+  property, which is why these steps are numbered and nothing else on this page is.</p>
+
+  <ol class="steps">
+    <li class="gate"><b>Preflight, the fail-closed gate</b>
+      <span>Cheap probes: does the co-signer answer its head endpoint, does the presence
+      device enumerate? No button press is consumed here. If a component you asked for is
+      silent, stop now.</span></li>
+    <li class="gate"><b>Refusal is recorded, not swallowed</b>
+      <span>A blocked attempt is appended as a <code>REFUSED</code> / <code>NotPerformed</code>
+      entry with its own persisted record. Unplugging the co-signer now logs the attempt
+      instead of hiding it. Exit code 3.</span></li>
+    <li class="pnr"><b>The operation runs, point of no return</b>
+      <span>Overwrite and read-back sampling, or a signature carve. For an erase, nothing
+      after this line can undo what just happened.</span></li>
+    <li><b>Result record is built</b>
+      <span>Every sampled offset, both digests per sample, the honest <code>method_used</code>,
+      the <code>verified</code> flag, the media note. This is the document, not a summary
+      of it.</span></li>
+    <li><b>Presence is requested</b>
+      <span>A human presses a physical control on a separate device. Absence at this point
+      lowers the tier; it never fabricates one.</span></li>
+    <li><b>Entry is built and operator-signed</b>
+      <span>15 length-prefixed fields behind a domain tag, SHA-256, Ed25519. The tier, the
+      presence reference, and the <code>outcome</code> are all <i>inside</i> the preimage,
+      so none of them can be attached or upgraded afterwards.</span></li>
+    <li><b>Co-signature over the same hash</b>
+      <span>The witness signs the identical <code>entry_hash</code> and extends its own
+      independent head record. Both come back and are attached.</span></li>
+    <li><b>Degradation check</b>
+      <span>If preflight passed but a component died mid-operation, the entry is recorded
+      at the tier actually reached and flagged <code>DEGRADED</code>. This is the residual
+      window, and it is announced rather than hidden.</span></li>
+    <li><b>Record then chain, in that order</b>
+      <span>The result file is written before the chain is saved. A crash between them
+      leaves an orphan record, harmless. The reverse order would leave an entry pointing
+      at evidence that was never written.</span></li>
+  </ol>
+
+  <div class="note">
+    <p><b>Why the preflight has to be first.</b> An erase is irreversible. Checking whether
+    you were permitted to do it <i>after</i> doing it is not a check. The window between
+    step 1 and step 7 cannot be eliminated by any tool that destroys data, it is narrowed
+    to a single operation, and step 8 states its size instead of implying it is closed.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 04 ═══ -->
+<section id="tiers">
+  <h2><span class="num">05</span> Custody tiers</h2>
+  <p class="section-lede">The ladder is additive: each rung is the one below it plus one
+  independent party. A tier is computed from what actually answered, never from what was
+  intended.</p>
+
+  <figure>
+    <div class="fig-frame">
+      <svg viewBox="0 0 800 250" role="img" aria-label="Four custody tiers as an additive ladder: SOFTWARE_KEY, plus presence gives PRESENCE_CONFIRMED, plus witness gives WITNESS_COSIGNED, both gives FULL_CUSTODY.">
+        <defs>
+          <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <rect x="10" y="150" width="172" height="66" rx="3" fill="var(--stock)" stroke="currentColor"/>
+        <text x="96" y="172" font-size="11.5" font-weight="700" text-anchor="middle" fill="currentColor">SOFTWARE_KEY</text>
+        <text x="96" y="189" font-size="10" text-anchor="middle" fill="var(--muted)">one key, operator's</text>
+        <text x="96" y="202" font-size="10" text-anchor="middle" fill="var(--muted)">own machine</text>
+
+        <rect x="212" y="150" width="172" height="66" rx="3" fill="var(--stock)" stroke="currentColor"/>
+        <text x="298" y="172" font-size="11.5" font-weight="700" text-anchor="middle" fill="currentColor">PRESENCE_CONFIRMED</text>
+        <text x="298" y="189" font-size="10" text-anchor="middle" fill="var(--muted)">+ a human pressed a</text>
+        <text x="298" y="202" font-size="10" text-anchor="middle" fill="var(--muted)">control on another device</text>
+
+        <rect x="414" y="150" width="172" height="66" rx="3" fill="var(--accent-wash)" stroke="var(--accent)"/>
+        <text x="500" y="172" font-size="11.5" font-weight="700" text-anchor="middle" fill="var(--accent)">WITNESS_COSIGNED</text>
+        <text x="500" y="189" font-size="10" text-anchor="middle" fill="var(--accent)">+ second key, separate</text>
+        <text x="500" y="202" font-size="10" text-anchor="middle" fill="var(--accent)">domain, own head record</text>
+
+        <rect x="616" y="150" width="172" height="66" rx="3" fill="var(--seal-wash)" stroke="var(--seal)"/>
+        <text x="702" y="172" font-size="11.5" font-weight="700" text-anchor="middle" fill="var(--seal)">FULL_CUSTODY</text>
+        <text x="702" y="189" font-size="10" text-anchor="middle" fill="var(--seal)">+ both of the above</text>
+        <text x="702" y="202" font-size="10" text-anchor="middle" fill="var(--seal)">on the same entry</text>
+
+        <line x1="184" y1="183" x2="208" y2="183" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar2)"/>
+        <line x1="386" y1="183" x2="410" y2="183" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar2)"/>
+        <line x1="588" y1="183" x2="612" y2="183" stroke="currentColor" stroke-width="1.4" marker-end="url(#ar2)"/>
+
+        <text x="196" y="140" font-size="9.5" text-anchor="middle" fill="var(--muted)">+ presence</text>
+        <text x="398" y="140" font-size="9.5" text-anchor="middle" fill="var(--muted)">+ witness</text>
+        <text x="600" y="140" font-size="9.5" text-anchor="middle" fill="var(--muted)">+ presence</text>
+
+        <!-- rules above -->
+        <rect x="10" y="24" width="778" height="42" rx="3" fill="var(--accent-wash)" stroke="var(--accent)"/>
+        <text x="24" y="42" font-size="11" font-weight="700" fill="var(--accent)" letter-spacing=".6">RULE 1, A tier is resolved once, from facts</text>
+        <text x="24" y="57" font-size="10.5" fill="var(--accent)">tiers.resolve(presence_confirmed, witness_cosigned) is the only place a tier is set. Callers pass what happened, never what they hoped for.</text>
+
+        <rect x="10" y="78" width="778" height="42" rx="3" fill="var(--caution-wash)" stroke="var(--caution)"/>
+        <text x="24" y="96" font-size="11" font-weight="700" fill="var(--caution)" letter-spacing=".6">RULE 2, A chain is quoted at its WEAKEST entry</text>
+        <text x="24" y="111" font-size="10.5" fill="var(--caution)">tiers.lowest() drives the certificate. Quoting the best tier would let one strong entry launder a weak one sitting beside it.</text>
+      </svg>
+    </div>
+    <figcaption><b>Additive, and computed rather than declared.</b> The two rules above the
+    ladder are what stop a tier from being aspirational, one function decides it from
+    observed facts, and the certificate quotes the floor, not the ceiling.</figcaption>
+  </figure>
+
+  <p>All four fields that carry this, <code>custody_tier</code>,
+  <code>presence_ref</code>, <code>operator_key_id</code>, and <code>method</code>, sit
+  inside the signed preimage. Editing any of them on a stored entry breaks its hash, which
+  is asserted directly in <code>tests/test_custody.py</code>.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 05 ═══ -->
+<section id="failclosed">
+  <h2><span class="num">06</span> Fail-closed policy</h2>
+  <p class="section-lede">The single most consequential behaviour in the tool, and the one
+  that recently changed.</p>
+
+  <div class="grid-2">
+    <div class="label-card">
+      <div class="label-strip"><span class="id">BEFORE</span><span>silent downgrade</span>
+        <span class="badge b-none">removed</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:.5rem">Co-signer unreachable → record a weaker tier, carry
+        on, exit 0.</p>
+        <p style="margin-bottom:0;font-size:.875rem;color:var(--muted)">An operator who
+        wanted an operation off the record unplugged the co-signer. The tool downgraded
+        itself without complaint and the label went into a ledger nobody reads before the
+        fact. One-second trigger, no trace.</p>
+      </div>
+    </div>
+    <div class="label-card">
+      <div class="label-strip"><span class="id">NOW</span><span>asking makes it required</span>
+        <span class="badge b-built">built</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:.5rem">Co-signer unreachable → block before the operation,
+        append a <code>REFUSED</code> entry, exit 3.</p>
+        <p style="margin-bottom:0;font-size:.875rem;color:var(--muted)">Opting out
+        explicitly (<code>--no-witness</code>) still degrades cleanly and records the
+        honest tier. <code>--allow-degraded</code> is the deliberate escape hatch. There is
+        no path where a requested component vanishes and the tool proceeds quietly.</p>
+      </div>
+    </div>
+  </div>
+
+  <h4>The three properties, each separately tested</h4>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Property</th><th>What it means</th><th>How it is proven</th></tr></thead>
+      <tbody>
+        <tr><td><b>Blocked</b></td><td>The operation does not run.</td>
+          <td class="mono">exit code 3, "preflight: BLOCKED"</td></tr>
+        <tr><td><b>Recorded</b></td><td>The blocked attempt is in the chain.</td>
+          <td class="mono">op_type REFUSED, method NotPerformed</td></tr>
+        <tr><td><b>Untouched</b></td><td>The target is byte-identical afterwards.</td>
+          <td class="mono">target.read_bytes() == original</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note caution">
+    <p><b>The residual window is real and stated.</b> Preflight confirms every required
+    component is answering <i>before</i> an irreversible operation begins. It cannot cover a
+    component that dies during the operation itself, by then the data is gone. That case
+    is recorded at the tier actually reached and flagged <code>DEGRADED</code>. Every tool
+    that performs an irreversible action has this window; this one narrows it to a single
+    operation and reports its size rather than implying it is closed.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 06 ═══ -->
+<section id="outcome">
+  <h2><span class="num">07</span> The signed outcome</h2>
+  <p class="section-lede">The fifteenth field, and the one that took a format break to
+  add. It answers the question a forensics judge asks second.</p>
+
+  <div class="note deny">
+    <p><b>The defect it closes.</b> An erase whose read-back sampling <i>failed</i> used
+    to produce a ledger entry indistinguishable from a clean one. <code>cli show</code>
+    printed the same <code>ERASE / Clear</code> line either way, and the certificate
+    summarised it as a success. The <code>verified</code> flag lived only in the result
+    record &mdash; hash-committed and therefore tamper-evident, but <i>not in the
+    entry</i>, and the entry is what a human reads and a certificate quotes.</p>
+    <p style="margin-bottom:0">A tool whose entire pitch is that it refuses to overclaim
+    was quietly overclaiming in its own ledger.</p>
+  </div>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Value</th><th>Means</th><th>Produced by</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">VERIFIED</td><td>Completed, and its own verification passed.</td>
+          <td>read-back sampling matched the written pattern</td></tr>
+        <tr><td class="mono">UNVERIFIED</td><td>Completed, but the check did <b>not</b> pass.</td>
+          <td>sampling mismatch, or a filesystem that could not be identified</td></tr>
+        <tr><td class="mono">PARTIAL</td><td>Completed with known incompleteness.</td>
+          <td>a carve with a guessed end boundary; a copy-on-write filesystem</td></tr>
+        <tr><td class="mono">NOT_PERFORMED</td><td>Nothing ran.</td>
+          <td>a <code>REFUSED</code> entry from the fail-closed preflight</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>Why it cost a format break, and why that was the moment to take it</h4>
+  <p>Adding a field to <code>HASHED_FIELDS</code> changes the signing preimage, so every
+  chain written under the old format stops verifying. That is correct and intended &mdash;
+  a migration that rewrites signed entries is precisely the thing this tool exists to
+  detect. The window for a free break closes the moment a chain leaves the building, and
+  it had not yet.</p>
+
+  <p>The field list is read by five places, and changing it in four is a silent break:</p>
+
+  <figure>
+    <div class="fig-frame">
+      <svg viewBox="0 0 780 220" role="img" aria-label="HASHED_FIELDS is read by the Python encoder, the Python verifier, the certificate generator, the console JavaScript, and the Rust verifier. The three-implementation test is the canary that fails if any of them drift apart.">
+        <defs>
+          <marker id="ar5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <rect x="14" y="86" width="176" height="48" rx="3" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1.4"/>
+        <text x="102" y="106" font-size="11.5" font-weight="700" text-anchor="middle" fill="var(--accent)">HASHED_FIELDS</text>
+        <text x="102" y="122" font-size="10" text-anchor="middle" fill="var(--accent)">core.py &mdash; the contract</text>
+
+        <rect x="290" y="10" width="200" height="34" rx="3" fill="var(--stock)" stroke="currentColor"/>
+        <text x="390" y="31" font-size="10.5" text-anchor="middle" fill="currentColor">encode_entry / entry_hash</text>
+        <rect x="290" y="52" width="200" height="34" rx="3" fill="var(--stock)" stroke="currentColor"/>
+        <text x="390" y="73" font-size="10.5" text-anchor="middle" fill="currentColor">verify_chain_report</text>
+        <rect x="290" y="94" width="200" height="34" rx="3" fill="var(--stock)" stroke="currentColor"/>
+        <text x="390" y="115" font-size="10.5" text-anchor="middle" fill="currentColor">certificate/generator.py</text>
+        <rect x="290" y="136" width="200" height="34" rx="3" fill="var(--seal-wash)" stroke="var(--seal)"/>
+        <text x="390" y="157" font-size="10.5" text-anchor="middle" fill="var(--seal)">console/index.html &mdash; JS</text>
+        <rect x="290" y="178" width="200" height="34" rx="3" fill="var(--seal-wash)" stroke="var(--seal)"/>
+        <text x="390" y="199" font-size="10.5" text-anchor="middle" fill="var(--seal)">rust/akhanda-verify &mdash; Rust</text>
+
+        <line x1="192" y1="100" x2="286" y2="28" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar5)" opacity=".6"/>
+        <line x1="192" y1="104" x2="286" y2="70" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar5)" opacity=".6"/>
+        <line x1="192" y1="110" x2="286" y2="111" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar5)" opacity=".6"/>
+        <line x1="192" y1="116" x2="286" y2="153" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar5)" opacity=".6"/>
+        <line x1="192" y1="122" x2="286" y2="195" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar5)" opacity=".6"/>
+
+        <rect x="530" y="136" width="236" height="76" rx="3" fill="var(--seal-wash)" stroke="var(--seal)" stroke-width="1.4"/>
+        <text x="648" y="158" font-size="10.5" font-weight="700" text-anchor="middle" fill="var(--seal)" letter-spacing=".6">THE CANARY</text>
+        <text x="648" y="176" font-size="10" text-anchor="middle" fill="var(--seal)">test_three_implementations.py</text>
+        <text x="648" y="190" font-size="10" text-anchor="middle" fill="var(--seal)">fails the moment any two</text>
+        <text x="648" y="203" font-size="10" text-anchor="middle" fill="var(--seal)">of the five drift apart</text>
+        <line x1="494" y1="153" x2="526" y2="162" stroke="var(--seal)" stroke-width="1.3" marker-end="url(#ar5)"/>
+        <line x1="494" y1="195" x2="526" y2="186" stroke="var(--seal)" stroke-width="1.3" marker-end="url(#ar5)"/>
+      </svg>
+    </div>
+    <figcaption><b>Five readers, one contract.</b> The two green boxes are separate
+    implementations in other languages; the canary runs all three and compares digests, so
+    a field added in Python and forgotten in JavaScript or Rust fails the build rather
+    than producing a chain only one implementation can read.</figcaption>
+  </figure>
+
+  <p>The verifier also refuses a chain written under a different
+  <code>ENTRY_VERSION</code> rather than checking it against the wrong field list.
+  Mis-verifying quietly is worse than stopping.</p>
+</section>
+
+<section id="three">
+  <h2><span class="num">08</span> Three verifiers, one contract</h2>
+  <p class="section-lede">The verification path is written three times, in three
+  languages, on purpose.</p>
+
+  <p>Two implementations written by the same author can share a misreading of the
+  specification &mdash; they agree, and they are both wrong together. A third, in a
+  language with different string, integer, and byte semantics, is the cheapest way to
+  catch that class of error. It is also the only test here that would fail if the
+  <i>specification</i> were wrong rather than the code.</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Implementation</th><th class="num">LOC</th><th>Runs</th><th>Verifies</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">src/attestation/core.py</td><td class="num">408</td>
+          <td>the tool itself</td><td>structure + operator + concurring signatures</td></tr>
+        <tr><td class="mono">console/index.html</td><td class="num">344</td>
+          <td>the viewer's browser</td><td>structure only &mdash; and says so on the page</td></tr>
+        <tr><td class="mono">rust/akhanda-verify</td><td class="num">568</td>
+          <td>a standalone binary</td><td>structure + both signature layers</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>Why the third one is Rust</h4>
+  <ul class="tight">
+    <li><b>Memory safety is compiler-enforced, not asserted.</b>
+      <code>#![forbid(unsafe_code)]</code> sits on both crate roots &mdash; production code
+      containing <code>unsafe</code> does not build. For a forensic tool the verifier is
+      the component a third party runs on evidence they did not produce.</li>
+    <li><b>No dependency on this project at runtime.</b> One binary, one JSON file, one
+      public key. No network, no configuration, no environment. A verifier that needs a
+      server stops working when the server does, and the point is that someone can check
+      the evidence years later.</li>
+    <li><b>Different semantics catch different bugs.</b> Rust's explicit integer widths and
+      byte-level string handling make a length-prefix mistake fail loudly where a
+      dynamically typed language can paper over it.</li>
+    <li><b>The exit code is the interface.</b> 0 verified, 1 broken, 2 usage &mdash; usable
+      directly in a script or in CI.</li>
+  </ul>
+
+  <div class="note">
+    <p style="margin-bottom:0"><b>Honest scope.</b> Rust is used for the verifier and
+    nothing else. The erase and recovery paths stay in Python, where they call platform
+    tools and are easier for the team to read and defend. Adding Rust where it does not
+    earn its place would be scope, not security. <code>cargo test</code> and
+    <code>cargo clippy -- -D warnings</code> both run clean.</p>
+  </div>
+</section>
+
+<section id="validation">
+  <h2><span class="num">09</span> NIST validation</h2>
+  <p class="section-lede">Measured against the corpus NIST publishes so forensic tools can
+  be checked rather than trusted. Re-runnable, byte-exact, and reported per difficulty
+  level because a single blended figure would hide the thing that matters.</p>
+
+  <div class="note deny">
+    <p><b>What the first measurement found.</b> The carver had only ever been tested on
+    images this project generated, and it passed everything. Run against NIST CFReDS
+    <code>L4_Graphic.dd</code> it reported <b>50 artefacts where 9 files exist</b>, matched
+    exactly one byte-for-byte, and flagged <b>none</b> as uncertain, while printing
+    <i>"every artifact had a located footer"</i>.</p>
+    <p style="margin-bottom:0"><b>Two percent precision, stated with total
+    confidence</b>, in the one project whose thesis is that it does not overclaim.</p>
+  </div>
+
+  <h4>Scoring rules, chosen to be strict</h4>
+  <ul class="tight">
+    <li>A hit is a <b>byte-identical SHA-256 match</b> against a NIST source file. Not
+      "looks like a JPEG", not "opens in a viewer". The same bytes, or it does not count.</li>
+    <li><b>Precision</b> = exact matches ÷ artefacts reported. Every false positive costs.</li>
+    <li><b>Recall</b> = source files recovered ÷ source files <i>contiguously present in
+      that image</i>. Dividing by the whole corpus marked the tool down for files that
+      were never in the image, that was an error in the measurement, since corrected.</li>
+    <li>Where nothing is contiguous, recall is <b>n/a</b>, never 0%: there was no intact
+      file to recover.</li>
+  </ul>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>NIST level</th><th class="num">present</th><th class="num">reported</th>
+        <th class="num">exact</th><th class="num">precision</th><th class="num">recall</th>
+        <th>what the level tests</th></tr></thead>
+      <tbody>
+        <tr><td class="mono"><b>L0</b></td><td class="num">6</td><td class="num">6</td>
+          <td class="num"><b>6</b></td><td class="num"><b>100.0%</b></td>
+          <td class="num"><b>100.0%</b></td>
+          <td>non-fragmented, <b>the case signature carving is for</b></td></tr>
+        <tr><td class="mono"><b>L1</b></td><td class="num">6</td><td class="num">6</td>
+          <td class="num"><b>6</b></td><td class="num"><b>100.0%</b></td>
+          <td class="num"><b>100.0%</b></td><td>sequential fragmentation</td></tr>
+        <tr><td class="mono">L2</td><td class="num">0</td><td class="num">3</td>
+          <td class="num">0</td><td class="num">0%</td><td class="num">n/a</td>
+          <td>non-sequential fragmentation, nothing contiguous exists</td></tr>
+        <tr><td class="mono">L3</td><td class="num">0</td><td class="num">2</td>
+          <td class="num">0</td><td class="num">0%</td><td class="num">n/a</td>
+          <td>missing fragments, nothing contiguous exists</td></tr>
+        <tr><td class="mono">L4</td><td class="num">3</td><td class="num">5</td>
+          <td class="num">2</td><td class="num">40.0%</td><td class="num">66.7%</td>
+          <td>nested files</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p style="margin-top:1rem">Throughput ~130 MB/s. Every L0 hit is HIGH confidence, meaning
+  the extent came from the file's own structure rather than a footer search or a size cap.</p>
+
+  <h4>What closed the gap: three formats had shortcut extent logic</h4>
+  <p>Every miss traced to one cause, the carve began at exactly the right offset and
+  <b>ended at the wrong byte</b>, so the digest never matched. The starts were never the
+  problem; the ends were.</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Format</th><th>The shortcut</th><th>The real logic</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">TIFF</td><td>"no end marker" → size cap, LOW confidence</td>
+          <td>Walks every IFD, every external field value, and every strip and tile offset;
+            the end is the furthest byte any of them reach</td></tr>
+        <tr><td class="mono">PCX</td><td>"no end marker" → size cap, LOW confidence</td>
+          <td>Decodes the run-length stream until it has produced the byte count the header
+            declares, then accounts for the optional 769-byte VGA palette</td></tr>
+        <tr><td class="mono">GIF</td><td>Searched for the <code>00 3B</code> trailer pair , 
+            which occurs constantly inside LZW data</td>
+          <td>Walks the block structure (extensions, image descriptors, sub-block chains)
+            and <i>arrives</i> at the trailer instead of guessing at it</td></tr>
+        <tr><td class="mono">JPEG</td><td>First <code>FF D9</code> won, which belongs to
+            the EXIF thumbnail, not the photograph</td>
+          <td>Walks the segment structure, stepping over the APP1 payload whole, and scans
+            for the end only after start-of-scan</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>PCX needed a second fix for precision. Its three-byte signature is far too short to
+  stand alone, and because a run-length decoder eventually produces enough bytes from
+  <i>any</i> input, the extent walk then "succeeded" on random data and reported the
+  artefact at HIGH confidence. Enforcing the header invariants the specification actually
+  requires, reserved byte zero, even <code>bytesPerLine</code>, width consistency, DPI
+  range, zero filler, removed every remaining false positive.</p>
+
+  <div class="note">
+    <p><b>Why there is no single headline number, and why that is the honest choice.</b>
+    L2 and L3 contain no contiguous file at all. Signature carving cannot reassemble
+    non-contiguous extents, that is a property of the technique, not a defect in this
+    implementation, and it is exactly why NIST built those images. Averaging L0 and L2
+    into one figure would erase the distinction an examiner depends on. The benchmark
+    prints per level and refuses to emit a blend.</p>
+    <p style="margin-bottom:0">A tool that quotes one number across L0, L5 is telling you
+    less than it knows.</p>
+  </div>
+
+  <h4>It is automated, and it is a ratchet</h4>
+  <p><code>scripts/benchmark_carver.py</code> re-runs the whole matrix and writes
+  <code>evidence/carver_benchmark.json</code>; <code>tests/test_recovery_nist.py</code>
+  pins L0 at 100% precision, 100% recall, every hit HIGH confidence, all six formats
+  detected. A change that drops any of those fails the suite. Both <b>skip loudly</b> when
+  the corpus is absent, a test that passes because its data is missing is worse than no
+  test.</p>
+</section>
+
+<section id="software">
+  <h2><span class="num">10</span> Software: every file</h2>
+  <p class="section-lede">Twelve modules. What each one is for, what it refuses to do, and
+  how big it is.</p>
+
+  <h4>Attestation core, the ledger</h4>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>File</th><th class="num">LOC</th><th>Responsibility</th><th>The rule it enforces</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">attestation/core.py</td><td class="num">408</td>
+          <td>Entry schema, injective encoding, chain append, verification walk, <code>ChainReport</code>.</td>
+          <td>Two different records can never share signing bytes.</td></tr>
+        <tr><td class="mono">attestation/tiers.py</td><td class="num">126</td>
+          <td>The four-tier ladder; <code>resolve()</code> and <code>lowest()</code>.</td>
+          <td>A tier is computed from facts, in one place, over performed work only.</td></tr>
+        <tr><td class="mono">attestation/policy.py</td><td class="num">143</td>
+          <td>Preflight, refusal records, residual-window description.</td>
+          <td>Asking for a component makes it required.</td></tr>
+        <tr><td class="mono">attestation/canonical.py</td><td class="num">37</td>
+          <td>The single normative digest rule for result records.</td>
+          <td>One canonicalisation, never three copies of "sorted keys".</td></tr>
+        <tr><td class="mono">attestation/keys.py</td><td class="num">153</td>
+          <td>Operator key lifecycle, witness public-key cache.</td>
+          <td>Read the environment per call; verification works offline.</td></tr>
+        <tr><td class="mono">attestation/store.py</td><td class="num">148</td>
+          <td>Atomic chain persistence, result records, re-verification.</td>
+          <td>The chain never commits to a file that was discarded.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>Operations, co-signing, and output</h4>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>File</th><th class="num">LOC</th><th>Responsibility</th><th>The rule it enforces</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">erasure/engine.py</td><td class="num">373</td>
+          <td>Media probe, NIST decision tree, overwrite, read-back sampling, two-gate guard.</td>
+          <td>Records what was achieved. Never returns <code>Destroy</code>.</td></tr>
+        <tr><td class="mono">erasure/file_eraser.py</td><td class="num">466</td>
+          <td>PS module (b): files and folders. Overwrite, verify against a known
+            pattern, scrub the name, truncate, unlink. Real filesystem detection.</td>
+          <td>Verification compares to a reference. Purge is never claimed.</td></tr>
+        <tr><td class="mono">erasure/file_eraser.py</td><td class="num">466</td>
+          <td>PS module (b): files and folders. Overwrite, verify against a known
+            pattern, scrub the name, truncate, unlink. Real filesystem detection.</td>
+          <td>Verification compares to a reference. Purge is never claimed.</td></tr>
+        <tr><td class="mono">recovery/engine.py</td><td class="num">173</td>
+          <td>Signature carving for jpg, png, gif, pdf, zip; nested-span skipping.</td>
+          <td>A guessed end boundary is flagged <code>truncated</code>.</td></tr>
+        <tr><td class="mono">witness/node.py</td><td class="num">174</td>
+          <td>Co-signer service: cosign, head, pubkey, published log.</td>
+          <td>Key persists across restarts; log is append-only on disk.</td></tr>
+        <tr><td class="mono">witness/client.py</td><td class="num">154</td>
+          <td>Workstation side + <code>compare_witness_head()</code> divergence detection.</td>
+          <td>An absent witness is "not checked", never "agrees".</td></tr>
+        <tr><td class="mono">presence/client.py</td><td class="num">146</td>
+          <td>Presence handshake, device discovery, timeout, prefix mismatch rejection.</td>
+          <td>Nothing raises. Absence is a tier. Discovery never guesses at a port.</td></tr>
+        <tr><td class="mono">anchor/ots.py</td><td class="num">185</td>
+          <td>RFC 6962 Merkle, inclusion proofs, OpenTimestamps submit and verify.</td>
+          <td>Odd node promoted, never duplicated (CVE-2012-2459).</td></tr>
+        <tr><td class="mono">certificate/generator.py</td><td class="num">694</td>
+          <td>NIST + BSA certificate, clause map, generated limits block, text renderer.</td>
+          <td>Names which verification layer ran; quotes verified counts only.</td></tr>
+        <tr><td class="mono">cli.py</td><td class="num">550</td>
+          <td>init · erase · erase-files · recover · verify · certify · anchor · show.</td>
+          <td>Preflight before the destructive step, always.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>Interface and evidence</h4>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>File</th><th class="num">LOC</th><th>Responsibility</th><th>Why it matters</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">console/index.html</td><td class="num">324</td>
+          <td>Chain viewer that re-implements the encoding in JavaScript and re-hashes
+            every entry with the browser's own SHA-256.</td>
+          <td>A second implementation checking the first, the only kind of self-check
+            worth showing a judge.</td></tr>
+        <tr><td class="mono">firmware/esp32/presence.ino</td><td class="num">42</td>
+          <td>Serial handshake: <code>REQ</code> → <code>WAITING</code> → button →
+            <code>CONFIRMED</code>. <b>Written, never flashed</b> &mdash; no chain entry has
+            been produced with a device attached (G19).</td>
+          <td>Presence only, and <b>designed</b> rather than shipped. Explicitly not a key
+            store. See &sect;11.</td></tr>
+        <tr><td class="mono">scripts/demo_tamper.py</td><td class="num">139</td>
+          <td>The three-act stage demo. No hardware required.</td>
+          <td>Cannot be broken by a device failing to enumerate on stage.</td></tr>
+        <tr><td class="mono">rust/akhanda-verify</td><td class="num">568</td>
+          <td>Standalone verifier: structure plus both signature layers. No network,
+            no configuration, no runtime dependency on this project.</td>
+          <td><code>#![forbid(unsafe_code)]</code>, compiler-enforced.</td></tr>
+        <tr><td class="mono">scripts/seed_console.py</td><td class="num">72</td>
+          <td>Writes a deliberately mixed chain, some dual-signed, some not.</td>
+          <td>Forces the console to render the honest uneven case.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 07 ═══ -->
+<section id="hardware">
+  <h2><span class="num">11</span> The two ports, and what is actually behind them</h2>
+  <p class="section-lede">The design has exactly two external dependencies, and both sit
+  behind a port. That is why the implementation behind a port can change &mdash; and it
+  has changed &mdash; without the attestation core moving. This section states what is
+  behind each port <i>today</i>, at the honesty level rule&nbsp;2 requires: what has
+  actually run, not what was ordered.</p>
+  <div class="label-card" style="margin:1.1rem 0">
+    <div class="label-strip"><span class="id">SUPERSEDED</span><span>recorded, not deleted</span></div>
+    <div class="label-body">
+      <p style="margin-bottom:0">Earlier revisions of this document showed a
+      Raspberry&nbsp;Pi&nbsp;Zero&nbsp;2W co-signer and an ESP32 presence button, both
+      labelled <b>BUILT</b>. Neither is the current design, and neither had run on hardware
+      when it was labelled built. The Pi is gone &mdash; the co-signer is now a <b>separate
+      operating-system account</b>. The ESP32 firmware still exists and its serial client is
+      real code, not a stub, but no chain entry has ever been produced with a device
+      attached, so it is labelled <b>DESIGNED</b>.</p>
+    </div>
+    <div class="label-foot"><b>Why the old labels stay described</b> &mdash; a document that
+      quietly rewrites its own history is the failure mode this project exists to make
+      impossible. Correcting a claim in public costs less than being caught holding it.</div>
+  </div>
+
+  <figure>
+    <div class="fig-frame">
+      <svg viewBox="0 0 820 320" role="img" aria-label="Two ports, co-signer and presence. Behind the co-signer port a separate operating-system account is selected and its isolation is under test; a physical Raspberry Pi and a KVM guest were considered and dropped. Behind the presence port an ESP32 button is designed but has never run on hardware, and a WebAuthn authenticator is scheduled for Phase 1. The attestation core is unchanged by either choice.">
+        <defs>
+          <marker id="ar3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <rect x="290" y="16" width="240" height="52" rx="3" fill="var(--stock)" stroke="currentColor" stroke-width="1.4"/>
+        <text x="410" y="38" font-size="13" font-weight="700" text-anchor="middle" fill="currentColor">Attestation core</text>
+        <text x="410" y="55" font-size="10.5" text-anchor="middle" fill="var(--muted)">unchanged by either choice below</text>
+
+        <!-- port A -->
+        <rect x="80" y="104" width="270" height="46" rx="3" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1.4"/>
+        <text x="215" y="123" font-size="11.5" font-weight="700" text-anchor="middle" fill="var(--accent)">PORT, co-signer</text>
+        <text x="215" y="139" font-size="10" text-anchor="middle" fill="var(--accent)">cosign(seq, entry_hash) → sig + head</text>
+
+        <rect x="80" y="186" width="128" height="72" rx="3" fill="var(--seal-wash)" stroke="var(--seal)"/>
+        <text x="144" y="203" font-size="10.5" font-weight="700" text-anchor="middle" fill="var(--seal)">Separate OS account</text>
+        <text x="144" y="219" font-size="9.5" text-anchor="middle" fill="var(--seal)">HTTP, second laptop</text>
+        <text x="144" y="232" font-size="9.5" text-anchor="middle" fill="var(--seal)">key ACL&rsquo;d to witness</text>
+        <text x="144" y="252" font-size="8.5" font-weight="700" text-anchor="middle" fill="var(--seal)" letter-spacing=".6">SELECTED &middot; LB-03</text>
+
+        <rect x="222" y="186" width="128" height="72" rx="3" fill="none" stroke="var(--muted)" stroke-dasharray="2 3" opacity=".8"/>
+        <text x="286" y="203" font-size="10.5" font-weight="700" text-anchor="middle" fill="var(--muted)">Pi / KVM guest</text>
+        <text x="286" y="219" font-size="9.5" text-anchor="middle" fill="var(--muted)">considered, costed</text>
+        <text x="286" y="232" font-size="9.5" text-anchor="middle" fill="var(--muted)">one more thing to fail</text>
+        <text x="286" y="252" font-size="9" font-weight="700" text-anchor="middle" fill="var(--muted)" letter-spacing=".8">DROPPED</text>
+
+        <!-- port B -->
+        <rect x="470" y="104" width="270" height="46" rx="3" fill="var(--accent-wash)" stroke="var(--accent)" stroke-width="1.4"/>
+        <text x="605" y="123" font-size="11.5" font-weight="700" text-anchor="middle" fill="var(--accent)">PORT, presence</text>
+        <text x="605" y="139" font-size="10" text-anchor="middle" fill="var(--accent)">request_presence(pre_hash) → confirmed</text>
+
+        <rect x="470" y="186" width="128" height="72" rx="3" fill="var(--caution-wash)" stroke="var(--caution)" stroke-dasharray="4 3"/>
+        <text x="534" y="203" font-size="10.5" font-weight="700" text-anchor="middle" fill="var(--caution)">ESP32 button</text>
+        <text x="534" y="219" font-size="9.5" text-anchor="middle" fill="var(--caution)">USB serial, 115200</text>
+        <text x="534" y="232" font-size="9.5" text-anchor="middle" fill="var(--caution)">shows the pre-hash</text>
+        <text x="534" y="252" font-size="8.5" font-weight="700" text-anchor="middle" fill="var(--caution)" letter-spacing=".6">DESIGNED &middot; NOT RUN</text>
+
+        <rect x="612" y="186" width="128" height="72" rx="3" fill="var(--accent-wash)" stroke="var(--accent)" stroke-dasharray="4 3"/>
+        <text x="676" y="203" font-size="10.5" font-weight="700" text-anchor="middle" fill="var(--accent)">WebAuthn key</text>
+        <text x="676" y="219" font-size="9.5" text-anchor="middle" fill="var(--accent)">CTAP2 over USB HID</text>
+        <text x="676" y="232" font-size="9.5" text-anchor="middle" fill="var(--accent)">User Presence flag</text>
+        <text x="676" y="252" font-size="9" font-weight="700" text-anchor="middle" fill="var(--accent)" letter-spacing=".8">PHASE 1</text>
+
+        <line x1="360" y1="55" x2="230" y2="100" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar3)"/>
+        <line x1="460" y1="55" x2="590" y2="100" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar3)"/>
+        <line x1="180" y1="152" x2="150" y2="182" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar3)" opacity=".65"/>
+        <line x1="252" y1="152" x2="282" y2="182" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar3)" opacity=".65"/>
+        <line x1="570" y1="152" x2="540" y2="182" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar3)" opacity=".65"/>
+        <line x1="642" y1="152" x2="672" y2="182" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar3)" opacity=".65"/>
+
+        <rect x="80" y="278" width="660" height="30" rx="3" fill="var(--caution-wash)" stroke="var(--caution)"/>
+        <text x="410" y="297" font-size="10.5" text-anchor="middle" fill="var(--caution)">Neither presence device protects a key, and neither has run yet. Presence is a claim about a human, never about a key.</text>
+      </svg>
+    </div>
+    <figcaption><b>Two pivots have now happened, and neither reached the core.</b> A
+    co-signer is anything that answers <code>cosign()</code> from a domain the workstation
+    cannot write to; a presence device is anything that answers
+    <code>request_presence()</code> with a human in the loop. Dropping the Pi for an OS
+    account, and scheduling WebAuthn behind the ESP32, changed two adapters and zero lines of
+    <code>src/attestation/</code>. That is what the port abstraction was claiming, and it has
+    now been tested by events rather than asserted.</figcaption>
+  </figure>
+
+  <div class="grid-2">
+    <div class="label-card">
+      <div class="label-strip"><span class="id">CO-SIGNER</span><span>what it defends against</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:.5rem"><b>Separate OS account</b>, selected. The witness
+        key is generated inside a second Windows account and its directory is stripped of
+        inherited permissions
+        (<code>icacls &hellip; /inheritance:r /grant:r witness:F</code>). The operator account
+       , the one that performs the erasure, cannot read it. Co-signing needs
+        the second login.</p>
+        <p style="margin-bottom:0"><b>Pi, and KVM guest</b>, both dropped. The Pi bought
+        physical separation at the price of a device that has to enumerate and join a network
+        on stage; the KVM guest bought a separate admin domain but is reachable by anyone who
+        owns the hypervisor, which on a laptop is the operator. Neither bought enough to pay
+        for the failure mode it added.</p>
+      </div>
+      <div class="label-foot"><b>Say precisely</b>, an OS-account co-signer defends
+        against the operator <i>process</i>, not against the machine&rsquo;s administrator. An
+        <span class="mono">Administrators</span> token reaches both accounts. The honest words
+        are <b>dual control</b>, never <b>physical separation</b>. LB-03 is the test that keeps
+        this sentence true rather than hopeful.</div>
+    </div>
+    <div class="label-card">
+      <div class="label-strip"><span class="id">PRESENCE</span><span>designed, not shipped</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:.5rem"><b>ESP32 button</b>, designed and written, never
+        run. It displays the <b>pre-hash</b>: the entry hashed with <code>presence_ref</code>
+        empty, which is the only value that can exist before the human presses, because
+        <code>presence_ref</code> is itself inside the signed preimage. The human confirms
+        <i>these bytes</i>, and <code>verify_presence_binding()</code> re-derives them later.</p>
+        <p style="margin-bottom:0"><b>WebAuthn authenticator</b>, Phase 1, not
+        implemented. A relying party binding the assertion to the exact pre-hash, on commodity
+        hardware with no custom firmware. Cost: the key has no screen, so the human reads the
+        value on the workstation rather than on the device that is attesting.</p>
+      </div>
+      <div class="label-foot"><b>The claim to make today</b>, presence is
+        <b>designed</b>. No chain entry in this repository carries a <code>presence_ref</code>
+        produced by a physical device (G19, G9), so the custody tier reached so far is
+        <span class="mono">SOFTWARE_KEY</span> or <span class="mono">WITNESS_COSIGNED</span>,
+        never <span class="mono">FULL_CUSTODY</span>.</div>
+    </div>
+  </div>
+
+  <h3>What the hardware does <i>not</i> need</h3>
+  <p>No GPU, at any point. Erasure is I/O-bound, carving is a byte scan, signing is
+  microseconds, and the console is static HTML. Measured on this machine: a 500-entry chain
+  verifies in <b>81&nbsp;ms</b> with both signature layers re-checked, of which only
+  <b>3.9&nbsp;ms</b> is hashing, verification is signature-bound, not hash-bound
+ , and a tamper is localised to the exact <code>seq</code> in <b>37&nbsp;ms</b>
+  (<code>evidence/chain_benchmark.json</code>).</p>
+  <p style="margin-bottom:.6rem">With the co-signer now an OS account, the virtualization
+  requirement is gone: <b>no VT-x, no hypervisor, no second physical device.</b> What replaces
+  it is a link. The two machines must reach each other, and that is now the single point of
+  failure for the second signature, so it is tested in advance, on the exact transport used
+  on the day (<code>scripts/prep/g24_link_check.py</code>).</p>
+  <p style="margin-bottom:0"><b>Tested on the real machines (1&nbsp;Sept), and it settled the
+  transport.</b> A <b>USB-C to USB-C direct cable does NOT link two laptops</b>, USB is
+  host-to-device, so neither laptop will act as a device to the other, and this laptop has no
+  Thunderbolt/USB4 controller to carry the one exception. No USB-Ethernet adapter was present
+  either (<code>scripts/prep/link_detect.ps1</code> → <code>evidence/link_detect.json</code>).
+  Both machines <i>do</i> have Wi-Fi, so the chosen transport is a <b>Wi-Fi hotspot</b>, a
+  phone's, or this laptop's own Mobile Hotspot, with both laptops on one subnet
+  (<code>scripts/prep/wifi_link.md</code>). Wireless carries the handshake only; it is trusted
+  with nothing. A hostile network can drop packets, in which case the operation <b>fails
+  closed</b> and writes a REFUSED entry, it cannot forge a signature it has no key for. The
+  one risk is AP client-isolation on venue Wi-Fi, which is why a hotspot the team controls is
+  preferred and why the link is rehearsed rather than assumed.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 08 ═══ -->
+<section id="legal">
+  <h2><span class="num">12</span> Standards mapping</h2>
+  <p class="section-lede">Two standards, one document. The mapping lives in code as
+  <code>CLAUSE_MAP</code>, so "every field maps to a named clause" is an executable test
+  rather than a review opinion.</p>
+
+  <div class="grid-2">
+    <div class="label-card">
+      <div class="label-strip"><span class="id">NIST SP 800-88 Rev. 2</span><span>Appendix G</span></div>
+      <div class="label-body">
+        <p>Certificate of Sanitization. Media block, method type actually achieved, method
+        details, tool and version, verification method, post-sanitization classification,
+        and both signature blocks.</p>
+        <p style="margin-bottom:0"><b>The honest part:</b> method type is the
+        <i>weakest</i> method across every covered erase. One Purge cannot launder a Clear
+        performed on another device in the same case.</p>
+      </div>
+    </div>
+    <div class="label-card">
+      <div class="label-strip"><span class="id">BSA 2023</span><span>Section 63(4)</span></div>
+      <div class="label-body">
+        <p>Since 2023 the certificate must be signed by <b>both</b> the person in charge of
+        the device <b>and</b> an expert, Schedule Part A and Part B.</p>
+        <p style="margin-bottom:0"><b>This is why the tool dual-signs.</b> A
+        single-signature tool cannot produce a §63(4)-shaped certificate at all. The
+        statute asks for two parties, so the ledger asks for two keys.</p>
+      </div>
+    </div>
+  </div>
+
+  <h4>The four conditions of §63(2), and what answers each</h4>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Clause</th><th>What it requires</th><th>Answered by</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">63(2)(a)</td><td>Regular use by a person with lawful control</td>
+          <td><span class="badge b-gap">declaration</span> operator's statement</td></tr>
+        <tr><td class="mono">63(2)(b)</td><td>Information regularly fed in the ordinary course</td>
+          <td><span class="badge b-gap">declaration</span> operator's statement</td></tr>
+        <tr><td class="mono">63(2)(c)</td><td>The device operated properly throughout</td>
+          <td><span class="badge b-built">mechanism</span> chain verification, every entry
+            re-hashes, links, and carries a valid signature</td></tr>
+        <tr><td class="mono">63(2)(d)</td><td>Content derived from information fed in</td>
+          <td><span class="badge b-built">mechanism</span> <code>result_hash</code>, the
+            entry commits to the operation's own record</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <p>Two of the four are answered by a mechanism and two by a human declaration, and the
+    certificate labels which is which. Presenting all four as machine-proven would be the
+    exact overclaim this project exists to avoid.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 09 ═══ -->
+<section id="attacks">
+  <h2><span class="num">13</span> Three attacks, three layers</h2>
+  <p class="section-lede">Each attack defeats the layer above it. The third is the one no
+  single-machine ledger can answer, and it is the demo.</p>
+
+  <figure>
+    <div class="fig-frame">
+      <svg viewBox="0 0 800 300" role="img" aria-label="Three attacks and which verification layer catches each: editing an entry is caught by the key-free hash walk, deleting from the middle by the sequence and link check, and a full chain rewrite only by comparison against the witness head.">
+        <rect x="10" y="14" width="252" height="270" rx="3" fill="none" stroke="currentColor" opacity=".55"/>
+        <text x="136" y="38" font-size="12" font-weight="700" text-anchor="middle" fill="currentColor">ATTACK 1, edit</text>
+        <text x="136" y="56" font-size="10.5" text-anchor="middle" fill="var(--muted)">change Clear to Purge</text>
+        <text x="136" y="70" font-size="10.5" text-anchor="middle" fill="var(--muted)">on a stored entry</text>
+        <rect x="30" y="90" width="212" height="58" rx="3" fill="var(--seal-wash)" stroke="var(--seal)"/>
+        <text x="136" y="110" font-size="10.5" font-weight="700" text-anchor="middle" fill="var(--seal)" letter-spacing=".6">CAUGHT, KEY-FREE</text>
+        <text x="136" y="127" font-size="10" text-anchor="middle" fill="var(--seal)">the entry no longer re-hashes</text>
+        <text x="136" y="140" font-size="10" text-anchor="middle" fill="var(--seal)">to its own stated hash</text>
+        <text x="136" y="176" font-size="10.5" text-anchor="middle" fill="var(--muted)">Every competitor tool</text>
+        <text x="136" y="190" font-size="10.5" text-anchor="middle" fill="var(--muted)">catches this much.</text>
+
+        <rect x="274" y="14" width="252" height="270" rx="3" fill="none" stroke="currentColor" opacity=".55"/>
+        <text x="400" y="38" font-size="12" font-weight="700" text-anchor="middle" fill="currentColor">ATTACK 2, delete</text>
+        <text x="400" y="56" font-size="10.5" text-anchor="middle" fill="var(--muted)">remove one record from</text>
+        <text x="400" y="70" font-size="10.5" text-anchor="middle" fill="var(--muted)">the middle of the pile</text>
+        <rect x="294" y="90" width="212" height="58" rx="3" fill="var(--seal-wash)" stroke="var(--seal)"/>
+        <text x="400" y="110" font-size="10.5" font-weight="700" text-anchor="middle" fill="var(--seal)" letter-spacing=".6">CAUGHT, KEY-FREE</text>
+        <text x="400" y="127" font-size="10" text-anchor="middle" fill="var(--seal)">sequence gap, and prev_hash</text>
+        <text x="400" y="140" font-size="10" text-anchor="middle" fill="var(--seal)">no longer links</text>
+        <text x="400" y="176" font-size="10.5" text-anchor="middle" fill="var(--muted)">Independently signed PDFs</text>
+        <text x="400" y="190" font-size="10.5" text-anchor="middle" fill="var(--muted)">cannot catch this. Every</text>
+        <text x="400" y="204" font-size="10.5" text-anchor="middle" fill="var(--muted)">survivor still verifies.</text>
+
+        <rect x="538" y="14" width="252" height="270" rx="3" fill="none" stroke="var(--accent)" stroke-width="1.4"/>
+        <text x="664" y="38" font-size="12" font-weight="700" text-anchor="middle" fill="var(--accent)">ATTACK 3, rewrite all</text>
+        <text x="664" y="56" font-size="10.5" text-anchor="middle" fill="var(--accent)">rebuild the whole chain</text>
+        <text x="664" y="70" font-size="10.5" text-anchor="middle" fill="var(--accent)">and re-sign everything</text>
+        <rect x="558" y="90" width="212" height="42" rx="3" fill="var(--oxide-wash)" stroke="var(--oxide)"/>
+        <text x="664" y="108" font-size="10.5" font-weight="700" text-anchor="middle" fill="var(--oxide)" letter-spacing=".6">PASSES EVERY LOCAL CHECK</text>
+        <text x="664" y="124" font-size="10" text-anchor="middle" fill="var(--oxide)">hashes link, signatures valid</text>
+        <rect x="558" y="144" width="212" height="58" rx="3" fill="var(--seal-wash)" stroke="var(--seal)"/>
+        <text x="664" y="164" font-size="10.5" font-weight="700" text-anchor="middle" fill="var(--seal)" letter-spacing=".6">CAUGHT, WITNESS ONLY</text>
+        <text x="664" y="181" font-size="10" text-anchor="middle" fill="var(--seal)">the head recorded in Domain B</text>
+        <text x="664" y="194" font-size="10" text-anchor="middle" fill="var(--seal)">is no longer reproducible</text>
+        <text x="664" y="228" font-size="10.5" text-anchor="middle" fill="var(--accent)">This is the whole argument,</text>
+        <text x="664" y="242" font-size="10.5" text-anchor="middle" fill="var(--accent)">and Act 3 of the demo.</text>
+      </svg>
+    </div>
+    <figcaption><b>Two layers, and what each is for.</b> The key-free layer catches attacks
+    1 and 2 with no key at all, so a routine key rotation never false-flags an authentic
+    chain. Attack 3 survives both local layers by construction, only a record held
+    somewhere the operator cannot write exposes it.</figcaption>
+  </figure>
+
+  <p>A fourth attack sits outside all three: doctoring the stored <b>result record</b>
+  while leaving the entry's signature untouched. The chain still verifies, the signature
+  covers the hash, and the hash is unchanged. Only re-checking every stored record against
+  its committed digest catches it, which <code>cli verify</code> now does, exiting 1.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 13 ═══ -->
+<section id="aggregate">
+  <h2><span class="num">14</span> The case, the signer, and the tool itself</h2>
+  <p class="section-lede">Chaining answers one question completely: was this device&rsquo;s
+  history altered after it was written. Three questions sit just outside it, and each was
+  answerable only by trusting somebody. Each is now a signed fact instead.</p>
+
+  <div class="note caution">
+    <p style="margin:0"><b>What these four have in common.</b> Every one closes an
+    <i>omission</i> rather than an alteration &mdash; a thing that could be missing without
+    anything breaking. A chain notices what changed inside it. It is structurally blind to
+    what was never in it, to what stopped being in it one level up, and to who or what put
+    it there. Alteration was already solved; these are the remaining silences.</p>
+  </div>
+
+  <h3>14.1&ensp;A whole device disappears from a case</h3>
+  <p>A chain covers one device. A seizure does not: a laptop, two phones, four sticks, a
+  NAS &mdash; each examined separately, each with its own chain, correctly so. Merging them
+  into one ledger would force a global ordering on operations that genuinely happened in
+  parallel, and would make one device&rsquo;s verification depend on another&rsquo;s.</p>
+  <p>That leaves the hole exactly one level up. Delete <code>usb_03.json</code> from the
+  evidence folder and <b>every surviving chain still verifies perfectly</b>, because
+  nothing inside a chain knows how many siblings it had. It is the same omission attack the
+  project exists to close, moved up one level of aggregation &mdash; and it is closed the
+  same way: bind the set, then put the binding somewhere the operator cannot rewrite.</p>
+
+  <div class="grid-2">
+    <div class="label-card">
+      <div class="label-strip"><span class="id">CASE ROOT</span><span>src/attestation/case.py</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:.5rem">A Merkle root over every device&rsquo;s head, sorted
+        by <code>device_id</code> so two examiners with the same evidence compute the same
+        root. Order-dependence would make it useless for the one comparison it exists to
+        support.</p>
+        <p style="margin-bottom:0">Each leaf commits to <code>device_id</code>,
+        <code>chain_id</code>, <code>head_hash</code> <b>and <code>count</code></b>,
+        length-prefixed. The count is there for the same reason the witness publishes its
+        own: a head hash alone cannot tell a chain that legitimately ended at seq 4 from
+        one truncated to seq 4.</p>
+      </div>
+      <div class="label-foot"><b>Selective disclosure comes free</b> &mdash;
+        <code>device_proof()</code> shows one drive belongs to the case in
+        O(log&nbsp;n) sibling hashes without revealing the others&rsquo; contents or even
+        their identifiers. The real need: one drive released to its owner while the rest of
+        the case stays live.</div>
+    </div>
+    <div class="label-card">
+      <div class="label-strip"><span class="id">HONESTY</span><span>what it refuses to say</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:.5rem">A device <i>added</i> after the root was fixed is
+        reported but <b>explicitly not called tampering</b>. A drive examined on day three
+        looks identical to an inserted one, and crying wolf on the most ordinary event in a
+        live case would be its own kind of dishonesty.</p>
+        <p style="margin-bottom:0">An empty case <b>raises</b> rather than returning a zero
+        root. A zero root verifies against nothing while looking like a commitment.</p>
+      </div>
+      <div class="label-foot">The manifest states in its own text that it is
+        <b>a claim the operator made about their own case</b> until it is anchored or
+        co-signed. Same rule that makes a chain head evidence rather than an assertion.</div>
+    </div>
+  </div>
+
+  <h3>14.2&ensp;The signing key is swapped for someone else&rsquo;s</h3>
+  <p><code>operator_key_id</code> was already inside the preimage, so every entry stated
+  which key signed it. Nothing stated which key was <i>supposed</i> to. A chain whose entry
+  7 is signed by a key nobody recognises verifies perfectly &mdash; each signature is
+  checked against whatever key the verifier was handed, and <b>a verifier handed the
+  attacker&rsquo;s key confirms the attacker&rsquo;s signature with complete
+  honesty</b>.</p>
+  <p>Keys change for ordinary reasons: an examiner leaves, a laptop is reimaged, a token is
+  lost. None of those should be indistinguishable from a substitution.</p>
+
+  <div class="note">
+    <p style="margin:0 0 .4rem"><b>The rule:</b> a signer may change; a signer may not
+    change <i>silently</i>.</p>
+    <p style="margin:0">A rotation is announced by a <code>SIGNER_CHANGE</code> entry
+    <b>signed by the outgoing key</b>, naming the incoming one. That ordering is the entire
+    design: the outgoing key is the only party that can still prove it was the legitimate
+    holder, so it is the only party whose word about its own succession means anything. An
+    incoming key announcing itself is precisely what an attacker with a fresh keypair
+    would do, and is rejected &mdash; as is a retrospective announcement, because paperwork
+    arriving after the new key already signed is a note, not an authorisation.</p>
+  </div>
+
+  <p><code>CHANGE_REASONS</code> is a closed vocabulary and it includes
+  <span class="mono">COMPROMISE</span> on purpose. Free text would let a compromise be filed
+  as a routine handover; a vocabulary lacking the word nobody wants to write guarantees it
+  gets written as <span class="mono">ROTATION</span>. <span class="mono">LOSS</span> is
+  recorded as <i>weaker</i> than a rotation rather than equivalent &mdash; it cannot be
+  signed by the key it replaces &mdash; and the record says so itself.</p>
+
+  <div class="note deny">
+    <p style="margin:0"><b>Stated in the module, not discovered later.</b> This cannot
+    detect a compromise that happened before the first entry, and it cannot stop an attacker
+    holding the current private key from signing a valid handover. Narrowing the attack to
+    &ldquo;you must compromise the current key <i>and use it</i>&rdquo; is the honest claim.
+    <b>&ldquo;Revocation prevents compromise&rdquo; is not, and nothing here says it.</b></p>
+  </div>
+
+  <h3>14.3&ensp;Which build produced this?</h3>
+  <p>Every entry said what was done. None said what <i>did</i> it. That left the first
+  question asked of any automated forensic result unanswerable from the record itself:
+  <b>which build produced this, and is it the build that was validated?</b>
+  &ldquo;The tool&rdquo; stops being an answer the moment the code changes &mdash; which it
+  does, between validation and the case, between the first drive and the fortieth.</p>
+  <p><code>tool_ref</code> is now the <b>16th signed field</b>
+  (<span class="mono">ENTRY_VERSION&nbsp;3</span>): a version plus a SHA-256 over the
+  fourteen modules whose source can change what an entry says. Inside the preimage, not
+  beside it, for the same reason <code>outcome</code> had to move there &mdash; a field
+  describing the operation that lives outside the signature can be edited afterwards to make
+  one build&rsquo;s output look like another&rsquo;s.</p>
+
+  <div class="grid-2">
+    <div class="label-card">
+      <div class="label-strip"><span class="id">DESIGN</span><span>details that matter</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:.5rem">Line endings are normalised before hashing. Git
+        rewrites them on checkout, so a raw byte digest would report a different tool for
+        identical code &mdash; a false alarm exactly where cross-platform verification
+        matters most.</p>
+        <p style="margin-bottom:.5rem">A missing module hashes as <i>absent</i> rather than
+        being skipped, so deleting a module is detectable. Otherwise removal would be the one
+        code change the tool could not see in itself.</p>
+        <p style="margin-bottom:0"><code>Chain.append</code> takes <b>no</b>
+        <code>tool_ref</code> parameter. A value supplied by the operator would be a claim
+        about the tool made by the party the tool exists to constrain.</p>
+      </div>
+      <div class="label-foot">A mismatch <b>reports</b>, never fails. Chains outlive builds;
+        an entry from last month&rsquo;s version is normal, and this field exists to make it
+        visible rather than to forbid it.</div>
+    </div>
+    <div class="label-card">
+      <div class="label-strip"><span class="id">NOT SELF-MODIFYING</span><span>the boundary</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:.5rem">This is <b>not</b> a self-improving tool, and the
+        distinction is not cosmetic. A process that rewrites itself is a process the
+        certificate cannot describe &mdash; and BSA&nbsp;2023 s.63(4) <i>requires</i> the
+        certificate to describe the process. Self-modification is inadmissible, not merely
+        risky.</p>
+        <p style="margin-bottom:0">What self-attestation enables is the honest version: the
+        tool may change between versions, and every entry states which side of every change
+        it falls on. <b>Evolution becomes a signed, dated fact in the same ledger as the
+        evidence</b>, instead of an unrecorded event nobody can bound.</p>
+      </div>
+      <div class="label-foot">A test asserts no attested module writes to its own source.
+        The boundary is enforced, not just intended.</div>
+    </div>
+  </div>
+
+  <h3>14.4&ensp;The tool gets harder to break with every real task</h3>
+  <p>Fixtures are chosen by their author, so they encode what the author already thought of.
+  Real drives are chosen by nobody &mdash; a truncated JPEG at an awkward offset, an erase
+  that hit three bad sectors, a chain written under a different locale. Those are the inputs
+  that find bugs, and until now they were seen once and discarded.</p>
+  <p>Every real run is pinned as a case the tool must keep reproducing. A pinned case is
+  <b>a digest plus enough context to recompute it, never the evidence</b>: the corpus is
+  committed to a public repository, so it holds no drive contents, no case identifiers and
+  no machine identity. Inputs are matched by content rather than path, so a case pinned on
+  one laptop replays on another.</p>
+
+  <div class="note">
+    <p style="margin:0 0 .4rem"><b>Two failure modes it is built to avoid</b>, because both
+    would make the corpus worse than not having one.</p>
+    <p style="margin:0 0 .4rem"><b>Reporting green while testing nothing.</b> An input that
+    is not present on this machine is <span class="mono">UNAVAILABLE</span>, which is
+    deliberately <i>not</i> a pass. A malformed case file is
+    <span class="mono">BROKEN</span>, not skipped &mdash; silently ignoring entries would let
+    the suite shrink to zero unnoticed.</p>
+    <p style="margin:0"><b>Treating drift as a verdict.</b> If a run was wrong, pinning it
+    pinned the bug. A mismatch is therefore <i>&ldquo;which of these two is right?&rdquo;</i>
+    and never an automatic finding against the newer code. Both builds are named in the
+    report &mdash; which is what <code>tool_ref</code> is for.</p>
+  </div>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Silence</th><th>Closed by</th><th>The load-bearing test</th></tr></thead>
+      <tbody>
+        <tr><td>A whole device leaves the case</td>
+          <td class="mono">attestation/case.py</td>
+          <td>after deleting a device, <b>every survivor still verifies</b> &mdash; which is
+            the argument for the module, written as a test</td></tr>
+        <tr><td>The signer is substituted</td>
+          <td class="mono">attestation/signers.py</td>
+          <td>after substitution the chain <b>still verifies</b>; only the signer changed</td></tr>
+        <tr><td>Which build wrote this entry</td>
+          <td class="mono">attestation/toolref.py</td>
+          <td>no attested module writes to its own source; the digest moves when the code
+            moves, and when a module is <i>deleted</i></td></tr>
+        <tr><td>A real input&rsquo;s result is seen once and lost</td>
+          <td class="mono">attestation/corpus.py</td>
+          <td>an unavailable case is <b>not</b> counted as a pass</td></tr>
+        <tr><td>A wipe steps over bad sectors and calls itself clean</td>
+          <td class="mono">erasure/engine.py</td>
+          <td>removing <code>bad_ranges</code> from the result <b>changes the digest the
+            entry signed</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 14 ═══ -->
+<section id="fragments">
+  <h2><span class="num">15</span> Fragment reassembly</h2>
+  <p class="section-lede">Signature carving finds a header, reads forward, stops at a
+  footer. That works only while the file is contiguous &mdash; and on the benchmark NIST
+  built to test exactly this, it recovers nothing at all.</p>
+
+  <div class="note caution">
+    <p style="margin:0 0 .4rem"><b>The zero this removes was structural, not a tuning
+    problem.</b> NIST CFReDS levels&nbsp;2 and&nbsp;3 contain <i>no contiguous file</i>. A
+    scanner that reads forward cannot recover a file whose second half is stored before its
+    first, so every signature carver scores 0% on them &mdash; PhotoRec, Scalpel, Foremost,
+    and this project&rsquo;s own carver until now.</p>
+    <p style="margin:0"><code>000_0021.png</code> is now recovered from CFReDS&nbsp;L2
+    <b>byte-identically</b>: 12,966,639 bytes, SHA-256 <span class="mono">9779c1ee&hellip;</span>,
+    decoding as PNG 2580&times;1932 RGB.</p>
+  </div>
+
+  <h3>15.1&ensp;Why this is not the usual guesswork</h3>
+  <p>Reassembly is normally heuristic: try gap sizes, see whether a decoder complains, keep
+  whichever result looks least broken. That produces files nobody should put in evidence,
+  because <b>&ldquo;the decoder did not object&rdquo; is not a statement about the original
+  bytes</b>. A JPEG missing its middle third still opens.</p>
+  <p>This uses formats that carry their own integrity checks, so every fragment is
+  <i>proven</i> to belong before it is used:</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Step</th><th>What decides it</th><th>Why it cannot be a guess</th></tr></thead>
+      <tbody>
+        <tr><td>Which bytes are chunks</td><td>CRC-32 over each chunk&rsquo;s own type+data</td>
+          <td>A wrong fragment fails its own checksum. 1,583 chunks found this way; 4&nbsp;MB
+            of SHA-256 output yields none.</td></tr>
+        <tr><td>Which chunks form a fragment</td><td>physical adjacency in the image</td>
+          <td>Chunks that abut were laid down together. This turns 1,583 chunks into
+            <b>2 runs</b> &mdash; an intractable ordering problem into a solved one.</td></tr>
+        <tr><td>Which fragment comes first</td><td>the PNG format itself</td>
+          <td><code>IHDR</code> must open a file and <code>IEND</code> must close it. The run
+            holding IHDR <i>is</i> the first fragment. Nothing is preferred.</td></tr>
+        <tr><td>The chunk split across the cut</td><td>exhaustive split search, CRC-32 as oracle</td>
+          <td>Its head ends fragment one and its tail begins fragment two, so it CRCs in
+            neither place. Every split is tried; a wrong one is rejected.</td></tr>
+        <tr><td>Whether the result is coherent</td><td>a real decoder, run <b>last</b></td>
+          <td>Confirms the assembly parses. Deliberately not the deciding check.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>15.2&ensp;The boundary chunk is the whole difficulty</h3>
+  <p>Without it the rebuild is <b>8,204 bytes short &mdash; and it still decodes
+  perfectly</b>. That is precisely the failure a decoder check cannot catch, and precisely
+  why byte-identity against ground truth is the only acceptable bar here. A reassembled file
+  that merely opens is worthless as evidence.</p>
+
+  <div class="note deny">
+    <p style="margin:0"><b>A bug in this module, kept because it is instructive.</b> The
+    straddle search found the boundary chunk in the prototype and lost it in the module. The
+    first fragment ends 1,730&nbsp;bytes before the end of the image and the chunk&rsquo;s
+    head is exactly those 1,730&nbsp;bytes &mdash; which <code>range(8,&nbsp;1730)</code>
+    excludes. It failed as <i>&ldquo;no boundary chunk&rdquo;</i> rather than as an error, so
+    the run still looked successful and produced a file that decoded. Only the hash
+    comparison caught it.</p>
+  </div>
+
+  <h3>15.3&ensp;What is claimed</h3>
+  <p>Every result is labelled <code>reassembled=True</code> with its fragment list, so it is
+  never presented as a contiguous find. Contiguous files are deliberately <b>not</b> reported
+  by this module, so they cannot be double-counted in any recall figure. The test suite
+  carries the control that matters: <b>the plain carver still recovers nothing from L2</b>,
+  so this cannot be the ordinary carver working while the reassembler takes the credit.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 15 ═══ -->
+<section id="coverage">
+  <h2><span class="num">16</span> Coverage against SIH26149 as written</h2>
+  <p class="section-lede">Read against the official NTRO text rather than a paraphrase of
+  it. Where a named requirement is unmet, this table says so &mdash; a coverage matrix that
+  reports full marks is not a coverage matrix.</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Named in the problem statement</th><th>Where</th><th>State</th></tr></thead>
+      <tbody>
+        <tr><td><b>Module 1 &mdash; Secure Drive Eraser</b></td><td class="mono">erasure/engine.py</td><td>built</td></tr>
+        <tr><td>&ensp;verification mechanisms</td><td class="mono">read_back_sample</td><td>built</td></tr>
+        <tr><td>&ensp;audit logging</td><td class="mono">attestation/core.py</td><td>built</td></tr>
+        <tr><td>&ensp;tamper-resistant reporting</td><td class="mono">chain + witness + anchor</td><td>built &mdash; the project&rsquo;s core</td></tr>
+        <tr><td>&ensp;compliance with destruction standards</td><td class="mono">NIST SP 800-88 Rev. 2</td><td>built</td></tr>
+        <tr><td>&ensp;HDD / SSD / USB / <b>memory cards</b> / external</td><td class="mono">probe_media</td><td><b>reasoned, not observed</b> &mdash; no real device yet (G9)</td></tr>
+        <tr><td><b>Module 2 &mdash; Secure File &amp; Folder Eraser</b></td><td class="mono">erasure/file_eraser.py</td><td>built</td></tr>
+        <tr><td>&ensp;batch operations</td><td class="mono">erase_path(recursive=True)</td><td>built</td></tr>
+        <tr><td>&ensp;verify erasure success</td><td class="mono">verify_overwritten</td><td>built &mdash; against a known pattern</td></tr>
+        <tr><td>&ensp;remove metadata and <b>residual traces</b></td><td class="mono">name + timestamps + streams.py</td><td>built &mdash; NTFS alternate data streams overwritten then removed (&sect;19.2)</td></tr>
+        <tr><td>&ensp;multiple file systems and operating systems</td><td class="mono">detect_filesystem</td><td>built &mdash; Windows / Linux / macOS; NTFS, FAT32, exFAT, ReFS matrix in <span class="mono">fs_matrix.ps1</span>, not yet run (&sect;19.4)</td></tr>
+        <tr><td><b>Module 3 &mdash; Advanced File Carving &amp; Recovery</b></td><td class="mono">recovery/engine.py</td><td>built</td></tr>
+        <tr><td>&ensp;signature-based carving</td><td class="mono">SIGNATURES</td><td>built &mdash; 10 types</td></tr>
+        <tr><td>&ensp;<b>structure-based</b> carving</td><td class="mono">recovery/reassemble.py</td><td>built &mdash; CRC-chained, &sect;14</td></tr>
+        <tr><td>&ensp;<b>fragmented file reconstruction</b></td><td class="mono">recovery/reassemble.py</td><td>built &mdash; CFReDS L2, byte-identical</td></tr>
+        <tr><td>&ensp;recovery without filesystem metadata</td><td class="mono">carve() / reassemble()</td><td>built &mdash; both scan raw bytes only</td></tr>
+        <tr><td>&ensp;confidence scoring</td><td class="mono">HIGH / MEDIUM / LOW</td><td>built &mdash; confidence in the EXTENT, stated as such</td></tr>
+        <tr><td>&ensp;automatic classification of recovered files</td><td class="mono">type + summarize()</td><td><b>partial</b> &mdash; classified by format, not by content</td></tr>
+        <tr><td><b>Media/device particulars</b>, make, model, <b>serial</b></td><td class="mono">erasure/deviceid.py</td><td>built &mdash; NIST Appendix C + BSA Part A blocks, unavailable never blank (&sect;17.3)</td></tr>
+        <tr><td><b>Sanitization validation</b>, approve/reject decision</td><td class="mono">attestation/validation.py</td><td>built &mdash; all five Rev. 2 grounds assessed; the tool never auto-approves (&sect;17.2)</td></tr>
+        <tr><td>&ensp;recovery from formatted / damaged / corrupted media</td><td class="mono">bad-sector skip-and-log</td><td>built &mdash; G9, CI fixture only</td></tr>
+        <tr><td><b>Reporting &amp; Audit Management System</b></td><td class="mono">certificate/generator.py</td><td>built &mdash; NIST + BSA clause map</td></tr>
+        <tr><td><b>User Interface Dashboard</b></td><td class="mono">console/index.html</td><td><b>partial</b> &mdash; verifier console; operator dashboard in progress</td></tr>
+        <tr><td><b>Validation &amp; testing documentation</b></td><td class="mono">tests/ + evidence/</td><td>built &mdash; 465 tests, recorded runs</td></tr>
+        <tr><td><b>Technical documentation</b></td><td class="mono">this document</td><td>built</td></tr>
+        <tr><td><b>Performance evaluation reports</b></td><td class="mono">evidence/*.json</td><td>built &mdash; GB-scale, chain timing, CFReDS</td></tr>
+        <tr><td><b>User manuals</b></td><td>&mdash;</td><td><b>not written</b> &mdash; a named deliverable, and the cheapest one outstanding</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <p style="margin:0 0 .4rem"><b>Two things this reading changed.</b></p>
+    <p style="margin:0 0 .4rem"><b>&ldquo;Fragmented file reconstruction&rdquo; is named
+    explicitly in the problem statement.</b> It was not scope creep or a flourish &mdash; it
+    was a stated requirement the project was failing, silently, while scoring 100% on the
+    contiguous cases and reporting that number.</p>
+    <p style="margin:0"><b>&ldquo;Residual traces&rdquo; is also named explicitly</b>, and
+    NTFS alternate data streams are exactly that: a stream attached to a file that survives
+    an overwrite of the main stream. It is listed above as partial rather than quietly folded
+    into &ldquo;metadata removal&rdquo;.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 17 ═══ -->
+<section id="certificate">
+  <h2><span class="num">17</span> The certificate: what it must say, and who must say it</h2>
+  <p class="section-lede">Read from NIST SP 800-88 Rev.&nbsp;2 and the BSA 2023 Schedule
+  themselves rather than from summaries of them. Both turned out to require things the tool
+  was not recording.</p>
+
+  <h3>17.1&ensp;NIST&rsquo;s own certificate already has a second signer</h3>
+  <div class="note">
+    <p style="margin:0 0 .4rem"><b>Appendix C, Fig.&nbsp;2 of Rev.&nbsp;2 &mdash; the sample
+    <i>Certificate of Sanitization</i> &mdash; has TWO signature blocks. The second is
+    labelled <span class="mono">Concurrence</span>.</b></p>
+    <p style="margin:0">This inverts the burden of the whole design. The second signature
+    stops being something to justify and becomes something to <i>implement</i>. Every other
+    tool prints that block as an empty line for someone to sign by hand later, or omits it.
+    Akhanda makes it a cryptographic signature from a key on a machine the operator cannot
+    write to.</p>
+  </div>
+  <p>India&rsquo;s evidence law arrives at the same shape independently. BSA 2023
+  &sect;63(4) requires <b>two</b> certificates: Part&nbsp;A from the party holding the
+  device, Part&nbsp;B from an <b>expert</b>. Two standards, written on different continents
+  for different purposes, both requiring two people &mdash; and the chain&rsquo;s
+  <code>operator_sig</code> / <code>concur_sig</code> pair is the intersection.</p>
+
+  <h3>17.2&ensp;Verification is not validation, and only one was implemented</h3>
+  <p>Rev.&nbsp;2 introduces <b>sanitization assurance</b> as two distinct things, and the
+  Appendix C form carries a <code>Verification/Status:</code> field <b>and</b> a separate
+  <code>Validation:</code> field:</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Rev. 2 concept</th><th>What it is</th><th>Akhanda</th></tr></thead>
+      <tbody>
+        <tr><td><b>Verification</b> &sect;4.5.1</td>
+          <td>&ldquo;inspecting the outcomes of a sanitization technique to determine the
+            outcome of the technique used&rdquo; &mdash; completion status, errors,
+            anomalies, media health</td>
+          <td class="mono">read_back_sample · bad_ranges · aborted · outcome<br><b>implemented, and exceeds the guideline</b></td></tr>
+        <tr><td><b>Validation</b> &sect;4.5.2</td>
+          <td>&ldquo;a <b>decision</b> to either approve the sanitization as being effective
+            or reject it, which would require repeating the sanitization method using a
+            different sanitization technique or escalating to a more secure sanitization
+            method&rdquo;</td>
+          <td class="mono">attestation/validation.py<br><b>added; previously absent</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note caution">
+    <p style="margin:0 0 .4rem"><b>THE TOOL MUST NOT DECIDE, and that is the design rather
+    than a limitation.</b> &sect;4.5.2 weighs &ldquo;the sanitization outcomes <b>and the
+    sensitivity of the target data</b>&rdquo;, turning on whether &ldquo;the organization
+    accepts any residual risks&rdquo;. Software knows the outcomes and nothing else.</p>
+    <p style="margin:0">A tool that auto-approves has not implemented validation &mdash; it
+    has renamed verification and buried a human judgement inside a boolean. <b>A perfect run
+    with zero skipped regions is still <span class="mono">AWAITING_DECISION</span>.</b></p>
+  </div>
+
+  <p>All five considerations &sect;4.5.2 lists are assessed, and what software cannot
+  determine is reported <b>undetermined</b> rather than clear &mdash; treating &ldquo;we
+  cannot tell&rdquo; as &ldquo;no problem&rdquo; is how a rejection ground quietly
+  disappears:</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Ground</th><th>Determined how</th></tr></thead>
+      <tbody>
+        <tr><td><b>G1</b>, regions no longer accessible through the interface</td>
+          <td class="yes">measured, from <code>bad_ranges</code> and <code>aborted</code></td></tr>
+        <tr><td><b>G5</b>, scope too narrow (overprovisioning)</td>
+          <td class="yes">measured, clearing flash <i>is</i> the standard&rsquo;s own example, so this triggers on the normal case</td></tr>
+        <tr><td><b>G2</b>, method inappropriate for the security category</td>
+          <td>undetermined, needs the data&rsquo;s sensitivity</td></tr>
+        <tr><td><b>G3</b>, unqualified personnel, uncalibrated tools</td>
+          <td>undetermined, <code>tool_ref</code> <b>identifies</b> the build and the signing key. Identifying is not qualifying.</td></tr>
+        <tr><td><b>G4</b>, outcome below the organisation&rsquo;s minimum</td>
+          <td>undetermined, a policy threshold this tool does not hold</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><code>decide()</code> refuses a decision with no named validator, no rationale, or no
+  stated data sensitivity &mdash; and refuses a <b>rejection with no remedy</b>, because
+  &sect;4.5.2 says rejection requires repeating or escalating, so a rejection naming neither
+  is a complaint rather than a decision. Approving <i>over</i> a triggered ground is
+  permitted and recorded as such, so the certificate shows the risk was accepted rather than
+  absent.</p>
+
+  <h3>17.3&ensp;A device path is not an identity</h3>
+  <p>Three independent authorities require the same block of fields, and the tool was
+  recording none of them &mdash; it recorded a <b>path</b>.</p>
+
+  <div class="grid-2">
+    <div class="label-card">
+      <div class="label-strip"><span class="id">REQUIRED BY</span><span>three sources, same fields</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:.4rem"><b>NIST Rev. 2, Appendix C</b>, Vendor/Make · Media
+        Type · Model Number · <b>Serial Number</b> · Property Number · Source ·
+        Classification · Operational/Damaged</p>
+        <p style="margin-bottom:.4rem"><b>BSA &sect;63(4) Part A</b>, Make &amp; Model ·
+        Colour · <b>Serial Number</b> · IMEI/UIN/UID/MAC/Cloud ID</p>
+        <p style="margin-bottom:0"><b>Blancco&rsquo;s own certificate</b>, Manufacturer ·
+        Chassis type · Model · Colour · <b>Serial numbers</b></p>
+      </div>
+      <div class="label-foot"><code>/dev/sdb</code> is whichever drive was plugged in second;
+        <code>\\.\PhysicalDrive2</code> is whichever one Windows enumerated third. Neither
+        survives a reboot, and neither finds a drive in an evidence bag six months later.</div>
+    </div>
+    <div class="label-card">
+      <div class="label-strip"><span class="id">UNAVAILABLE ≠ BLANK</span><span>the whole design</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:.4rem">On a certificate an <b>empty</b> serial field and an
+        <b>unread</b> serial field look identical &mdash; and a reader will conclude the
+        drive has no serial rather than that nobody looked.</p>
+        <p style="margin-bottom:0">Every field is either a value <b>with its source named</b>
+        (which sysfs path, which IOCTL) or an explicit <span class="mono">unavailable</span>
+        with a reason. A file image reports that it has <i>no physical identity</i>, which is
+        a different fact from a read that failed.</p>
+      </div>
+      <div class="label-foot">Fields no software can determine, Property Number, Source,
+        Classification, Colour, say <b>requires human entry</b> rather than being invented
+        or silently omitted.</div>
+    </div>
+  </div>
+
+  <p><code>is_identified()</code> turns on the <b>serial alone</b>. Make and model identify a
+  <i>product</i>, and a lab may hold forty of the same product; only the serial identifies
+  the item on the bench.</p>
+
+  <div class="note">
+    <p style="margin:0"><b>Where it is signed, and why not a 17th field.</b> Device identity
+    and the validation record ride in the <b>result record</b>, which <code>result_hash</code>
+    already covers &mdash; and <code>result_hash</code> is inside the signed preimage, with
+    the stored result re-verified against it. So both are tamper-evident without an
+    <span class="mono">ENTRY_VERSION&nbsp;4</span> bump and a synchronised change across three
+    verifier implementations, to gain a property the result record already provides. A test
+    asserts that stripping <code>device_identity</code> moves the digest.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 18 ═══ -->
+<section id="longevity">
+  <h2><span class="num">18</span> Outliving the algorithm that signed it</h2>
+  <p class="section-lede">A chain of custody is read when the case is heard, not when it is
+  written. That gap is measured in years, and cryptography has a shelf life.</p>
+
+  <div class="note caution">
+    <p style="margin:0 0 .5rem"><b>Dates, not adjectives.</b></p>
+    <div class="scroll" style="margin:0">
+      <table>
+        <tbody>
+          <tr><td>NIST FIPS 203 / 204 / 205 finalised</td><td class="n">13 August 2024</td></tr>
+          <tr><td>RSA-2048 and <b>ECC P-256 deprecated</b></td><td class="n">2030</td></tr>
+          <tr><td>Federal deadline for digital signatures</td><td class="n">2031</td></tr>
+          <tr><td><b>Quantum-vulnerable algorithms removed from NIST standards</b></td><td class="n">2035</td></tr>
+          <tr><td>Indian criminal proceedings, trial through appeal</td><td class="n">10&ndash;20 years</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="margin:.6rem 0 0"><b>Ed25519 is an elliptic-curve signature.</b> A chain signed
+    in 2026 may be examined in 2040 &mdash; five years after the algorithm that signed it
+    left the standards. The literature names this exactly: ACPO, NIST SP 800-101 and
+    ISO/IEC 27037 <i>&ldquo;make no provision for algorithm agility or quantum
+    resilience&rdquo;</i>, and evidence authenticated under a broken scheme becomes
+    <i>&ldquo;legally contestable&rdquo;</i>.</p>
+  </div>
+
+  <p>Every entry now carries an <b>ML-DSA-65</b> signature (NIST FIPS&nbsp;204, security
+  category&nbsp;3) alongside the Ed25519 one, over the same entry hash.</p>
+
+  <h3>18.1&ensp;Why this is additive, and why that is the whole point</h3>
+  <p><code>operator_sig</code> and <code>concur_sig</code> are attached <i>after</i> signing
+  &mdash; they are signatures <b>over</b> the entry hash, not fields <b>inside</b> the
+  preimage. A post-quantum signature is the same shape, so it costs nothing structural:</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>What a 17th hashed field would have cost</th><th>What this cost instead</th></tr></thead>
+      <tbody>
+        <tr><td><span class="mono">ENTRY_VERSION</span> 3 &rarr; 4</td><td class="yes">unchanged at 3</td></tr>
+        <tr><td>16 hashed fields &rarr; 17</td><td class="yes">unchanged at 16</td></tr>
+        <tr><td>Every existing entry hash invalidated</td><td class="yes">hashes unchanged</td></tr>
+        <tr><td>Synchronised change across Python, JavaScript <b>and</b> Rust</td><td class="yes">none, all three read a PQ-signed chain untouched</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The three-implementation canary passes without modification, which is the test that
+  proves the claim rather than the claim itself.</p>
+
+  <h3>18.2&ensp;Stripping is the attack, and the classical verifier cannot see it</h3>
+  <div class="note deny">
+    <p style="margin:0"><b>An adversary who cannot forge either signature can still DELETE
+    the post-quantum one</b>, silently downgrading the chain to the algorithm they expect to
+    break &mdash; and the ordinary verifier stays perfectly happy, because nothing it checks
+    has changed. That is precisely why the post-quantum layer needs its own detection.</p>
+  </div>
+  <p><code>pq_algorithm</code> is recorded <b>separately from the signature itself</b>. An
+  entry that names an algorithm and carries no signature for it is <span class="mono">STRIPPED</span>
+  &mdash; a finding, not an absence. The mirror attack, deleting the label instead of the
+  signature so nothing can be checked against a key, is caught the same way.</p>
+
+  <h3>18.3&ensp;Four states that must never collapse into two</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>State</th><th>What it means</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">NOT_PROTECTED</td><td>No PQ layer. <b>Normal</b> for a chain written before the migration &mdash; not a defect.</td></tr>
+        <tr><td class="mono">STRIPPED</td><td>An algorithm is named and the signature is gone. <b>An attack.</b></td></tr>
+        <tr><td class="mono">PROTECTED</td><td>Verified against a supplied public key.</td></tr>
+        <tr><td class="mono">SIGNATURE_INVALID</td><td>It did not verify.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>And when no public key is supplied, the result is <b>unverified</b> &mdash; never valid.
+  A migration is a mixture by nature, so a chain that is two of three protected reports
+  exactly that rather than rounding to whichever end flatters it.</p>
+
+  <div class="grid-2">
+    <div class="label-card">
+      <div class="label-strip"><span class="id">COST</span><span>measured on this machine</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:.4rem">Ed25519 &mdash; 64&nbsp;B signature, verify 0.099&nbsp;ms<br>
+        ML-DSA-65 &mdash; 3,309&nbsp;B signature, verify 0.182&nbsp;ms</p>
+        <p style="margin-bottom:0">A 500-entry chain verifies in <b>91&nbsp;ms instead of
+        81&nbsp;ms</b>. The file grows from ~33&nbsp;KB to ~1.7&nbsp;MB, beside the
+        multi-gigabyte images it describes.</p>
+      </div>
+      <div class="label-foot"><b>The price of a signature that lasts is a bigger file and ten
+        milliseconds.</b></div>
+    </div>
+    <div class="label-card">
+      <div class="label-strip"><span class="id">THE CLAIM</span><span>and what it is not</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:.4rem"><b>Claimed:</b> that this chain carries a signature
+        made with an algorithm NIST expects to still accept in 2040, alongside the classical
+        one.</p>
+        <p style="margin-bottom:0"><b>Not claimed:</b> that quantum computers will break
+        Ed25519 by any particular date &mdash; unknowable, and unnecessary to the argument.
+        Nor that post-quantum chain-of-custody is our idea: the literature already recommends
+        it. <b>First implementer, not first thinker.</b></p>
+      </div>
+      <div class="label-foot">The argument rests on <b>standards deprecation and legal
+        contestability</b>, both dated and citable. Reaching for the stronger version makes
+        it weaker.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 16 ═══ -->
+<section id="platform">
+  <h2><span class="num">19</span> Platform reach, and the driver question</h2>
+  <p class="section-lede">How far userspace actually gets on each operating system, what
+  sits beyond it, and why the thing beyond it is not being shipped.</p>
+
+  <h3>19.1&ensp;No kernel driver. Stated plainly, because the answer is no.</h3>
+  <div class="note deny">
+    <p style="margin:0 0 .4rem"><b>AKHANDA ships no kernel driver and will not ask you to
+    install one.</b> Not as a limitation reluctantly admitted &mdash; as a decision, with
+    reasons that survive being asked about.</p>
+    <p style="margin:0 0 .4rem"><b>It could not be shipped in time even if it were wanted.</b>
+    A Windows kernel driver must be signed through the Microsoft Hardware Developer
+    Program: an EV code-signing certificate, a partner account, hardware-lab attestation,
+    and weeks of turnaround. Nothing in that sequence fits a prep window measured in days.</p>
+    <p style="margin:0 0 .4rem"><b>The unsigned alternative is worse than the gap.</b>
+    Loading an unsigned driver means disabling Secure Boot or enabling test-signing on the
+    examiner&rsquo;s machine &mdash; weakening the integrity of the very workstation whose
+    output is meant to be evidence. A tool that asks a forensic examiner to turn off Secure
+    Boot has damaged the case it was brought in to support.</p>
+    <p style="margin:0"><b>And it is not needed for what the problem statement asks.</b>
+    Raw whole-disk access &mdash; <code>\\.\PhysicalDriveN</code> on Windows,
+    <code>/dev/sdX</code> on Linux &mdash; is available to an elevated userspace process on
+    every supported platform. Every module below reaches its media without one.</p>
+  </div>
+
+  <p>What a driver <i>would</i> buy is narrow and specific, and it is already in the
+  disclosed limits rather than hidden: reaching data resident <b>inside</b> filesystem
+  metadata &mdash; a small file stored in its own NTFS MFT record, an ext4 inode table, a
+  journal. That data lives in no data run, so no userspace write addresses it. The
+  certificate says so; a driver would change that sentence and nothing else on this page.</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Capability</th><th>Windows</th><th>Linux</th><th>macOS</th><th>How</th></tr></thead>
+      <tbody>
+        <tr><td>Whole-disk erase</td><td>yes, elevated</td><td>yes, root</td><td>yes, root</td>
+          <td class="mono">\\.\PhysicalDriveN · /dev/sdX</td></tr>
+        <tr><td>NIST Purge (firmware sanitize)</td><td>no</td><td>yes</td><td>no</td>
+          <td class="mono">hdparm · nvme sanitize</td></tr>
+        <tr><td>File &amp; folder erase</td><td>yes</td><td>yes</td><td>yes</td><td>userspace</td></tr>
+        <tr><td>Filesystem detection</td><td>yes</td><td>yes</td><td>yes</td>
+          <td class="mono">GetVolumeInformationW · /proc/mounts · stat -f</td></tr>
+        <tr><td>Alternate data streams</td><td>yes</td><td>n/a</td><td>n/a</td>
+          <td class="mono">FindFirstStreamW</td></tr>
+        <tr><td>Carving &amp; reassembly</td><td>yes</td><td>yes</td><td>yes</td>
+          <td>pure byte scan, no privilege at all</td></tr>
+        <tr><td>Chain, signing, verification</td><td>yes</td><td>yes</td><td>yes</td>
+          <td>three implementations, no privilege</td></tr>
+        <tr><td>MFT-resident / inode-resident data</td><td colspan="3">not reachable on any
+          platform</td><td>would need a kernel driver</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p><b>Purge is a Linux capability and is recorded as one.</b> On Windows and macOS there
+  is no userspace path to ATA Secure Erase or NVMe Sanitize, so the tool achieves Clear and
+  writes Clear. Asking for Purge there does not produce a Purge record &mdash; it produces
+  a Clear record with the reason attached.</p>
+
+  <h3>19.2&ensp;Alternate data streams: a verified erasure that left the data behind</h3>
+  <p>SIH26149 requires the file eraser to remove &ldquo;associated metadata and residual
+  traces&rdquo;. A named NTFS stream is precisely that, and it is the trace that survived
+  everything the eraser did.</p>
+  <p>A named stream shares a file&rsquo;s directory entry but <b>not its bytes</b>. The
+  pattern write, the read-back, the verification, the name scrub, the truncate, the unlink
+  &mdash; all of it addressed the default stream. So the tool could report
+  <span class="mono">VERIFIED</span> while a payload sat intact in
+  <code>file.txt:hidden</code>. <b>Every check passed. Every check was looking at the wrong
+  stream.</b></p>
+
+  <div class="grid-2">
+    <div class="label-card">
+      <div class="label-strip"><span class="id">ORDER</span><span>overwrite, then delete</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:0">Streams are erased <b>before</b> the file is unlinked.
+        Unlinking first would drop them along with the file, leaving their blocks
+        unreferenced but never overwritten &mdash; ordinary deletion wearing the name of
+        erasure. Same reasoning as the main eraser&rsquo;s own ordering.</p>
+      </div>
+      <div class="label-foot">A stream that could not be erased downgrades the outcome to
+        <span class="mono">PARTIAL</span>: it is a surviving copy of data the function has
+        just reported destroyed, so it cannot be <span class="mono">VERIFIED</span> whatever
+        the main stream did.</div>
+    </div>
+    <div class="label-card">
+      <div class="label-strip"><span class="id">HONESTY</span><span>found ≠ erased ≠ absent</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:.5rem"><code>found</code> is recorded separately from
+        <code>erased</code>, and the report is present even when the count is zero.
+        &ldquo;This file had none&rdquo; and &ldquo;streams were never looked for&rdquo; are
+        different facts; only the first is a statement about the file.</p>
+        <p style="margin-bottom:0">On ext4 or APFS the report says
+        <b>not applicable</b> rather than returning a clean zero that would imply a check
+        ran and passed.</p>
+      </div>
+      <div class="label-foot"><b>Clear level only.</b> A stream small enough to be resident
+        in the MFT record is unreachable from userspace, exactly as the file&rsquo;s own
+        resident data is.</div>
+    </div>
+  </div>
+
+  <h3>19.3&ensp;The write guard, and the hole that was in it</h3>
+  <div class="note caution">
+    <p style="margin:0 0 .4rem"><b>The blocklist named <code>/dev/sda</code>,
+    <code>/dev/nvme0n1</code> and <code>C:\</code> &mdash; and did not name
+    <code>\\.\PhysicalDrive0</code>,</b> which on the development machine <i>is</i> the
+    system disk. A confirm token plus one environment variable would have reached it.
+    Nobody wrote that path down, so nothing protected it.</p>
+    <p style="margin:0">A hand-written blocklist protects only the paths someone thought of.
+    Two of the six gates below deliberately do not depend on anyone&rsquo;s imagination.</p>
+  </div>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Gate</th><th>What it stops</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>confirm token</td><td>a stray argument becoming a wipe</td></tr>
+        <tr><td>2</td><td class="mono">AKHANDA_ALLOW_DEVICE_WRITE=1</td><td>an independent second switch</td></tr>
+        <tr><td>3</td><td class="mono">REFUSED_PREFIXES</td><td>the named patterns &mdash; necessary, <b>not sufficient</b></td></tr>
+        <tr><td>4</td><td>protected roots (Windows)</td><td>the volume holding the OS or this repository</td></tr>
+        <tr><td>5</td><td class="mono">/proc/mounts</td><td>the device <i>actually</i> mounted at /, /boot, /home</td></tr>
+        <tr><td>6</td><td class="mono">AKHANDA_TARGET_DEVICE</td><td>must equal the target <b>exactly</b>, for any whole disk</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><b>Gate 6 is what makes a typo harmless.</b> A boolean flag plus a mistyped drive
+  number is a wiped system disk &mdash; and the flag would have been telling the truth the
+  whole time. Naming the exact device means a typo reaches nothing. It authorises; it can
+  never override the blocklist, so naming <code>PhysicalDrive0</code> exactly is still
+  refused.</p>
+  <p><b>Gate 5 asks the system rather than the name.</b> On a forensic workstation the
+  evidence drive may well <i>be</i> <code>/dev/sda</code>. A name-based blocklist cannot
+  tell that apart from a boot disk; <code>/proc/mounts</code> can, so the evidence drive is
+  permitted while the running system never is.</p>
+
+  <div class="note deny">
+    <p style="margin:0"><b>Three bugs were introduced while writing this guard, all the same
+    shape</b> &mdash; normalising POSIX paths for Windows matching. The worst refused
+    <i>every</i> target on Linux, including the USB stick the guard exists to permit,
+    because every absolute POSIX path shares the anchor <code>/</code>. A guard that blocks
+    everything is as broken as one that blocks nothing, and it would have surfaced on Linux,
+    at the demo, with a drive plugged in. The tests assert both halves: the system disk is
+    refused, <b>and</b> the evidence drive is permitted.</p>
+  </div>
+
+  <h3>19.4&ensp;Testing filesystems without touching a disk</h3>
+  <p><code>detect_filesystem()</code> is claimed to work across filesystems, and had only
+  ever run against the one NTFS volume this repository lives on &mdash; a claim covering
+  four cases written from one. <code>scripts/prep/fs_matrix.ps1</code> runs it against real
+  NTFS, FAT32, exFAT and ReFS volumes, <b>every one backed by a <code>.vhdx</code>
+  file</b>. No physical disk is enumerated, selected, formatted or written to, and
+  <code>diskpart</code> is driven with an explicit <code>select vdisk file=</code> rather
+  than a disk number &mdash; there is no disk-number arithmetic that could land
+  somewhere else.</p>
+  <p>It matters more than it looks. A detector returning <span class="mono">unknown</span>
+  does not crash: it <b>downgrades</b> the recorded outcome to
+  <span class="mono">UNVERIFIED</span>. And ReFS is copy-on-write, so it must produce
+  <span class="mono">PARTIAL</span> even when the read-back matched, because the read came
+  back through the same layer that may have written the new bytes elsewhere.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 10 ═══ -->
+<section id="tests">
+  <h2><span class="num">20</span> Test surface</h2>
+  <p class="section-lede">507 Python tests and 12 Rust tests across 6,300 lines &mdash;
+  roughly seven-eighths the size of the source. Built to fail rather than to pass.</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Suite</th><th class="num">Tests</th><th>What it holds down</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">test_file_eraser.py</td><td class="num">32</td>
+          <td>Verification against a known pattern, three gates, unknown filesystem downgrades, a partial run that does not understate destruction.</td></tr>
+        <tr><td class="mono">test_file_eraser.py</td><td class="num">32</td>
+          <td>Verification against a known pattern, three gates, unknown filesystem downgrades, a partial run that does not understate destruction.</td></tr>
+        <tr><td class="mono">test_attestation.py</td><td class="num">20</td>
+          <td>Injectivity, tamper naming, reorder, deletion, cross-chain theft, domain tag.</td></tr>
+        <tr><td class="mono">test_certificate.py</td><td class="num">24</td>
+          <td>Clause coverage, weakest-method rule, every limits line, refusal to overclaim.</td></tr>
+        <tr><td class="mono">test_fix_fail_closed.py</td><td class="num">21</td>
+          <td>Blocked · recorded · untouched, both escape hatches, the residual window.</td></tr>
+        <tr><td class="mono">test_fix_result_records.py</td><td class="num">21</td>
+          <td>One digest rule, missing vs altered vs matching, the laundering attack.</td></tr>
+        <tr><td class="mono">test_custody.py</td><td class="num">20</td>
+          <td>Tier ladder, presence degradation paths, key handling, atomic persistence.</td></tr>
+        <tr><td class="mono">test_fix_honest_verification_wording.py</td><td class="num">17</td>
+          <td>Three verification layers never collapse into one sentence.</td></tr>
+        <tr><td class="mono">test_erasure.py</td><td class="num">17</td>
+          <td>Pattern gone, sampling detects a write that did not land, both guards, Destroy refused.</td></tr>
+        <tr><td class="mono">test_fix_witness_verification.py</td><td class="num">15</td>
+          <td>Forgery vs rotation, key cache, offline verification.</td></tr>
+        <tr><td class="mono">test_anchor.py</td><td class="num">13</td>
+          <td>CVE-2012-2459 regression, RFC 6962 domain separation, inclusion proofs.</td></tr>
+        <tr><td class="mono">test_end_to_end.py</td><td class="num">12</td>
+          <td>Every CLI command on a bare laptop with no hardware attached.</td></tr>
+        <tr><td class="mono">test_recovery.py</td><td class="num">12</td>
+          <td>Three known files recovered by signature, nested thumbnail, truncation flagged.</td></tr>
+        <tr><td class="mono">test_witness.py</td><td class="num">12</td>
+          <td>Head construction pinned across two machines, divergence, unreachable ≠ agrees.</td></tr>
+        <tr><td class="mono">test_three_implementations.py</td><td class="num">9</td>
+          <td>Python, JavaScript, and Rust produce identical entry hashes and identical
+            verdicts &mdash; including delimiter-laden and Devanagari fields.</td></tr>
+        <tr><td class="mono">test_fix_refusal_tier.py</td><td class="num">17</td>
+          <td>A refusal cannot drag the custody tier down, cannot deflate the Part B
+            ratio, and cannot be hidden from the certificate.</td></tr>
+        <tr><td class="mono">test_presence_discovery.py</td><td class="num">9</td>
+          <td>The real Bluetooth-only port enumeration from this laptop; discovery
+            must return nothing rather than guess.</td></tr>
+        <tr><td class="mono">test_cross_implementation.py</td><td class="num">4</td>
+          <td>The original two-way Python/JavaScript canary, kept as a faster check.</td></tr>
+        <tr><td class="mono">test_console_contract.py</td><td class="num">4</td>
+          <td>The console's field list and domain tag cannot drift from Python's.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note">
+    <p><b>The one worth pointing at.</b>
+    <code>test_three_implementations.py</code> extracts the JavaScript from the console
+    page that actually ships, runs it under node, runs the compiled Rust binary, and
+    compares all three against chains built in Python. Every other test checks the
+    implementation against its own assumptions. This one checks it against two
+    independent ones &mdash; and each backend <i>skips loudly</i> when its toolchain is
+    absent rather than passing silently.</p>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 21 ═══ -->
+<section id="automation">
+  <h2><span class="num">21</span> Automation, and the rules it enforces on itself</h2>
+  <p class="section-lede">One runner, eleven checks, and three rules that exist because each
+  was broken here first.</p>
+
+  <p><code>scripts/run_all.py</code> runs every check this project has and writes both
+  <code>evidence/run_all.log</code> and <code>evidence/run_all.json</code> on every run.
+  <code>.github/workflows/checks.yml</code> drives the <b>same runner</b> rather than listing
+  its own checks, so CI cannot drift into a second, quietly different suite.</p>
+
+  <div class="grid-2">
+    <div class="label-card">
+      <div class="label-strip"><span class="id">RULE 1</span><span>no early exit</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:0">A runner that stops at the first failure tells you about
+        one problem and hides the rest &mdash; so the next run finds the second, and the run
+        after that finds the third. Every check runs to completion regardless of what failed
+        before it; the exit code is decided at the end from the whole picture.</p>
+      </div>
+    </div>
+    <div class="label-card">
+      <div class="label-strip"><span class="id">RULE 2</span><span>failures recorded more fully than passes</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:0">A pass needs a name, a duration and an exit code. A
+        failure gets its <b>entire</b> stdout and stderr, untruncated, with the command and
+        working directory &mdash; because that is the only record of <i>why</i>, and a log
+        that truncates the one line you need is a log nobody trusts twice.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="note caution">
+    <p style="margin:0 0 .4rem"><b>RULE 3 &mdash; skipped is not passed, and neither is
+    not-run.</b> A missing toolchain reports <span class="mono">SKIPPED</span> <i>with the
+    reason</i>. &ldquo;cargo is not on PATH&rdquo; and &ldquo;the Rust tests passed&rdquo;
+    must never look the same, and a suite that quietly shrinks when a tool goes missing
+    reports green while testing less.</p>
+    <p style="margin:0"><b>This rule was broken in the runner that enforces it.</b> A
+    <code>--quick</code> run printed <span class="mono">skipped 0</span> while three checks
+    were never executed &mdash; the header said &ldquo;8 of 11&rdquo; but the summary read
+    clean, so a glance would take a partial run for a complete one. Deselected checks are now
+    on the summary line, named, and the verdict reads
+    <span class="mono">GREEN (PARTIAL &mdash; 3 check(s) not run)</span>.</p>
+  </div>
+
+  <h3>21.1&ensp;What the runner found in its own first runs</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Finding</th><th>Why it mattered</th></tr></thead>
+      <tbody>
+        <tr><td><b>bandit went red every run</b></td>
+          <td>It ran at <span class="mono">-ll</span>, catching the two MEDIUM findings that are
+            deliberately triaged and kept visible. Reviewed findings turning the board red
+            every time makes the board stop meaning anything. Now <span class="mono">-lll</span>,
+            matching the documented gate: HIGH is a stop.</td></tr>
+        <tr><td><b>The Rust summary read &ldquo;0 passed&rdquo;</b></td>
+          <td>cargo prints a result line per target and the doc/bin targets each report zero,
+            so taking the last line reported no tests for a suite that had just run twelve.</td></tr>
+        <tr><td><b>The adversarial audit fell to 7/8, twice</b></td>
+          <td>Both times a newly written test called a function and asserted nothing, relying
+            on an exception no reader can see. Caught by the audit, not by the suite, because
+            a hollow test passes.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="stats" style="margin-top:1.2rem">
+    <div class="stat"><div class="v">11</div><div class="k">checks</div></div>
+    <div class="stat"><div class="v">620</div><div class="k">tests, 0 skipped</div></div>
+    <div class="stat"><div class="v">12</div><div class="k">Rust tests</div></div>
+    <div class="stat"><div class="v">8/8</div><div class="k">claims survived attack</div></div>
+    <div class="stat"><div class="v">382s</div><div class="k">full run</div></div>
+  </div>
+  <p style="margin-top:1rem"><b>620 passed, 0 skipped</b> &mdash; taken from pytest&rsquo;s own
+  summary line rather than by counting collected items, after a stale count of 558 (and later 578) was quoted
+  from a <code>--collect-only</code> run that predated the newest tests.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 22 ═══ -->
+<section id="positioning">
+  <h2><span class="num">22</span> Market, and why the pieces existing does not settle it</h2>
+  <p class="section-lede">Every figure here is from a named, dated source. The honest bound
+  is stated before the headline, because a market number a judge can shrink is worse than a
+  smaller one they cannot.</p>
+
+  <div class="stats">
+    <div class="stat"><div class="v">$1.39B</div><div class="k">India digital forensics by 2030</div></div>
+    <div class="stat"><div class="v">40%</div><div class="k">CAGR (Deloitte&ndash;DSCI)</div></div>
+    <div class="stat"><div class="v">$5.6B</div><div class="k">global data-erasure by 2030</div></div>
+    <div class="stat"><div class="v">~$650M</div><div class="k">our reachable Indian slice</div></div>
+  </div>
+
+  <div class="note caution">
+    <p style="margin:0"><b>The bound, stated first.</b> The same Deloitte&ndash;DSCI report
+    says <b>mobile forensics is over half</b> of that market &mdash; and AKHANDA is block
+    storage only, which we <i>measured</i> on a real Note&nbsp;10+ that cannot be reached at
+    the block level. So the addressable slice is the <b>non-mobile remainder, ~$650M by
+    2030</b>. Understating the reachable market is what makes the reachable number credible.</p>
+  </div>
+
+  <p>Three enforceable Indian mandates, all live, all requiring what this tool produces:
+  <b>DPDP Act 2023 &sect;8(7)</b> (erasure on purpose-completion), <b>BSA 2023 &sect;63(4)</b>
+  (the statutory certificate, in force since 1&nbsp;July&nbsp;2024), and the
+  <b>RBI / SEBI / CERT-In</b> compliance drivers Deloitte names by name.</p>
+
+  <h3>22.1&ensp;The pieces exist. The combination does not.</h3>
+  <p>Cross-operation chaining is prior art (US20110184910A1, expired 2023). Signed erasure
+  attestation is Seagate&rsquo;s (US9716594B2, active). The reassembly technique is
+  Garfinkel&rsquo;s. <b>Two squares survived the entire patent, product and literature
+  search:</b> a second party that is <i>cryptographically independent per operation</i>, and
+  a chain of custody signed with an algorithm NIST will still accept in 2040.</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Who</th><th>Has</th><th>Missing</th></tr></thead>
+      <tbody>
+        <tr><td><b>Blancco</b> (STQC, Pune)</td><td>certified erasure, supervisor <i>statement</i></td><td>chaining · independent signer · recovery · PQ</td></tr>
+        <tr><td><b>BitRaser</b> (STQC, CC&nbsp;EAL2)</td><td>certified erasure</td><td>chaining · independent signer · recovery · PQ</td></tr>
+        <tr><td><b>EnCase / FTK</b></td><td>imaging, recovery</td><td>chaining · second signer · BSA certificate</td></tr>
+        <tr><td><b>Delhi FSL</b> (deployed)</td><td>blockchain custody of <i>samples</i></td><td>tool-operation chaining · erasure · PQ</td></tr>
+        <tr><td><b>CUSAT</b> (patent, Dec 2025)</td><td>enriched fingerprint</td><td>chaining · second signer · erasure</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><b>The moat is the conjunction, not any clause.</b> A competitor copies any one clause in
+  a sprint; the conjunction &mdash; systems + crypto + forensics + WebAuthn + Indian law in
+  one team &mdash; is an org-design problem. And the certified incumbents have a structural
+  <i>disincentive</i> to change their certificate format, because recertification runs on
+  years: <b>our advantage is not that we thought of it first, but that we have nothing to
+  recertify.</b></p>
+
+  <div class="note">
+    <p style="margin:0"><b>The one headline that survives an adversarial search</b> &mdash;
+    every clause load-bearing: <i>&ldquo;No commercially deployed or government-fielded tool
+    combines, in one certificate applied to sanitisation and recovery: cross-operation
+    chaining, an independent second human validator, cryptographic human-presence
+    attestation, post-quantum signing, and external public anchoring.&rdquo;</i> Remove any
+    clause and a named competitor matches it.</p>
+  </div>
+
+  <p style="margin-top:1rem"><b>Scored honestly</b> in <code>research/round2/</code>: &ldquo;a
+  strong, defensible SIH26149 entry&rdquo; at <b>p&nbsp;&asymp;&nbsp;0.94</b>, with the two
+  real penalties named &mdash; no hardware run yet (closeable with a VHD and one witness
+  account), and STQC-certified incumbents already in Indian procurement (answered by conceding
+  erasure and holding completeness). The unconditional &ldquo;wins the whole hackathon&rdquo;
+  number is deliberately <i>not</i> inflated past the single digits its own Bayesian funnel
+  supports.</p>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 11 ═══ -->
+<section id="scope">
+  <h2><span class="num">23</span> Scope and ownership</h2>
+  <p class="section-lede">Six people, six acceptance tests. Nothing is "done" because
+  someone says so.</p>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Role</th><th>Owns</th><th>Acceptance test</th><th>State</th></tr></thead>
+      <tbody>
+        <tr><td><b>Lead</b></td><td>Attestation core, policy, witness, presence, anchor, certificate, CLI</td>
+          <td>Full suite passes; tamper demo runs reliably</td>
+          <td><span class="badge b-built">built</span></td></tr>
+        <tr><td><b>Erasure</b></td><td>Media decision tree, real-media testing</td>
+          <td>Pattern written to the 16GB stick, erased, confirmed gone, records Clear honestly</td>
+          <td><span class="badge b-gap">drive path unrun on real media; file path verified on real NTFS</span></td></tr>
+        <tr><td><b>Recovery</b></td><td>Signature table, corpus, confidence heuristic</td>
+          <td>Three known deleted files recovered from a prepared image</td>
+          <td><span class="badge b-gap">reference built, heuristic missing</span></td></tr>
+        <tr><td><b>Console</b></td><td>The interface it becomes</td>
+          <td>Renders correct state from chain.json with no backend running</td>
+          <td><span class="badge b-built">reference built</span></td></tr>
+        <tr><td><b>Evidence</b></td><td>Executing the matrix on real hardware, capturing output</td>
+          <td>A documented pack covering every row</td>
+          <td><span class="badge b-none">not started</span></td></tr>
+        <tr><td><b>Compliance</b></td><td>Verifying each clause against source texts, the deck</td>
+          <td>Every certificate field maps to a named clause</td>
+          <td><span class="badge b-gap">machine half done, sources unchecked</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note caution">
+    <p><b>The unspoken risk.</b> Reference implementations exist for every role so nobody
+    is blocked on an empty file and the demo cannot fail because one person ran out of
+    time. But ownership still sits with the named role, they extend it, test it on real
+    media, and must be able to explain it. A teammate who only runs code they did not
+    reason through cannot answer for it under split Q&amp;A, and that is exactly where
+    hackathon projects lose marks.</p>
+  </div>
+
+  <h3>Known gaps, ranked</h3>
+  <ul class="tight">
+    <li><b>No co-signer or presence device has ever run</b>, the witness node and the
+      presence handshake have never been exercised against physical hardware. Every claim
+      about them is a configuration, not a result. This outranks everything below it.</li>
+    <li><b>Drive erasure has never touched real removable media</b>, the file path is
+      verified on real NTFS, but no USB stick has been wiped. The NIST decision tree for
+      flash is reasoned, not observed.</li>
+    <li><b>The presence device is shown the wrong hash</b>, it displays a prefix of the
+      result digest, not the entry hash that gets signed, and the module docstring claims
+      the opposite. Needs a two-phase design, because the entry hash depends on the
+      presence reference. A wrong comment is a lie a judge can read.</li>
+    <li><b>Recovery confidence scoring</b>, a heuristic (header/footer completeness,
+      entropy) is the right call at this scale. A trained classifier is scope that is not
+      needed, and would be the only reason to want a GPU.</li>
+    <li><b>Keys are readable files on disk</b>, <code>AKHANDA_KEY_PASSPHRASE</code>
+      encrypts the operator key at rest; the witness key is not yet passphrase-derived.
+      Deferred and disclosed rather than silently carried.</li>
+  </ul>
+
+  <h3>Three bugs real hardware found that no test could</h3>
+  <p>Kept on this page because they are the argument for testing on the machine you will
+  present from, not only in CI.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>What</th><th>Why no test caught it</th></tr></thead>
+      <tbody>
+        <tr><td>Presence discovery returned a Bluetooth COM port as the presence device</td>
+          <td>Every test mocked the port enumeration. The real laptop has six paired
+            Bluetooth ports and zero ESP32s, and the blind &ldquo;first port wins&rdquo;
+            fallback selected one &mdash; so the preflight reported a device that did not
+            exist.</td></tr>
+        <tr><td>Filesystem detection always returned &ldquo;unknown&rdquo;, and unknown
+            produced the <i>strongest</i> outcome</td>
+          <td>The stub's own docstring claimed a downgrade the code did not perform. It
+            now reads NTFS through Win32 and ext4 through <code>/proc/mounts</code>.</td></tr>
+        <tr><td>File-erase verification returned true for a file that was never
+            overwritten</td>
+          <td>It wrote unreproducible random bytes, so there was nothing to compare
+            against; it only rejected all-zero reads, and old data is not zeros. Thirteen
+            shipped tests all passed.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════ 12 ═══ -->
+<section id="limits">
+  <h2><span class="num">24</span> What it cannot do</h2>
+  <p class="section-lede">Stated first, never trimmed. A reviewer who finds a gap
+  themselves discounts everything else in the document.</p>
+
+  <div class="stack">
+    <div class="label-card">
+      <div class="label-strip"><span class="id">LIMIT 01</span><span>integrity, not completeness</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:0">The chain proves nothing was altered after being written.
+        It cannot prove nothing was <i>withheld</i>. An operator who logs nine of ten
+        operations passes every check in this repository. Recording refusals narrows this , 
+        a blocked attempt now leaves a trace, but an operation never attempted through the
+        tool leaves none, and no single-operator ledger can close that.</p>
+      </div>
+    </div>
+
+    <div class="label-card">
+      <div class="label-strip"><span class="id">LIMIT 02</span><span>tail truncation</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:0">Dropping the most recent entries leaves a shorter,
+        self-consistent chain that local verification cannot distinguish from a chain that
+        was always that length. Only the witness's independent head record separates the
+        two. There is a test that asserts this limit still exists, so it cannot be quietly
+        claimed as solved.</p>
+      </div>
+    </div>
+
+    <div class="label-card">
+      <div class="label-strip"><span class="id">LIMIT 03</span><span>presence ≠ key protection</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:0">The ESP32 is not a secure element. CVE-2019-17391
+        extracts ESP32 eFuse keys by voltage glitching and is unpatchable on shipped
+        silicon. The device confirms a human was physically present. It does not hold,
+        protect, or attest a key, and no output ever says otherwise.</p>
+      </div>
+    </div>
+
+    <div class="label-card">
+      <div class="label-strip"><span class="id">LIMIT 04</span><span>anchoring is cryptographic, not legal</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:0">OpenTimestamps is not legally recognised in Indian
+        courts. It provides a cryptographic guarantee of the same class courts increasingly
+        accept. That is the claim, and nothing stronger appears anywhere in the tool's
+        output.</p>
+      </div>
+    </div>
+
+    <div class="label-card">
+      <div class="label-strip"><span class="id">LIMIT 05</span><span>flash cannot reach Purge</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:0">USB flash and SD cards support neither ATA Secure Erase
+        nor NVMe Sanitize, and their translation layers retain spare blocks the host cannot
+        address. On this media the tool achieves Clear and records Clear, even when Purge
+        was explicitly requested, in which case it also records why.</p>
+      </div>
+    </div>
+
+    <div class="label-card">
+      <div class="label-strip"><span class="id">LIMIT 06</span><span>carving is not recovery</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:0">Fragmented files carve as garbage after the first
+        fragment, and nothing in the byte stream announces it. Original filenames are gone
+        with the directory entries, the names in the output were invented from byte
+        offsets. A missing footer means the end boundary is a capped guess, flagged as
+        <code>truncated</code>.</p>
+      </div>
+    </div>
+
+    <div class="label-card">
+      <div class="label-strip"><span class="id">LIMIT 07</span><span>form, not admissibility</span></div>
+      <div class="label-body">
+        <p style="margin-bottom:0">Every certificate field maps to a named clause of NIST SP
+        800-88 Rev. 2 or the Bharatiya Sakshya Adhiniyam 2023. That is a statement about the
+        <i>form</i> of the document. Whether a record is admitted is a matter for the court,
+        never for the tool.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<hr class="hr">
+
+<footer>
+  <p style="margin-bottom:.5rem"><b>Provenance.</b> Akhanda extends AetherProof, the lead's
+  own open-source attestation engine (Apache-2.0, sole author Pulkit Kr Srivastava), which
+  predates this problem statement. Reused: the injective-encoding discipline, RFC 6962
+  Merkle domain separation, and the verified-versus-unverifiable reporting split, each
+  written there in response to a real defect found under adversarial testing. New here:
+  dual-party signing, the separate-domain co-signer, the fail-closed policy, external
+  anchoring, and the statute-native certificate generator.</p>
+  <p style="margin-bottom:0">Team Syntax Squad · GITAM University, Hyderabad · Smart India
+  Hackathon 2026 · problem statement SIH26149 · National Technical Research Organisation</p>
+</footer>
+
+</main>
+</div>

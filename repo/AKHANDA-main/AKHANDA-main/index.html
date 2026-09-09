@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Akhanda: documentation</title>
+<meta name="description" content="Akhanda, unbroken chain of custody for digital forensics. Documentation index.">
+<style>
+  :root{
+    color-scheme: light;
+    --paper:#e6e4df; --card:#fff; --tint:#faf9f6;
+    --ink:#14120f; --ink2:#4a453d; --ink3:#7d766b;
+    --rule:#ddd9d1; --rule2:#b8b2a7;
+    --ox:#7a1e28; --forest:#2c6249;
+    --sans:"Segoe UI",-apple-system,Helvetica,Arial,sans-serif;
+    --mono:"JetBrains Mono",Consolas,ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
+       font-size:16px;line-height:1.6}
+  .wrap{max-width:940px;margin:0 auto;padding:30px 18px 70px;
+        display:flex;flex-direction:column;gap:18px}
+  section{background:var(--card);border:1px solid var(--rule2);padding:30px 34px}
+  @media(max-width:620px){section{padding:22px 18px}}
+
+  .mark{font-size:15px;letter-spacing:.4em;color:var(--ox);margin-bottom:18px}
+  h1{font-size:clamp(30px,5vw,46px);line-height:1.05;margin:0 0 10px;letter-spacing:-.025em}
+  .sub{color:var(--ink2);font-size:17px;margin:0 0 4px}
+  .meta{margin-top:22px;padding-top:16px;border-top:2px solid var(--ink);
+        font-family:var(--mono);font-size:11.5px;color:var(--ink3);line-height:1.9}
+  h2{font-size:12px;letter-spacing:.15em;text-transform:uppercase;color:var(--ink3);
+     margin:0 0 14px;padding-bottom:7px;border-bottom:1px solid var(--rule)}
+  p{margin:0 0 13px;color:var(--ink2)}
+  strong{color:var(--ink)}
+  a{color:var(--ox)}
+  img{max-width:100%;display:block}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:0}
+  .doc{display:block;padding:15px 18px 15px 0;border-bottom:1px solid var(--rule);
+       text-decoration:none}
+  .doc:hover{background:var(--tint)}
+  .doc .t{font-size:15.5px;color:var(--ox);font-weight:600;margin-bottom:3px}
+  .doc .d{font-size:13px;color:var(--ink3);line-height:1.45}
+
+  .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));
+           border-top:2px solid var(--ink);margin-bottom:6px}
+  .m{padding:15px 18px 15px 0;border-bottom:1px solid var(--rule)}
+  .m .v{font-size:30px;font-weight:600;letter-spacing:-.02em;line-height:1}
+  .m .v.ok{color:var(--forest)}
+  .m .k{font-size:11.5px;color:var(--ink3);margin-top:7px;line-height:1.4}
+
+  .note{padding:15px 18px;border:1px solid var(--rule2);background:var(--tint);
+        font-size:14px;color:var(--ink2)}
+  .foot{font-family:var(--mono);font-size:11px;color:var(--ink3);line-height:1.9;
+        text-align:center;padding-top:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <section>
+    <div class="mark">&#2309;&#2326;&#2339;&#2381;&#2337;</div>
+    <h1>Akhanda</h1>
+    <p class="sub">Unbroken chain of custody for digital forensics.</p>
+    <p class="sub" style="font-size:15px">Secure data erasure and file recovery, where every
+    operation is written into one append-only ledger signed by two independent parties.</p>
+    <div class="meta">
+      <span><b>Team Syntax Squad</b>, GITAM (Deemed to be University), Hyderabad</span><br>
+      <span>Smart India Hackathon 2026 &nbsp;·&nbsp; Problem statement SIH26149 &nbsp;·&nbsp; NTRO</span><br>
+      <span>Apache-2.0 &nbsp;·&nbsp; Entry format v4</span>
+    </div>
+  </section>
+
+  <section>
+    <img src="docs/images/two-keys.png" alt="Two independent keys joined by a single thread">
+  </section>
+
+  <section>
+    <h2>Verified results</h2>
+    <div class="metrics">
+      <div class="m"><div class="v ok">648</div><div class="k">tests, 0 failures</div></div>
+      <div class="m"><div class="v ok">3</div><div class="k">independent verifier implementations that agree</div></div>
+      <div class="m"><div class="v">100%</div><div class="k">carving precision and recall on NIST CFReDS L1</div></div>
+      <div class="m"><div class="v">byte<br>identical</div><div class="k">reassembly against the NIST published original</div></div>
+    </div>
+    <p style="font-size:14px;margin-top:14px">Every figure is produced by running the code
+    in this repository. Commands to reproduce each one are in the
+    <a href="https://github.com/pulkit6732/AKHANDA#results">README</a>.</p>
+  </section>
+
+  <section>
+    <h2>Operating the tool</h2>
+    <div class="grid">
+      <a class="doc" href="MANUAL.html">
+        <div class="t">User manual</div>
+        <div class="d">The place to start if you are running Akhanda</div></a>
+      <a class="doc" href="OPERATING_GUIDE.html">
+        <div class="t">Operating guide</div>
+        <div class="d">Day to day procedure</div></a>
+      <a class="doc" href="JUDGE_QA.html">
+        <div class="t">Questions and answers</div>
+        <div class="d">The hard questions, answered</div></a>
+      <a class="doc" href="PLAN_B_NO_HOTSPOT.html">
+        <div class="t">Fallback plan</div>
+        <div class="d">When the two machines cannot reach each other</div></a>
+    </div>
+  </section>
+
+  <section>
+    <h2>Architecture and evidence</h2>
+    <div class="grid">
+      <a class="doc" href="akhanda/docs/ARCHITECTURE.html">
+        <div class="t">Architecture</div>
+        <div class="d">Chain format, encoding, signing, custody tiers, witness protocol</div></a>
+      <a class="doc" href="akhanda/docs/SIH26149_PROOF.html">
+        <div class="t">Evidence dossier</div>
+        <div class="d">The claims, and what backs each one</div></a>
+      <a class="doc" href="console-app/index.html">
+        <div class="t">Console</div>
+        <div class="d">Re-verifies a chain in your browser, no server needed</div></a>
+      <a class="doc" href="https://github.com/pulkit6732/AKHANDA/blob/main/akhanda/docs/ENGINEERING_RULES.md">
+        <div class="t">Engineering rules</div>
+        <div class="d">The rules the source enforces, and the limits it admits</div></a>
+    </div>
+  </section>
+
+  <section>
+    <h2>How it works</h2>
+    <p>An amendment is appended, never applied. The superseded entry stays in the chain,
+    unedited, still hashing to its recorded value.</p>
+    <img src="docs/images/arch-amend.svg" alt="An amendment names the entry it supersedes and that entry's hash, while the superseded entry stays unedited in the chain">
+    <p style="margin-top:16px">The witness never sees the evidence, only a 32 byte digest,
+    so co-signing transfers no custody.</p>
+    <img src="docs/images/arch-two-machines.svg" alt="The operator workstation sends only a 32 byte entry hash to a witness on a separate machine">
+  </section>
+
+  <section>
+    <h2>What this does not claim</h2>
+    <div class="note">
+      <p><strong>The chain does not prevent omission.</strong> It proves nothing was altered
+      after being written. It cannot prove nothing was withheld. That is integrity, not
+      completeness.</p>
+      <p><strong>OpenTimestamps is not legally recognised in Indian courts.</strong> It is a
+      cryptographic guarantee of a class courts increasingly accept, and that is the whole
+      claim.</p>
+      <p style="margin-bottom:0"><strong>The custody tier reached is
+      <code>WITNESS_COSIGNED</code>, never <code>FULL_CUSTODY</code>.</strong> The tool
+      refuses to print the higher label. The full list of limits is in the
+      <a href="https://github.com/pulkit6732/AKHANDA#limits-stated-plainly">README</a>.</p>
+    </div>
+  </section>
+
+  <div class="foot">
+    <a href="https://github.com/pulkit6732/AKHANDA">github.com/pulkit6732/AKHANDA</a><br>
+    Copyright 2026 Team Syntax Squad, GITAM (Deemed to be University), Hyderabad. Apache-2.0.
+  </div>
+
+</div>
+</body>
+</html>

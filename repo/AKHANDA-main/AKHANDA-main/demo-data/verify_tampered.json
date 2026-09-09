@@ -1,0 +1,10 @@
+{
+  "ok": false,
+  "broken_seq": 1,
+  "reason": "entry content altered: hash mismatch",
+  "witness": {
+    "checked": false,
+    "diverged": false,
+    "reason": "n/a"
+  }
+}

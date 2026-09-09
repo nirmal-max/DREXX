@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="6mm" height="7mm" viewBox="0 0 6 7">
+  <path fill="none" d="M0 .5V0h3l-.125.375Q2.75.75 2.5 1l-.5.5-.5.5-.5.5q-.25.25-.625.375L0 3z" style="fill:#000;fill-opacity:0" transform="translate(-.50000002 .49999968)"/>
+  <path d="M.50000002 3.0000003 3.5-.49999968h3L3.7583522 3.0000003l2.7416478 3.5h-3" style="fill:gray;fill-opacity:1" transform="translate(-.50000002 .49999968)"/>
+  <path fill="none" d="M4.125.375 4 0h3v3l-.375-.125Q6.25 2.75 6 2.5L5.5 2 5 1.5 4.5 1Q4.25.75 4.125.375M3 3.5q.25-.25.5-.25t.5.25l.5.5.5.5.5.5q.25.25.375.625L6 6H1l.125-.375Q1.25 5.25 1.5 5l.5-.5.5-.5z" style="fill:#000;fill-opacity:0" transform="translate(-.50000002 .49999968)"/>
+</svg>

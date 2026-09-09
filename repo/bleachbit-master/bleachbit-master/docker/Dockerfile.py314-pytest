@@ -1,0 +1,58 @@
+# syntax=docker/dockerfile:1.7
+
+FROM python:3.14-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=en_US.UTF-8
+ENV LC_ALL=en_US.UTF-8
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        cmake \
+        gettext \
+        gobject-introspection \
+        gir1.2-gtk-3.0 \
+        gir1.2-notify-0.7 \
+        libffi-dev \
+        libglib2.0-dev \
+        libgirepository-2.0-dev \
+        libgtk-3-0 \
+        libgirepository1.0-dev \
+        libcairo2-dev \
+        locales \
+        meson \
+        ninja-build \
+        pkg-config \
+        wget \
+        xauth \
+        xvfb \
+        libxml2-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# for tests.TestUnix.UnixTestCase.test_localization_paths
+RUN sed -i 's/# \(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen \
+    && sed -i 's/# \(de_DE.UTF-8 UTF-8\)/\1/' /etc/locale.gen \
+    && sed -i 's/# \(fr_FR.UTF-8 UTF-8\)/\1/' /etc/locale.gen \
+    && locale-gen \
+    && mkdir -p /usr/share/locale/de /usr/share/locale/fr
+
+# Update pip.
+# pip is the only preinstalled package.
+RUN python -m pip list && python -m pip install --no-cache-dir -U pip
+
+# Install new Python packages.
+COPY requirements.txt ./
+RUN python -m pip install --no-cache-dir \
+        PyGObject pytest pytest-xdist pytest-rerunfailures \
+        -r requirements.txt
+
+ARG HOME_IN_CONTAINER=/home/user
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+RUN mkdir -p "$HOME_IN_CONTAINER" && chown "$USER_ID:$GROUP_ID" "$HOME_IN_CONTAINER"
+
+WORKDIR /work
+
+CMD ["/bin/bash"]

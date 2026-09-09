@@ -1,0 +1,108 @@
+/*
+ *
+ * The Sleuth Kit
+ *
+ * Copyright 2013-2015 Basis Technology Corp.
+ * Contact: carrier <at> sleuthkit <dot> org
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * This is a C++ port of the Rejistry library developed by Willi Ballenthin.
+ * See https://github.com/williballenthin/Rejistry for the original Java version.
+ */
+
+/**
+ * \file REGFHeader.cpp
+  */
+
+#include <memory>
+
+// Local includes
+#include "REGFHeader.h"
+#include "RejistryException.h"
+
+namespace Rejistry {
+
+
+    REGFHeader::REGFHeader(RegistryByteBuffer& buf, const uint32_t offset) : BinaryBlock(buf, offset) {
+        // offset is applied within getDWord by BinaryBlock
+        uint64_t magic = getDWord(0x0);
+
+        if (magic != 0x66676572) {
+            throw RegistryParseException("REGF magic value not found");
+        }
+    }
+
+    bool REGFHeader::isSynchronized() const {
+        return (getDWord(SEQ1_OFFSET) == getDWord(SEQ2_OFFSET));
+    }
+
+    uint32_t REGFHeader::getMajorVersion() const {
+        return getDWord(MAJOR_VERSION_OFFSET);
+    }
+
+    uint32_t REGFHeader::getMinorVersion() const {
+        return getDWord(MINOR_VERSION_OFFSET);
+    }
+
+    std::wstring REGFHeader::getHiveName() const {
+        return getUTF16String(HIVE_NAME_OFFSET, 0x40);
+    }
+
+    uint32_t REGFHeader::getLastHbinOffset() const {
+        return getDWord(LAST_HBIN_OFFSET_OFFSET);
+    }
+
+    std::vector<HBIN::HBINUniqPtr> REGFHeader::getHBINs() const {
+        uint32_t nextHBINOffset = FIRST_HBIN_OFFSET;
+        std::vector<HBIN::HBINUniqPtr> hbinList;
+
+        do {
+            if (getDWord(nextHBINOffset) != 0x6E696268) {
+                // Terminate if this doesn't have the correct magic number.
+                break;
+            }
+
+            auto nextHBIN = std::make_unique<HBIN>(this, _buf, getAbsoluteOffset(nextHBINOffset));
+            uint32_t relNext = nextHBIN->getRelativeOffsetNextHBIN();
+            hbinList.push_back(std::move(nextHBIN));
+            if (relNext == 0 || nextHBINOffset + relNext < nextHBINOffset) {
+                break;
+            }
+            nextHBINOffset += relNext;
+        }
+        while (nextHBINOffset <= getLastHbinOffset());
+
+        return hbinList;
+    }
+
+    HBIN::HBINUniqPtr REGFHeader::getFirstHBIN() const {
+        if (getDWord(FIRST_HBIN_OFFSET) != 0x6E696268) {
+            throw RegistryParseException("HBIN magic value not found.");
+        }
+
+        return std::make_unique<HBIN>(this, _buf, getAbsoluteOffset(FIRST_HBIN_OFFSET));
+    }
+
+    /**
+     * @throws RegistryParseException in case of error.
+     */
+    std::unique_ptr<NKRecord> REGFHeader::getRootNKRecord() const {
+        int32_t firstCellOffset = (int32_t)(getDWord(FIRST_KEY_OFFSET_OFFSET));
+        auto firstHBIN = getFirstHBIN();
+        if (firstHBIN == nullptr) {
+            throw RegistryParseException("Failed to get first HBIN.");
+        }
+        return firstHBIN->getCellAtOffset(firstCellOffset)->getNKRecord();
+    }
+};

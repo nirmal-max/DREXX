@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 300" width="880" height="300" role="img" aria-label="Four custody tiers in ascending order, SOFTWARE_KEY, PRESENCE_CONFIRMED, WITNESS_COSIGNED and FULL_CUSTODY, with REFUSED shown as a recorded dead end taken when a required component does not answer.">
+  <defs>
+    <marker id="ti-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#7d766b"/>
+    </marker>
+    <marker id="ti-arrow-ox" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#7a1e28"/>
+    </marker>
+  </defs>
+
+  <rect width="880" height="300" fill="#faf9f6"/>
+
+  <text x="30" y="26" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11" fill="#7d766b" letter-spacing="1.6">CUSTODY TIERS, RECORDED RATHER THAN ASSUMED</text>
+
+  <g stroke="#7d766b" stroke-width="1.2" marker-end="url(#ti-arrow)">
+    <line x1="216" y1="98" x2="240" y2="98"/>
+    <line x1="426" y1="98" x2="450" y2="98"/>
+    <line x1="636" y1="98" x2="660" y2="98"/>
+  </g>
+
+  <rect x="30" y="70" width="186" height="56" fill="none" stroke="#8a6a12" stroke-width="1.4"/>
+  <text x="123" y="94" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11.5" fill="#8a6a12" text-anchor="middle">SOFTWARE_KEY</text>
+  <text x="123" y="112" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#7d766b" text-anchor="middle">operator key alone</text>
+
+  <rect x="240" y="70" width="186" height="56" fill="none" stroke="#8a6a12" stroke-width="1.4"/>
+  <text x="333" y="94" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11.5" fill="#8a6a12" text-anchor="middle">PRESENCE_CONFIRMED</text>
+  <text x="333" y="112" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#7d766b" text-anchor="middle">a human approved the bytes</text>
+
+  <rect x="450" y="70" width="186" height="56" fill="none" stroke="#2c6249" stroke-width="1.8"/>
+  <text x="543" y="94" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11.5" fill="#2c6249" text-anchor="middle" font-weight="bold">WITNESS_COSIGNED</text>
+  <text x="543" y="112" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#2c6249" text-anchor="middle">second key, separate machine</text>
+
+  <rect x="660" y="70" width="190" height="56" fill="none" stroke="#b8b2a7" stroke-width="1.4" stroke-dasharray="5 4"/>
+  <text x="755" y="94" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11.5" fill="#7d766b" text-anchor="middle">FULL_CUSTODY</text>
+  <text x="755" y="112" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#7d766b" text-anchor="middle">designed, not shipped</text>
+
+  <text x="543" y="146" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#2c6249" text-anchor="middle" font-weight="bold">the tier this release reaches</text>
+
+  <!-- refused branch -->
+  <path d="M333,126 L333,190" fill="none" stroke="#7a1e28" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ti-arrow-ox)"/>
+  <text x="348" y="164" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#7a1e28">a required component does not answer</text>
+
+  <rect x="240" y="196" width="186" height="52" fill="#f8eff0" stroke="#7a1e28" stroke-width="1.8"/>
+  <text x="333" y="219" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11.5" fill="#7a1e28" text-anchor="middle" font-weight="bold">REFUSED</text>
+  <text x="333" y="236" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#7a1e28" text-anchor="middle">blocked, and the block is signed</text>
+
+  <line x1="30" y1="264" x2="850" y2="264" stroke="#ddd9d1" stroke-width="1"/>
+  <text x="30" y="284" font-family="Helvetica,Arial,sans-serif" font-size="12" fill="#4a453d">Opting out of a component degrades cleanly and records the honest tier. Asking for one and not getting it does not: the operation is blocked before it runs.</text>
+</svg>

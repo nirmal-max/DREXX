@@ -1,0 +1,20 @@
+---
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# This file is part of nvme.
+# Copyright (c) 2026 SUSE LLC
+#
+# Authors: Daniel Wagner <dwagner@suse.de>
+
+ignore:
+  - 'subprojects'
+  - 'ccan'
+  - 'tests'
+  - 'libnvme/test'
+  - 'libnvme/libnvme/tests'
+  - 'libnvme/examples'
+
+coverage:
+  status:
+    project: off
+    patch: off

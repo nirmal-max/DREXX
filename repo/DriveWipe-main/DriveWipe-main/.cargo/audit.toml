@@ -1,0 +1,8 @@
+# cargo-audit configuration.
+#
+# Every entry here must state why the advisory does not apply to DriveWipe and
+# what would remove it. An advisory is only ignored when it is unreachable from
+# our code paths — never merely because it is inconvenient.
+
+[advisories]
+ignore = []

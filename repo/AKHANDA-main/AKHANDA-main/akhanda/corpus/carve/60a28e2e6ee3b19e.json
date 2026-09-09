@@ -1,0 +1,34 @@
+{
+  "corpus_version": "1",
+  "digest": "60a28e2e6ee3b19e60f4d387f4138ba92300014a27860d17137c35d1a0b9f834",
+  "environment": {
+    "byteorder": "little",
+    "machine": "AMD64",
+    "python": "3.13.5",
+    "system": "Windows"
+  },
+  "inputs": {
+    "name": "L0_Graphic.dd",
+    "sha256": "4d63d314f34a7349732bb0d36a434534dab551c0aebb2285cbe0216e0640a5f5",
+    "size": 64769536
+  },
+  "kind": "carve",
+  "meaning": "This is what the tool DID on real input, pinned so it must keep doing it. It is not a statement that the result is CORRECT: if the run was wrong, this pins the bug. A future mismatch is a question about which of the two results is right, not an automatic verdict against the newer one.",
+  "meta": {
+    "artifacts": 6,
+    "by_type": {
+      "bmp": 1,
+      "gif": 1,
+      "jpg": 1,
+      "pcx": 1,
+      "png": 1,
+      "tif": 1
+    },
+    "note": "Reference data, not team-generated. L2 and L3 contain no contiguous file by construction, so a low artifact count on those is the expected result and not a regression.",
+    "outcome": "VERIFIED",
+    "source": "NIST CFReDS graphic image",
+    "truncated": 0
+  },
+  "recorded_by_tool": "akhanda/0.1.0+81581afe42a8699d",
+  "recorded_utc": "2026-08-31T17:45:58Z"
+}

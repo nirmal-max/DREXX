@@ -1,0 +1,33 @@
+# Line endings are part of correctness in this repo, not a style preference.
+#
+# tests/test_cross_implementation.py - the canary that proves the Python,
+# JavaScript and Rust verifiers agree - extracts the console's crypto core out
+# of console/index.html with a regex anchored on "\n". Git's Windows default
+# (core.autocrlf=true) rewrites those to "\r\n" on checkout, the regex stops
+# matching, and a FRESH CLONE ON WINDOWS FAILS FOUR TESTS - including the one
+# docs/ENGINEERING_RULES.md says must never be allowed to fail.
+#
+# Caught by extracting a `git archive` of HEAD into a clean directory and
+# running the suite against it, which is what a clone actually looks like.
+# The repo's own working copy is LF and passes, so nothing local reveals this.
+
+* text=auto eol=lf
+
+# Binary: never touch these, never diff them as text.
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.bmp   binary
+*.tif   binary
+*.pcx   binary
+*.pdf   binary
+*.docx  binary
+*.pptx  binary
+*.xlsx  binary
+*.zip   binary
+*.dd    binary
+*.bin   binary
+*.img   binary
+*.vhd   binary
+*.ots   binary

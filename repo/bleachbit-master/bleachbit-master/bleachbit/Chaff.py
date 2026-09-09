@@ -1,0 +1,295 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2008-2026 Andrew Ziem.
+#
+# This work is licensed under the terms of the GNU GPL, version 3 or
+# later.  See the COPYING file in the top-level directory.
+
+import bz2
+from datetime import datetime
+import email.generator
+from email.mime.text import MIMEText
+import json
+import logging
+import os
+import random
+import tempfile
+
+from bleachbit import options_dir
+
+from . import markovify
+
+logger = logging.getLogger(__name__)
+
+# These were typos in the original emails, not OCR errors:
+# abdinh@state.gov
+# mhcaleja@state.gov
+
+RECIPIENTS = [
+    'abedinh@state.gov',
+    'adlerce@state.gov',
+    'baerdb@state.gov',
+    'baldersonkm@state.gov',
+    'balderstonkm@state.gov',
+    'bam@mikulski.senate.gov',
+    'bealeca@state.gov',
+    'benjamin_moncrief@lemieux.senate.gov',
+    'blaker2@state.gov',
+    'brimmere@state.gov',
+    'burnswj@state.gov',
+    'butzgych2@state.gov',
+    'campbellkm@state.gov',
+    'carsonj@state.gov',
+    'cholletdh@state.gov',
+    'cindy.buhl@mail.house.gov',
+    'colemancl@state.gov',
+    'crowleypj@state.gov',
+    'danieljj@state.gov',
+    'david_garten@lautenberg.senate.gov',
+    'dewanll@state.gov',
+    'feltmanjd@state.gov',
+    'fuchsmh@state.gov',
+    'goldbergps@state.gov',
+    'goldenjr@state.gov',
+    'gonzalezjs@state.gov',
+    'gordonph@state.gov',
+    'hanleymr@state.gov',
+    'hdr22@clintonemail.com',
+    'hillcr@state.gov',
+    'holbrookerc@state.gov',
+    'hormatsrd@state.gov',
+    'hr15@att.blackberry.net',
+    'hr15@mycingular.blackberry.net',
+    'hrod17@clintonemail.com',
+    'huma@clintonemail.com',
+    'hyded@state.gov',
+    'info@mailva.evite.com',
+    'jilotylc@state.gov',
+    'jonespw2@state.gov',
+    'kellyc@state.gov',
+    'klevorickcb@state.gov',
+    'kohhh@state.gov',
+    'laszczychj@state.gov',
+    'lewjj@state.gov',
+    'macmanusje@state.gov',
+    'marshallcp@state.gov',
+    'mchaleja@state.gov',
+    'millscd@state.gov',
+    'muscatinel@state.gov',
+    'nidestr@state.gov',
+    'nulandvj@state.gov',
+    'oterom2@state.gov',
+    'posnermh@state.gov',
+    'reinesp@state.gov',
+    'reinespi@state.gov',
+    'ricese@state.gov',
+    'rodriguezme@state.gov',
+    'rooneym@state.gov',
+    's_specialassistants@state.gov',
+    'schwerindb@state.gov',
+    'shannonta@state.gov',
+    'shapiroa@state.gov',
+    'shermanwr@state.gov',
+    'slaughtera@state.gov',
+    'steinbergjb@state.gov',
+    'sterntd@state.gov',
+    'sullivanjj@state.gov',
+    'tauschereo@state.gov',
+    'tillemannts@state.gov',
+    'toivnf@state.gov',
+    'tommy_ross@reid.senate.gov',
+    'valenzuelaaa@state.gov',
+    'valmorolj@state.gov',
+    'vermarr@state.gov',
+    'verveerms@state.gov',
+    'woodardew@state.gov']
+DEFAULT_SUBJECT_LENGTH = 64
+DEFAULT_NUMBER_OF_SENTENCES_CLINTON = 50
+DEFAULT_NUMBER_OF_SENTENCES_2600 = 50
+MODEL_BASENAMES = (
+    '2600_model.json.bz2',
+    'clinton_content_model.json.bz2',
+    'clinton_subject_model.json.bz2')
+MODEL_SHA512 = {
+    '2600_model.json.bz2':
+        '1c06c362587c177908fee6a4f7a439a684ada48404f40fec72cba5ba1f90aff5'
+        '9e76742718f8dc290853fe08f32f2c1b60b769c412765340fc428f0ea3fc46d7',
+    'clinton_content_model.json.bz2':
+        'ea92709c17082e1113c00138d9dd9fd970a7089f4de9bc8f58a0ce3312782154'
+        '9554cb2cd6b5591f1e7035513badeff11af09423357b8ecf5a20bc5a61a9b8ef',
+    'clinton_subject_model.json.bz2':
+        '4cff92b6cab27d4efccc65c0f9378c21af0fe02b59e5d1790cfdf675c555fda9'
+        '8cb7083e8268aa0878198ce4df4160db4f4e77f191e301bea31c02c19bc1c2bf',
+}
+if set(MODEL_SHA512) != set(MODEL_BASENAMES):
+    raise RuntimeError('every model in MODEL_BASENAMES needs a SHA-512')
+URL_TEMPLATES = (
+    'https://sourceforge.net/projects/bleachbit/files/chaff/%s/download',
+    'https://download.bleachbit.org/chaff/%s')
+DEFAULT_MODELS_DIR = options_dir
+
+
+def _load_model(model_path):
+    _open = open
+    if model_path.endswith('.bz2'):
+        _open = bz2.open
+    with _open(model_path, 'rt', encoding='utf-8') as model_file:
+        return markovify.Text.from_dict(json.load(model_file))
+
+
+def load_subject_model(model_path):
+    return _load_model(model_path)
+
+
+def load_content_model(model_path):
+    return _load_model(model_path)
+
+
+def load_2600_model(model_path):
+    return _load_model(model_path)
+
+
+def _get_random_recipient():
+    return random.choice(RECIPIENTS)
+
+
+def _get_random_datetime(min_year=2011, max_year=2012):
+    date = datetime.strptime(
+        f'{random.randint(1, 365)} {random.randint(min_year, max_year)}',
+        '%j %Y')
+    # Saturday, September 15, 2012 2:20 PM
+    return date.strftime('%A, %B %d, %Y %I:%M %p')
+
+
+def _get_random_content(content_model, number_of_sentences=DEFAULT_NUMBER_OF_SENTENCES_CLINTON):
+    content = []
+    for _i in range(number_of_sentences):
+        sentence = content_model.make_sentence()
+        if sentence is None:
+            sentence = ''
+        content.append(sentence)
+        content.append(random.choice([' ', ' ', '\n\n']))
+    try:
+        return MIMEText(''.join(content), _charset='iso-8859-1')
+    except UnicodeEncodeError:
+        return _get_random_content(content_model, number_of_sentences=number_of_sentences)
+
+
+def _generate_email(subject_model, content_model, number_of_sentences=DEFAULT_NUMBER_OF_SENTENCES_CLINTON, subject_length=DEFAULT_SUBJECT_LENGTH):
+    message = _get_random_content(
+        content_model, number_of_sentences=number_of_sentences)
+
+    subject = subject_model.make_short_sentence(subject_length)
+    message['Subject'] = subject if subject is not None else ''
+    message['To'] = _get_random_recipient()
+    message['From'] = _get_random_recipient()
+    message['Sent'] = _get_random_datetime()
+
+    return message
+
+
+def download_models(models_dir=DEFAULT_MODELS_DIR,
+                    on_error=None):
+    """Download models
+
+    Calls on_error(primary_message, secondary_message) in case of error
+
+    Returns success as boolean value
+    """
+    from bleachbit.Network import download_url_to_fn
+    for basename in (MODEL_BASENAMES):
+        fn = os.path.join(models_dir, basename)
+        if os.path.exists(fn):
+            logger.debug('File %s already exists', fn)
+            continue
+        this_file_success = False
+        for url_template in URL_TEMPLATES:
+            url = url_template % basename
+            if download_url_to_fn(url, fn, expected_sha512=MODEL_SHA512[basename], on_error=on_error):
+                this_file_success = True
+                break
+        if not this_file_success:
+            return False
+    return True
+
+
+def generate_emails(number_of_emails,
+                    email_output_dir,
+                    models_dir=DEFAULT_MODELS_DIR,
+                    number_of_sentences=DEFAULT_NUMBER_OF_SENTENCES_CLINTON,
+                    on_progress=None,
+                    should_stop=None,
+                    *_kwargs):
+    logger.debug('Loading two email models')
+    subject_model_path = os.path.join(
+        models_dir, 'clinton_subject_model.json.bz2')
+    content_model_path = os.path.join(
+        models_dir, 'clinton_content_model.json.bz2')
+    subject_model = load_subject_model(subject_model_path)
+    content_model = load_content_model(content_model_path)
+    logger.debug('Generating %s emails', f'{number_of_emails:,}')
+    generated_file_names = []
+    cumulative_size = 0
+    for i in range(1, number_of_emails + 1):
+        with tempfile.NamedTemporaryFile(mode='w+', prefix='outlook-', suffix='.eml', dir=email_output_dir, delete=False) as email_output_file:
+            email_generator = email.generator.Generator(email_output_file)
+            msg = _generate_email(
+                subject_model, content_model, number_of_sentences=number_of_sentences)
+            email_generator.write(msg.as_string())
+            generated_file_names.append(email_output_file.name)
+            cumulative_size += email_output_file.tell()
+        if on_progress:
+            on_progress(1.0 * i / number_of_emails,
+                        generated_file_names=generated_file_names,
+                        cumulative_size=cumulative_size)
+        if should_stop and should_stop(generated_file_names, cumulative_size):
+            break
+    return generated_file_names
+
+
+def _generate_2600_file(model, number_of_sentences=DEFAULT_NUMBER_OF_SENTENCES_2600):
+    content = []
+    for _i in range(number_of_sentences):
+        sentence = model.make_sentence()
+        if sentence is None:
+            sentence = ''
+        content.append(sentence)
+        # The space is repeated to make paragraphs longer.
+        content.append(random.choice([' ', ' ', '\n\n']))
+    return ''.join(content)
+
+
+def generate_2600(file_count,
+                  output_dir,
+                  model_dir=DEFAULT_MODELS_DIR,
+                  on_progress=None,
+                  should_stop=None):
+    logger.debug('Loading 2600 model')
+    model_path = os.path.join(model_dir, '2600_model.json.bz2')
+    model = _load_model(model_path)
+    logger.debug('Generating %s files', f'{file_count:,}')
+    generated_file_names = []
+    cumulative_size = 0
+    for i in range(1, file_count + 1):
+        with tempfile.NamedTemporaryFile(mode='w+', encoding='utf-8', prefix='2600-', suffix='.txt', dir=output_dir, delete=False) as output_file:
+            txt = _generate_2600_file(model)
+            output_file.write(txt)
+            generated_file_names.append(output_file.name)
+            cumulative_size += output_file.tell()
+        if on_progress:
+            on_progress(1.0 * i / file_count,
+                        generated_file_names=generated_file_names,
+                        cumulative_size=cumulative_size)
+        if should_stop and should_stop(generated_file_names, cumulative_size):
+            break
+    return generated_file_names
+
+
+def have_models():
+    """Check whether the models exist in the default location.
+
+    Used to check whether download is needed."""
+    for basename in (MODEL_BASENAMES):
+        fn = os.path.join(DEFAULT_MODELS_DIR, basename)
+        if not os.path.exists(fn):
+            return False
+    return True

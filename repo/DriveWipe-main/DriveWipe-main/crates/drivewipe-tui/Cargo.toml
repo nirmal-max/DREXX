@@ -1,0 +1,34 @@
+[package]
+name = "drivewipe-tui"
+version = "2.0.5"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+description = "Terminal UI for DriveWipe"
+
+[features]
+default = ["pdf-report", "live"]
+pdf-report = ["drivewipe-core/pdf-report"]
+# Live-environment screens (HPA/DCO, ATA security, kernel module, live
+# dashboard). On by default so a stock build is fully featured; the underlying
+# dependency only exists on Linux, and the screens are cfg'd to match.
+live = ["dep:drivewipe-live"]
+
+[dependencies]
+drivewipe-core = { path = "../drivewipe-core" }
+ratatui.workspace = true
+crossterm.workspace = true
+crossbeam-channel.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+log.workspace = true
+env_logger.workspace = true
+ctrlc.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+drivewipe-live = { path = "../drivewipe-live", optional = true }

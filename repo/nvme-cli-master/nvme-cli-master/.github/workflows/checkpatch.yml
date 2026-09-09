@@ -1,0 +1,29 @@
+---
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# This file is part of nvme.
+# Copyright (c) 2026 SUSE LLC
+#
+# Authors: Daniel Wagner <dwagner@suse.de>
+
+name: Checkpatch Review
+on: [pull_request]
+jobs:
+  checkpatch:
+    name: checkpatch review
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      with:
+        ref: ${{ github.event.pull_request.head.sha }}
+        fetch-depth: 0
+    - name: Fetch checkpatch.pl
+      run: |
+        curl -sSf \
+          https://raw.githubusercontent.com/torvalds/linux/master/scripts/checkpatch.pl \
+          -o checkpatch.pl
+
+    - name: Run checkpatch review
+      run: |
+        git format-patch --stdout origin/${{ github.base_ref }}..HEAD \
+          | perl checkpatch.pl -

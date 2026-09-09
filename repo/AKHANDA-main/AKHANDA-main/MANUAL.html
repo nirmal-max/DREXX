@@ -1,0 +1,441 @@
+<title>Akhanda User Manual</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --paper:#F5F6F8; --card:#FFF; --sunk:#EAEDF1; --ink:#13171E; --ink2:#3A424F;
+  --dim:#68707D; --line:#D2D8E0; --seal:#27409E; --seal-bg:#E8ECF9;
+  --ok:#0C6A47; --ok-bg:#E1EFE8; --warn:#94600A; --warn-bg:#F8EFDD;
+  --stop:#A3322A; --stop-bg:#F8E7E4; --key:#1F2430;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0C0F14; --card:#141922; --sunk:#1A202A; --ink:#E4E8EF; --ink2:#AFB7C4;
+  --dim:#828B99; --line:#272F3B; --seal:#8DA3F2; --seal-bg:#1A2140;
+  --ok:#55B189; --ok-bg:#102319; --warn:#D69740; --warn-bg:#241A0D;
+  --stop:#DE7C73; --stop-bg:#291412; --key:#0A0D12;
+}}
+:root[data-theme="dark"]{
+  --paper:#0C0F14; --card:#141922; --sunk:#1A202A; --ink:#E4E8EF; --ink2:#AFB7C4;
+  --dim:#828B99; --line:#272F3B; --seal:#8DA3F2; --seal-bg:#1A2140;
+  --ok:#55B189; --ok-bg:#102319; --warn:#D69740; --warn-bg:#241A0D;
+  --stop:#DE7C73; --stop-bg:#291412; --key:#0A0D12;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Public Sans",-apple-system,"Segoe UI",sans-serif;font-size:16px;line-height:1.62;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1080px;margin:0 auto;padding:0 22px 90px}
+.spine{max-width:74ch;margin-inline:auto}
+h1,h2,h3{font-family:Newsreader,Georgia,serif;margin:0;font-weight:600;letter-spacing:-.012em;text-wrap:balance}
+h1{font-size:clamp(2rem,4.3vw,2.95rem);line-height:1.09}
+h2{font-size:clamp(1.4rem,2.4vw,1.9rem);line-height:1.2}
+h3{font-size:1.1rem;line-height:1.34}
+p{margin:0 0 1em}
+.m,code{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+code{background:var(--sunk);border:1px solid var(--line);border-radius:2px;padding:.06em .34em;font-size:.86em}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.7rem;font-weight:500;letter-spacing:.17em;
+  text-transform:uppercase;color:var(--dim);margin:0 0 .55rem}
+header.mast{border-bottom:1px solid var(--line);padding:50px 0 28px;margin-bottom:38px}
+.lede{font-size:1.12rem;color:var(--ink2);margin-top:.9rem}
+section{margin:0 0 54px}
+.rule{border:0;height:1px;background:var(--line);margin:50px 0}
+pre{background:var(--key);color:#DCE3EC;border:1px solid var(--line);border-radius:3px;
+  padding:13px 15px;overflow-x:auto;font-size:.83rem;line-height:1.65;margin:12px 0;
+  font-family:"IBM Plex Mono",monospace}
+pre .c{color:#7C8797}
+pre b{color:#8DA3F2;font-weight:500}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:3px;background:var(--card);margin:18px 0}
+table{border-collapse:collapse;width:100%;font-size:.87rem;min-width:560px}
+th{font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--dim);font-weight:600;text-align:left;padding:9px 13px;background:var(--sunk);
+  border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+.note{border:1px solid var(--line);border-left:3px solid var(--dim);background:var(--card);
+  border-radius:3px;padding:15px 17px;margin:20px 0}
+.note.seal{border-left-color:var(--seal)}.note.ok{border-left-color:var(--ok)}
+.note.warn{border-left-color:var(--warn)}.note.stop{border-left-color:var(--stop)}
+.note h3{font-family:"Public Sans",sans-serif;font-size:.75rem;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--dim);margin:0 0 .45rem}
+.note p:last-child{margin-bottom:0}
+.step{display:grid;grid-template-columns:auto 1fr;gap:15px;margin:0 0 24px;align-items:start}
+.num{font-family:"IBM Plex Mono",monospace;font-size:.76rem;font-weight:600;color:var(--seal);
+  background:var(--seal-bg);border:1px solid var(--seal);border-radius:50%;width:29px;height:29px;
+  display:grid;place-items:center;flex:none;margin-top:2px}
+.step h3{margin-bottom:.28rem}.step p:last-child{margin-bottom:0}
+.tag{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:.68rem;font-weight:600;
+  padding:1px 6px;border:1px solid;border-radius:2px;white-space:nowrap}
+.t-ok{color:var(--ok);border-color:var(--ok);background:var(--ok-bg)}
+.t-wn{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+.t-st{color:var(--stop);border-color:var(--stop);background:var(--stop-bg)}
+ul.clean{margin:0 0 1em;padding-left:1.15em}ul.clean li{margin-bottom:.42em}
+.toc{background:var(--card);border:1px solid var(--line);border-radius:3px;padding:16px 20px;margin:0 0 40px}
+.toc ol{margin:0;padding-left:1.3em;columns:2;column-gap:32px}
+.toc li{margin-bottom:.3em}
+.toc a{color:var(--ink2);text-decoration:none}
+.toc a:hover{color:var(--seal);text-decoration:underline}
+footer{border-top:1px solid var(--line);padding-top:24px;color:var(--dim);font-size:.84rem}
+:focus-visible{outline:2px solid var(--seal);outline-offset:2px}
+@media(max-width:640px){.toc ol{columns:1}}
+</style>
+
+<div class="wrap">
+<header class="mast"><div class="spine">
+  <p class="eyebrow">Akhanda &middot; SIH26149 &middot; Syntax Squad</p>
+  <h1>User manual</h1>
+  <p class="lede">Every command you type, every button you click, every file that appears,
+    and what each one is for. Written so a person who has never opened a terminal can follow
+    it, and so a judge who asks &ldquo;show me&rdquo; gets an answer in under a minute.</p>
+</div></header>
+
+<div class="spine">
+
+<div class="toc"><ol>
+  <li><a href="#s1">Before you begin</a></li>
+  <li><a href="#s2">Installing, once</a></li>
+  <li><a href="#s3">Starting the witness laptop</a></li>
+  <li><a href="#s4">Running the tool</a></li>
+  <li><a href="#s5">Opening the screen</a></li>
+  <li><a href="#s6">Every screen, button by button</a></li>
+  <li><a href="#s7">Every command, explained</a></li>
+  <li><a href="#s8">Every file, explained</a></li>
+  <li><a href="#s9">Erasing a real device</a></li>
+  <li><a href="#s10">When something goes wrong</a></li>
+  <li><a href="#s11">The five-minute demo script</a></li>
+</ol></div>
+
+<!-- 1 -->
+<section id="s1">
+  <p class="eyebrow">Part 1</p>
+  <h2>Before you begin</h2>
+  <p>You need <strong>two laptops</strong> and <strong>one hotspot</strong>. Nothing else.
+    No internet, no cloud account, no paid software.</p>
+  <div class="tw"><table>
+    <thead><tr><th>Name</th><th>Which machine</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Laptop A</strong></td><td>the main one, with the project on <span class="m">D:</span></td><td>does the work: wipes, recovers, writes the record</td></tr>
+      <tr><td><strong>Laptop B</strong></td><td>the LOQ</td><td>holds a second key and signs. Nothing else lives on it</td></tr>
+      <tr><td><strong>Hotspot</strong></td><td>your phone, or laptop A</td><td>lets the two talk. <strong>Never campus wi-fi</strong></td></tr>
+    </tbody>
+  </table></div>
+  <div class="note stop"><h3>The one rule about campus wi-fi</h3>
+    <p>Many campus and venue networks block two laptops from seeing each other, even though
+      both show internet. You will not discover this until the moment you need it. Use a
+      hotspot you control.</p></div>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+  <p class="eyebrow">Part 2</p>
+  <h2>Installing, once</h2>
+  <p>Do this the night before, not on the day. Open <strong>PowerShell</strong> on laptop A
+    (press the Windows key, type <em>powershell</em>, press Enter).</p>
+
+  <div class="step"><div class="num">1</div><div>
+    <h3>Go to the project folder</h3>
+<pre>cd "D:\akhanda SIH\akhanda"</pre>
+    <p>Everything in this manual assumes you are here unless it says otherwise.</p>
+  </div></div>
+
+  <div class="step"><div class="num">2</div><div>
+    <h3>Install what the tool needs</h3>
+<pre>pip install -r requirements.txt</pre>
+    <p>Takes a minute or two. You only ever do this once.</p>
+  </div></div>
+
+  <div class="step"><div class="num">3</div><div>
+    <h3>Build the independent checker (optional but worth it)</h3>
+<pre>cargo build --release --manifest-path rust/akhanda-verify/Cargo.toml</pre>
+    <p>This is a second program that checks the record using completely separate code.
+      It exists so nobody has to take our word for anything.</p>
+  </div></div>
+
+  <div class="step"><div class="num">4</div><div>
+    <h3>Prove the whole thing works</h3>
+<pre><span class="c"># Windows</span>
+$env:PYTHONPATH="src"; python -m pytest tests/ -q</pre>
+    <p>Expect <strong>630 passed</strong> and nothing skipped. This is the number you quote
+      to judges, and it is checked, not claimed.</p>
+  </div></div>
+
+  <div class="step"><div class="num">5</div><div>
+    <h3>Install the screen (one time)</h3>
+<pre>cd "D:\akhanda SIH\frontend"
+npm install</pre>
+    <p>Needs Node.js from nodejs.org if you do not have it.</p>
+  </div></div>
+</section>
+
+<hr class="rule">
+
+<!-- 3 -->
+<section id="s3">
+  <p class="eyebrow">Part 3</p>
+  <h2>Starting the witness laptop</h2>
+  <p>Do this <strong>first</strong>, every time. Everything else depends on it.</p>
+
+  <div class="step"><div class="num">1</div><div>
+    <h3>Join laptop B to the hotspot</h3>
+    <p>Click the wi-fi icon, choose your hotspot, connect.</p>
+  </div></div>
+
+  <div class="step"><div class="num">2</div><div>
+    <h3>Open the witness folder and start it</h3>
+<pre>cd C:\witness_node
+python node.py</pre>
+    <p>You must see <span class="m">Application startup complete</span>.
+      <strong>Leave this window open for the entire demo.</strong> Minimise it, never close it.</p>
+  </div></div>
+
+  <div class="step"><div class="num">3</div><div>
+    <h3>Find laptop B's address</h3>
+<pre>ipconfig | findstr /i "IPv4"</pre>
+    <p>Write down the number that looks like <span class="m">192.168.137.132</span>. You need
+      it on laptop A.</p>
+  </div></div>
+
+  <div class="note warn"><h3>Move it off the USB stick</h3>
+    <p>If you ran it from the USB drive, copy the folder onto laptop B's own hard disk first.
+      Unplug the stick and the witness dies mid-demo.</p></div>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+  <p class="eyebrow">Part 4</p>
+  <h2>Running the tool</h2>
+
+  <div class="step"><div class="num">1</div><div>
+    <h3>Check laptop A can reach laptop B</h3>
+<pre>curl http://192.168.137.132:8000/witness/pubkey</pre>
+    <p>You want a short line containing <span class="m">key_id</span>. Nothing back means the
+      window in Part 3 is closed, or laptop B's firewall is blocking. See Part 10.</p>
+  </div></div>
+
+  <div class="step"><div class="num">2</div><div>
+    <h3>Do the work</h3>
+<pre>cd "D:\akhanda SIH\akhanda"
+python scripts/demo_bundle.py --witness http://192.168.137.132:8000</pre>
+    <p>About five seconds. This one command performs five real operations and writes every
+      file you will show. Watch for <span class="m">all steps ok</span> at the end.</p>
+  </div></div>
+
+  <div class="tw"><table>
+    <thead><tr><th>What that command actually did</th><th>Why it is in the demo</th></tr></thead>
+    <tbody>
+      <tr><td>Carved four real files out of a disk image</td><td>proves recovery returns files <strong>byte for byte</strong></td></tr>
+      <tr><td>Securely erased three files and checked the erase</td><td>the erasure half of the problem statement</td></tr>
+      <tr><td>Tried one job with the witness switched off</td><td>it was <strong>blocked</strong>, and the refusal was recorded</td></tr>
+      <tr><td>Issued the court certificate</td><td>every field marked with the law it answers</td></tr>
+      <tr><td>Altered a record and re-checked</td><td>verification failed and named the record</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+  <p class="eyebrow">Part 5</p>
+  <h2>Opening the screen</h2>
+  <p>Two screens exist. Both work. Use whichever you rehearsed.</p>
+
+  <h3>The main screen</h3>
+<pre>cd "D:\akhanda SIH\frontend"
+npm run dev</pre>
+  <p>Then open the address it prints, usually
+    <span class="m">http://localhost:5173</span>.</p>
+
+  <h3>The simple screen (no build needed)</h3>
+<pre>cd "D:\akhanda SIH\console-app"
+python -m http.server 8080</pre>
+  <p>Then open <span class="m">http://localhost:8080</span>. This one also lets you open any
+    record file from disk and connect live to laptop B.</p>
+
+  <div class="note ok"><h3>Keep both open in separate tabs</h3>
+    <p>They cost nothing to run and either can carry the demo alone.</p></div>
+</section>
+
+<hr class="rule">
+
+<!-- 6 -->
+<section id="s6">
+  <p class="eyebrow">Part 6</p>
+  <h2>Every screen, button by button</h2>
+
+  <h3>Landing page</h3>
+  <p>The opening screen. Explains in one sentence what the tool does. <strong>Click:</strong>
+    the navigation at the top to move between the other screens.</p>
+
+  <h3>Console</h3>
+  <p>The record book. Each row is one operation, in order.</p>
+  <div class="tw"><table>
+    <thead><tr><th>What you see</th><th>What it means</th></tr></thead>
+    <tbody>
+      <tr><td>Green dot</td><td>this record verifies</td></tr>
+      <tr><td>Red dot</td><td>this record does not verify</td></tr>
+      <tr><td><span class="tag t-ok">WITNESS_COSIGNED</span></td><td>a second key on the other laptop signed it</td></tr>
+      <tr><td><span class="tag">SOFTWARE_KEY</span></td><td>only this laptop signed it. Honest, and visibly weaker</td></tr>
+      <tr><td><span class="tag t-wn">OPERATION REFUSED</span></td><td>a job that was <strong>blocked</strong> and recorded. Point at this one</td></tr>
+      <tr><td>The long hash</td><td>the fingerprint of that record, 64 characters</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Live integrity check &mdash; the one to demonstrate</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Button</th><th>What happens when you click it</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Inject Tamper</strong></td><td>changes one signed field in memory, then <strong>recomputes every fingerprint</strong>. Rows turn red because the arithmetic disagrees</td></tr>
+      <tr><td><strong>Restore Original</strong></td><td>puts the original value back and recomputes. Everything returns to green</td></tr>
+    </tbody>
+  </table></div>
+  <p>Each row shows <strong>recorded</strong> and <strong>recomputed</strong> side by side.
+    On a good record they are identical. That is the proof.</p>
+  <div class="note seal"><h3>If a judge doubts it</h3>
+    <p>Press <strong>F12</strong> to open the browser console. Every run prints a table of
+      recorded against recomputed hashes. They are watching the arithmetic happen on their
+      own machine, not reading our claim.</p></div>
+
+  <h3>Certificate</h3>
+  <p>The court document. Every field carries the exact law or standard it answers. Scroll to
+    the bottom for the stated limits, which are printed on the certificate itself.</p>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+  <p class="eyebrow">Part 7</p>
+  <h2>Every command, explained</h2>
+  <div class="tw"><table>
+    <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td class="m">python node.py</td><td>starts the witness on laptop B. Leave open</td></tr>
+      <tr><td class="m">ipconfig | findstr /i "IPv4"</td><td>shows a laptop's address on the network</td></tr>
+      <tr><td class="m">curl http://&lt;ip&gt;:8000/witness/pubkey</td><td>asks the witness which key it holds. Your link test</td></tr>
+      <tr><td class="m">python scripts/demo_bundle.py --witness &lt;url&gt;</td><td>runs all five operations and writes every file</td></tr>
+      <tr><td class="m">python scripts/demo_bundle.py</td><td>same, but without a witness. Records the weaker tier honestly</td></tr>
+      <tr><td class="m">python src/cli.py --no-witness show</td><td>prints the record book as text</td></tr>
+      <tr><td class="m">python src/cli.py --no-witness verify</td><td>checks the record book and reports</td></tr>
+      <tr><td class="m">python -m pytest tests/ -q</td><td>runs all 630 tests</td></tr>
+      <tr><td class="m">python scripts/run_all.py</td><td>the full automated check, 11 parts, about six minutes</td></tr>
+      <tr><td class="m">npm run dev</td><td>starts the main screen</td></tr>
+      <tr><td class="m">python -m http.server 8080</td><td>starts the simple screen</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note"><h3>Two things people get wrong</h3>
+    <p>It is <span class="m">python src/cli.py</span>, not <span class="m">python -m cli</span>.
+      And on Windows set the path with <span class="m">$env:PYTHONPATH="src"</span>, not
+      <span class="m">export</span>.</p></div>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+  <p class="eyebrow">Part 8</p>
+  <h2>Every file, explained</h2>
+  <p>Everything the tool writes lands in
+    <span class="m">D:\akhanda SIH\akhanda\demo_bundle\</span></p>
+  <div class="tw"><table>
+    <thead><tr><th>File</th><th>What it is</th><th>Shown on</th></tr></thead>
+    <tbody>
+      <tr><td class="m"><strong>chain.json</strong></td><td>the record book. Every operation, locked to the one before</td><td>Console</td></tr>
+      <tr><td class="m">certificate.json / .txt</td><td>the court document, every field marked with its clause</td><td>Certificate</td></tr>
+      <tr><td class="m">byte_identical_proof.json</td><td>each recovered file's fingerprint before and after</td><td>Evidence</td></tr>
+      <tr><td class="m">chain_tampered.json</td><td>a deliberately altered copy, to prove detection</td><td>Integrity</td></tr>
+      <tr><td class="m">recover_result.json</td><td>every file found, and honestly whether any was incomplete</td><td>on request</td></tr>
+      <tr><td class="m">erase_result.json</td><td>what was wiped and whether the wipe was checked</td><td>on request</td></tr>
+      <tr><td class="m">MANIFEST.json</td><td>which steps ran, which failed. Failures are written down</td><td>on request</td></tr>
+      <tr><td class="m">recovered\</td><td>the actual recovered files. You can open them</td><td>proof they work</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note stop"><h3>Never share this one folder</h3>
+    <p><span class="m">demo_bundle\_akhanda_home\</span> holds your <strong>private signing
+      key</strong>. Never put it on a USB you hand over, never email it, never upload it.
+      Anyone with that key can sign records as you.</p></div>
+</section>
+
+<hr class="rule">
+
+<!-- 9 -->
+<section id="s9">
+  <p class="eyebrow">Part 9</p>
+  <h2>Erasing a real device</h2>
+  <div class="note stop"><h3>This destroys data and cannot be undone</h3>
+    <p>Only ever do this on a drive you own and have already emptied. Check the drive number
+      twice.</p></div>
+  <p>First see which drive is which:</p>
+<pre>Get-Disk</pre>
+  <p>Then, and only if you are certain:</p>
+<pre>$env:AKHANDA_ALLOW_DEVICE_WRITE="1"
+$env:AKHANDA_TARGET_DEVICE="\\.\PhysicalDrive1"
+python src/cli.py erase \\.\PhysicalDrive1 --level Clear `
+  --confirm I-UNDERSTAND-THIS-DESTROYS-DATA</pre>
+  <p>The tool refuses unless <strong>all three</strong> are correct: the switch, the exact
+    drive path, and the confirm phrase. A typo reaches nothing. Your system disk is refused
+    even when everything is set.</p>
+  <div class="note seal"><h3>The honest demo, with no risk</h3>
+    <p>Ask for the strongest wipe on a pen drive and the tool records the weaker grade
+      <strong>Clear</strong>, because flash memory keeps blocks no computer can reach. That
+      refusal to overstate is worth more to a judge than any wipe you could show.</p></div>
+</section>
+
+<!-- 10 -->
+<section id="s10">
+  <p class="eyebrow">Part 10</p>
+  <h2>When something goes wrong</h2>
+  <div class="tw"><table>
+    <thead><tr><th>What you see</th><th>What it means</th><th>Fix</th></tr></thead>
+    <tbody>
+      <tr><td>Screen says witness <strong>unreachable</strong></td><td>the window on laptop B was closed</td><td>restart <span class="m">python node.py</span> and leave it open</td></tr>
+      <tr><td><span class="m">curl</span> hangs or times out</td><td>laptop B's firewall is blocking</td><td>run node.py again and click <strong>Allow</strong>, tick <strong>Private</strong></td></tr>
+      <tr><td>Both have internet but cannot see each other</td><td>the network blocks laptop-to-laptop</td><td>switch to a phone hotspot</td></tr>
+      <tr><td>Address stopped working</td><td>the address changed overnight</td><td><span class="m">ipconfig</span> on laptop B, use the new one</td></tr>
+      <tr><td>No co-signer on any row</td><td>you ran without <span class="m">--witness</span></td><td>run again with the witness address</td></tr>
+      <tr><td><span class="m">python -m cli</span> not found</td><td>wrong command</td><td>use <span class="m">python src/cli.py</span></td></tr>
+      <tr><td>Screen will not start</td><td>dependencies missing</td><td><span class="m">npm install</span> in the frontend folder</td></tr>
+      <tr><td>Port already in use</td><td>it is already running in another window</td><td>use the tab you already have open</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note warn"><h3>If the hotspot fails entirely</h3>
+    <p>There is a separate plan for that. See <strong>PLAN_B_NO_HOTSPOT</strong> in the same
+      folder. Read it before the day, not during.</p></div>
+</section>
+
+<!-- 11 -->
+<section id="s11">
+  <p class="eyebrow">Part 11</p>
+  <h2>The five-minute demo script</h2>
+  <div class="step"><div class="num">1</div><div>
+    <h3>Open the Console. Point at the refused row.</h3>
+    <p><em>&ldquo;That row is an operation that did not happen. The second computer was
+      unreachable, so the tool blocked the job and wrote the refusal down. Ask any other tool
+      to show you the log entry for a job it declined to perform. There isn't one.&rdquo;</em></p>
+  </div></div>
+  <div class="step"><div class="num">2</div><div>
+    <h3>Show the co-signer on the first row.</h3>
+    <p><em>&ldquo;That key exists only on the other laptop. This machine cannot produce that
+      signature.&rdquo;</em></p>
+  </div></div>
+  <div class="step"><div class="num">3</div><div>
+    <h3>Go to Live integrity check. Press Inject Tamper.</h3>
+    <p><em>&ldquo;It just recomputed every fingerprint in this browser. One record no longer
+      matches, and everything after it fails too, because each one is locked to the one
+      before. It doesn't say invalid. It says which one.&rdquo;</em></p>
+  </div></div>
+  <div class="step"><div class="num">4</div><div>
+    <h3>Press F12 if anyone doubts it.</h3>
+    <p><em>&ldquo;Every hash is printed as it is computed. You are watching arithmetic on your
+      own machine, not reading our claim.&rdquo;</em></p>
+  </div></div>
+  <div class="step"><div class="num">5</div><div>
+    <h3>Press Restore, then open the Certificate.</h3>
+    <p><em>&ldquo;Every field is marked with the exact law or standard it answers. And at the
+      bottom, the certificate states its own limits. A tool that names what it cannot prove
+      is the only kind worth putting in front of a court.&rdquo;</em></p>
+  </div></div>
+</section>
+
+<footer>
+  <p><strong>Akhanda</strong> &middot; &#2309;&#2326;&#2339;&#2381;&#2337;, &ldquo;unbroken&rdquo;
+    &middot; Syntax Squad &middot; GITAM (Deemed to be University), Hyderabad &middot;
+    Smart India Hackathon 2026, problem statement SIH26149, sponsored by NTRO.</p>
+  <p>Every command in this manual was run on the machines described before it was written down.</p>
+</footer>
+
+</div></div>

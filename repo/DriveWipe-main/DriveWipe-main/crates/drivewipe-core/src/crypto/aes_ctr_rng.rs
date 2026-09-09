@@ -1,0 +1,92 @@
+use aes::Aes256;
+use cipher::{KeyIvInit, StreamCipher};
+use ctr::Ctr128BE;
+use zeroize::Zeroize;
+
+/// AES-256-CTR based cryptographic type alias.
+type Aes256Ctr = Ctr128BE<Aes256>;
+
+/// A cryptographically secure pseudo-random number generator built on AES-256-CTR.
+///
+/// Generates a keystream by encrypting a stream of zeroes using AES-256 in CTR mode.
+/// The key and nonce are sourced from the system CSPRNG on construction, and all
+/// sensitive material is zeroized on drop.
+pub struct AesCtrRng {
+    cipher: Aes256Ctr,
+    /// Retained only so we can zeroize on drop.
+    key: [u8; 32],
+    /// Retained only so we can zeroize on drop.
+    nonce: [u8; 16],
+}
+
+impl AesCtrRng {
+    /// Creates a new `AesCtrRng` seeded from the operating system's CSPRNG
+    /// via `rand::rng()`.
+    pub fn new() -> Self {
+        use rand::RngExt;
+        let mut rng = rand::rng();
+        let key: [u8; 32] = rng.random();
+        let nonce: [u8; 16] = rng.random();
+        Self::from_seed(key, nonce)
+    }
+
+    /// Creates a new `AesCtrRng` from an explicit 256-bit key and 128-bit nonce.
+    pub fn from_seed(key: [u8; 32], nonce: [u8; 16]) -> Self {
+        let cipher = Aes256Ctr::new(&key.into(), &nonce.into());
+        Self { cipher, key, nonce }
+    }
+
+    /// Return the key and nonce this generator was seeded with.
+    ///
+    /// Recording the seed alongside a wipe pass allows the exact keystream to
+    /// be regenerated later for byte-for-byte verification of a random pass.
+    pub fn seed(&self) -> ([u8; 32], [u8; 16]) {
+        (self.key, self.nonce)
+    }
+
+    /// Fill `buf` with keystream bytes, continuing from the current position.
+    ///
+    /// `apply_keystream` XORs the keystream with the buffer contents, so the
+    /// buffer must be zeroed first to extract raw keystream bytes.  This is the
+    /// only API available in `cipher 0.4` -- there is no `write_keystream`.
+    pub fn fill_bytes(&mut self, buf: &mut [u8]) {
+        buf.fill(0);
+        self.cipher.apply_keystream(buf);
+    }
+
+    /// Fill `buf` with the keystream bytes at absolute byte position `offset`.
+    ///
+    /// CTR mode is seekable, so the keystream for any offset can be produced
+    /// without generating everything before it. This makes a random pass fully
+    /// reproducible: the same seed and offset always yield the same bytes,
+    /// which is what allows a random pass to be verified against the device
+    /// and what keeps a resumed pass consistent with the bytes already written.
+    pub fn fill_bytes_at(&mut self, offset: u64, buf: &mut [u8]) {
+        use cipher::StreamCipherSeek;
+        self.cipher.seek(offset);
+        buf.fill(0);
+        self.cipher.apply_keystream(buf);
+    }
+}
+
+impl Default for AesCtrRng {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for AesCtrRng {
+    fn drop(&mut self) {
+        self.key.zeroize();
+        self.nonce.zeroize();
+        // Zero the cipher state (expanded AES key schedule) to prevent
+        // key material from lingering in memory after drop.
+        // SAFETY: We are zeroing our own field's memory, which is being
+        // dropped and will not be read again.
+        unsafe {
+            let ptr = &mut self.cipher as *mut _ as *mut u8;
+            let size = std::mem::size_of_val(&self.cipher);
+            std::ptr::write_bytes(ptr, 0, size);
+        }
+    }
+}

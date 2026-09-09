@@ -1,0 +1,727 @@
+<title>Akhanda Evidence Dossier</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --paper:#F5F7FA; --surface:#FFFFFF; --sunken:#EDF0F5;
+  --ink:#111722; --ink-2:#3A4354; --grey:#646E80; --line:#D7DDE7;
+  --seal:#27409E; --seal-soft:#E7EBF8;
+  --ok:#0B6B4F; --ok-soft:#E0F0E9;
+  --warn:#9A6206; --warn-soft:#F8EEDC;
+  --stop:#A8322A; --stop-soft:#F8E7E5;
+  --shadow:0 1px 2px rgba(17,23,34,.05),0 8px 24px -12px rgba(17,23,34,.14);
+  --spine:min(74ch,100%);
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#0D1118; --surface:#151A24; --sunken:#1B2130;
+    --ink:#E7EBF2; --ink-2:#B4BDCC; --grey:#8A94A6; --line:#2A3242;
+    --seal:#8FA5F7; --seal-soft:#1C2440;
+    --ok:#57C79E; --ok-soft:#10281F;
+    --warn:#E0A44A; --warn-soft:#2A2113;
+    --stop:#E8837A; --stop-soft:#2C1817;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0D1118; --surface:#151A24; --sunken:#1B2130;
+  --ink:#E7EBF2; --ink-2:#B4BDCC; --grey:#8A94A6; --line:#2A3242;
+  --seal:#8FA5F7; --seal-soft:#1C2440;
+  --ok:#57C79E; --ok-soft:#10281F;
+  --warn:#E0A44A; --warn-soft:#2A2113;
+  --stop:#E8837A; --stop-soft:#2C1817;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px -12px rgba(0,0,0,.6);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"Public Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:16px; line-height:1.65; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px 96px}
+.spine{width:var(--spine);margin-inline:auto}
+
+h1,h2,h3{font-family:Newsreader,Georgia,serif;text-wrap:balance;margin:0;font-weight:600;letter-spacing:-.01em}
+h1{font-size:clamp(2.1rem,4.6vw,3.4rem);line-height:1.08}
+h2{font-size:clamp(1.5rem,2.6vw,2.05rem);line-height:1.18}
+h3{font-size:1.16rem;line-height:1.3}
+p{margin:0 0 1.05em}
+a{color:var(--seal)}
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace;font-size:.71rem;font-weight:600;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--grey);margin:0 0 .7rem
+}
+
+/* ── masthead ─────────────────────────────────────────── */
+.mast{border-bottom:1px solid var(--line);padding:56px 0 34px;margin-bottom:44px}
+.mast .sanskrit{font-family:Newsreader,serif;font-size:1.5rem;color:var(--seal);margin:0 0 .1em}
+.lede{font-size:1.16rem;color:var(--ink-2);max-width:62ch;margin-top:1.1rem}
+.mast-meta{
+  display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:26px;
+  font-family:"IBM Plex Mono",monospace;font-size:.75rem
+}
+.tag{border:1px solid var(--line);border-radius:2px;padding:4px 9px;color:var(--ink-2);background:var(--surface)}
+.tag.seal{border-color:var(--seal);color:var(--seal);background:var(--seal-soft)}
+
+/* ── status strip ─────────────────────────────────────── */
+.strip{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));
+  gap:1px;background:var(--line);border:1px solid var(--line);border-radius:3px;
+  overflow:hidden;margin:0 0 12px
+}
+.stat{background:var(--surface);padding:16px 18px}
+.stat .n{
+  font-family:"IBM Plex Mono",monospace;font-size:1.55rem;font-weight:600;
+  font-variant-numeric:tabular-nums;line-height:1.1;display:block
+}
+.stat .k{font-size:.74rem;color:var(--grey);margin-top:5px;line-height:1.35}
+.stat.pass .n{color:var(--ok)}
+.caption{font-size:.79rem;color:var(--grey);margin:0 0 52px}
+
+section{margin:0 0 60px;scroll-margin-top:20px}
+
+/* ── figures ──────────────────────────────────────────── */
+figure{margin:26px 0;padding:0}
+.figbox{
+  background:var(--surface);border:1px solid var(--line);border-radius:4px;
+  padding:22px;overflow-x:auto;box-shadow:var(--shadow)
+}
+figure svg{display:block;max-width:100%;height:auto;margin-inline:auto;color:var(--ink)}
+figcaption{font-size:.83rem;color:var(--grey);margin-top:11px;max-width:70ch}
+
+/* ── tables ───────────────────────────────────────────── */
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:4px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.87rem;min-width:520px}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{
+  font-family:"IBM Plex Mono",monospace;font-size:.7rem;font-weight:600;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--grey);
+  background:var(--sunken);white-space:nowrap
+}
+tr:last-child td{border-bottom:none}
+td.num,td .mono{font-variant-numeric:tabular-nums}
+
+.pill{
+  display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:.68rem;
+  font-weight:600;letter-spacing:.05em;padding:2px 7px;border-radius:2px;white-space:nowrap
+}
+.p-ok{background:var(--ok-soft);color:var(--ok)}
+.p-warn{background:var(--warn-soft);color:var(--warn)}
+.p-stop{background:var(--stop-soft);color:var(--stop)}
+.p-seal{background:var(--seal-soft);color:var(--seal)}
+
+/* ── code ─────────────────────────────────────────────── */
+pre{
+  background:var(--sunken);border:1px solid var(--line);border-left:2px solid var(--seal);
+  border-radius:3px;padding:15px 17px;overflow-x:auto;font-size:.83rem;line-height:1.62;
+  margin:16px 0;font-family:"IBM Plex Mono",monospace;color:var(--ink)
+}
+pre .c{color:var(--grey)}
+pre .hl{color:var(--seal);font-weight:600}
+p code,li code,td code{
+  background:var(--sunken);border:1px solid var(--line);border-radius:2px;
+  padding:.08em .34em;font-size:.86em
+}
+
+/* ── callouts ─────────────────────────────────────────── */
+.note{
+  border:1px solid var(--line);border-left:3px solid var(--grey);
+  background:var(--surface);border-radius:3px;padding:16px 18px;margin:22px 0
+}
+.note.stop{border-left-color:var(--stop)}
+.note.ok{border-left-color:var(--ok)}
+.note.seal{border-left-color:var(--seal)}
+.note h3{font-family:"Public Sans",sans-serif;font-size:.79rem;font-weight:700;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--grey);margin:0 0 .5rem}
+.note p:last-child{margin-bottom:0}
+
+/* ── two-up ───────────────────────────────────────────── */
+.duo{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;margin:22px 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:4px;padding:18px 20px}
+.card h3{margin-bottom:.45rem}
+.card p:last-child{margin-bottom:0}
+.card .k{font-size:.9rem;color:var(--ink-2)}
+
+ul.clean{margin:0 0 1em;padding-left:1.15em}
+ul.clean li{margin-bottom:.42em}
+
+.rule{height:1px;background:var(--line);border:0;margin:56px 0}
+footer{border-top:1px solid var(--line);padding-top:26px;color:var(--grey);font-size:.83rem}
+
+@media (prefers-reduced-motion:no-preference){
+  .stat{transition:background .15s ease}
+}
+:focus-visible{outline:2px solid var(--seal);outline-offset:2px}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <div class="spine">
+    <p class="sanskrit">अखण्ड</p>
+    <p class="eyebrow">Smart India Hackathon 2026 · Problem Statement SIH26149 · NTRO</p>
+    <h1>Akhanda: an unbroken chain of custody for digital forensics</h1>
+    <p class="lede">A tool that securely erases and recovers data, where every operation is written into
+      one append-only, dual-signed ledger, and the certificate it produces satisfies both
+      NIST SP 800-88 Rev. 2 and Section 63(4) of the Bharatiya Sakshya Adhiniyam, 2023.</p>
+    <div class="mast-meta">
+      <span class="tag seal">Syntax Squad</span>
+      <span class="tag">Blockchain &amp; Cybersecurity</span>
+      <span class="tag">Python · Rust · Ed25519 · ML-DSA-65</span>
+      <span class="tag">Evidence dossier · 3 Sep 2026</span>
+    </div>
+  </div>
+</header>
+
+<div class="spine">
+
+<!-- ══ STATUS ══ -->
+<section id="status">
+  <p class="eyebrow">Measured, not claimed</p>
+  <div class="strip">
+    <div class="stat pass"><span class="n">630</span><span class="k">tests passing<br>0 skipped</span></div>
+    <div class="stat pass"><span class="n">11/11</span><span class="k">automation checks<br>verdict GREEN</span></div>
+    <div class="stat pass"><span class="n">8/8</span><span class="k">claims survived<br>falsification</span></div>
+    <div class="stat pass"><span class="n">4/4</span><span class="k">files recovered<br>byte-identical</span></div>
+    <div class="stat pass"><span class="n">3</span><span class="k">independent verifiers<br>agree exactly</span></div>
+    <div class="stat pass"><span class="n">0</span><span class="k">HIGH severity<br>findings (bandit)</span></div>
+  </div>
+  <p class="caption">Every figure on this page is reproducible by the commands in
+    <a href="#run">Run it yourself</a>. Nothing here is a projection.</p>
+</section>
+
+<!-- ══ PROBLEM ══ -->
+<section id="problem">
+  <p class="eyebrow">The problem</p>
+  <h2>A signature proves a document wasn't edited. It cannot prove the record is complete.</h2>
+
+  <p>SIH26149 asks for secure data erasure and advanced file recovery with verifiable
+    proof. Tools for both already exist and are good at their jobs. The gap is not
+    erasure and it is not recovery, it is <strong>what happens to the record afterwards</strong>.</p>
+
+  <p>BitRaser, Blancco, EnCase and FTK all sign each certificate <em>independently</em>. That
+    signature is real and it works: it proves that one document has not been altered. But
+    nothing binds certificate #5 to certificate #4. Delete one from the middle of a case
+    file and every surviving certificate still verifies perfectly. The tampering leaves no
+    trace, because there is nothing for it to leave a trace <em>in</em>.</p>
+
+  <p>Under BSA 2023 §63(4), in force since July 2024, electronic evidence needs a
+    certificate signed by both the person in charge and an expert. The statute changed;
+    the tools did not.</p>
+</section>
+
+<!-- ══ INSIGHT / DIAGRAM 1 ══ -->
+<section id="insight">
+  <p class="eyebrow">The mechanism</p>
+  <h2>Chain the operations, and removal stops being invisible</h2>
+
+  <figure>
+    <div class="figbox">
+      <svg viewBox="0 0 760 300" role="img" aria-label="Independently signed certificates survive deletion of one record intact, while a hash-chained ledger detects the removal and names the exact sequence number.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon points="0,0 10,5 0,10" fill="currentColor"/>
+          </marker>
+          <marker id="ars" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon points="0,0 10,5 0,10" fill="#A8322A"/>
+          </marker>
+        </defs>
+
+        <text x="0" y="14" font-size="12" font-weight="600" fill="currentColor">EVERY TOOL TODAY, independently signed</text>
+        <g font-size="11.5" fill="currentColor">
+          <rect x="0" y="30" width="120" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+          <text x="60" y="49" text-anchor="middle">Cert 1</text>
+          <text x="60" y="65" text-anchor="middle" font-size="10" opacity=".65">signed ✓</text>
+
+          <rect x="150" y="30" width="120" height="46" rx="3" fill="none" stroke="#A8322A" stroke-width="1.2" stroke-dasharray="4 3"/>
+          <text x="210" y="49" text-anchor="middle" fill="#A8322A">Cert 2</text>
+          <text x="210" y="65" text-anchor="middle" font-size="10" fill="#A8322A">DELETED</text>
+
+          <rect x="300" y="30" width="120" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+          <text x="360" y="49" text-anchor="middle">Cert 3</text>
+          <text x="360" y="65" text-anchor="middle" font-size="10" opacity=".65">signed ✓</text>
+
+          <rect x="450" y="30" width="120" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+          <text x="510" y="49" text-anchor="middle">Cert 4</text>
+          <text x="510" y="65" text-anchor="middle" font-size="10" opacity=".65">signed ✓</text>
+        </g>
+        <text x="600" y="57" font-size="12" font-weight="600" fill="#A8322A">still verifies</text>
+        <text x="600" y="72" font-size="11" fill="#A8322A">no gap detectable</text>
+
+        <line x1="0" y1="110" x2="760" y2="110" stroke="currentColor" stroke-width=".7" opacity=".3"/>
+
+        <text x="0" y="146" font-size="12" font-weight="600" fill="#27409E">AKHANDA, one hash-linked ledger</text>
+        <g font-size="11.5" fill="currentColor">
+          <rect x="0" y="162" width="120" height="58" rx="3" fill="none" stroke="#27409E" stroke-width="1.4"/>
+          <text x="60" y="181" text-anchor="middle">seq 0</text>
+          <text x="60" y="197" text-anchor="middle" font-size="9.5" opacity=".7">prev_hash ∅</text>
+          <text x="60" y="211" text-anchor="middle" font-size="9.5" opacity=".7">entry_hash a1b2…</text>
+
+          <rect x="150" y="162" width="120" height="58" rx="3" fill="none" stroke="#A8322A" stroke-width="1.4" stroke-dasharray="4 3"/>
+          <text x="210" y="181" text-anchor="middle" fill="#A8322A">seq 1</text>
+          <text x="210" y="200" text-anchor="middle" font-size="9.5" fill="#A8322A">DELETED</text>
+
+          <rect x="300" y="162" width="120" height="58" rx="3" fill="none" stroke="#27409E" stroke-width="1.4"/>
+          <text x="360" y="181" text-anchor="middle">seq 2</text>
+          <text x="360" y="197" text-anchor="middle" font-size="9.5" opacity=".7">prev_hash =</text>
+          <text x="360" y="211" text-anchor="middle" font-size="9.5" fill="#A8322A">seq 1 hash ✗</text>
+
+          <rect x="450" y="162" width="120" height="58" rx="3" fill="none" stroke="#27409E" stroke-width="1.4"/>
+          <text x="510" y="181" text-anchor="middle">seq 3</text>
+          <text x="510" y="197" text-anchor="middle" font-size="9.5" opacity=".7">prev_hash =</text>
+          <text x="510" y="211" text-anchor="middle" font-size="9.5" opacity=".7">seq 2 hash</text>
+        </g>
+        <line x1="120" y1="191" x2="148" y2="191" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"/>
+        <line x1="270" y1="191" x2="298" y2="191" stroke="#A8322A" stroke-width="1.2" marker-end="url(#ars)" stroke-dasharray="3 2"/>
+        <line x1="420" y1="191" x2="448" y2="191" stroke="currentColor" stroke-width="1.2" marker-end="url(#ar)"/>
+
+        <text x="600" y="184" font-size="12" font-weight="600" fill="#A8322A">VERIFICATION FAILS</text>
+        <text x="600" y="199" font-size="11" fill="#A8322A">names the exact seq</text>
+        <text x="600" y="214" font-size="11" fill="#A8322A">37 ms over 500 entries</text>
+
+        <text x="0" y="262" font-size="11" fill="currentColor" opacity=".75">Each entry commits to the hash of the one before it, so an entry cannot be removed</text>
+        <text x="0" y="278" font-size="11" fill="currentColor" opacity=".75">from the middle without breaking every link that follows.</text>
+      </svg>
+    </div>
+    <figcaption><strong>The whole idea in one picture.</strong> Deleting a record from a pile of
+      independently signed certificates leaves the survivors verifying perfectly. Deleting one
+      from a hash-linked ledger breaks the chain and localises the break.</figcaption>
+  </figure>
+</section>
+
+<!-- ══ ARCHITECTURE / DIAGRAM 2 ══ -->
+<section id="architecture">
+  <p class="eyebrow">Architecture</p>
+  <h2>Two machines, two keys, one record</h2>
+
+  <p>The second signature is the part that cannot be faked by whoever is running the tool,
+    because the key that makes it lives on a different computer. Both laptops sit on one
+    hotspot; the operator sends an entry hash, the witness signs it with its own key and
+    keeps its own copy.</p>
+
+  <figure>
+    <div class="figbox">
+      <svg viewBox="0 0 760 340" role="img" aria-label="The operator laptop sends an entry hash over a Wi-Fi hotspot to a witness laptop, which signs it with a key held only on that machine and returns the co-signature while keeping its own independent record.">
+        <defs>
+          <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon points="0,0 10,5 0,10" fill="#27409E"/>
+          </marker>
+          <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon points="0,0 10,5 0,10" fill="currentColor"/>
+          </marker>
+        </defs>
+
+        <!-- operator -->
+        <rect x="0" y="34" width="252" height="176" rx="4" fill="none" stroke="currentColor" stroke-width="1.3"/>
+        <text x="14" y="24" font-size="11.5" font-weight="600" fill="currentColor">OPERATOR LAPTOP</text>
+        <text x="14" y="56" font-size="10.5" fill="currentColor" opacity=".7" font-family="monospace">192.168.137.1</text>
+        <g font-size="11" fill="currentColor">
+          <rect x="16" y="68" width="220" height="30" rx="2" fill="none" stroke="currentColor" stroke-width=".9" opacity=".55"/>
+          <text x="26" y="87">erase · recover · erase-files</text>
+          <rect x="16" y="106" width="220" height="30" rx="2" fill="none" stroke="currentColor" stroke-width=".9" opacity=".55"/>
+          <text x="26" y="125">operator key, signs every entry</text>
+          <rect x="16" y="144" width="220" height="48" rx="2" fill="none" stroke="#27409E" stroke-width="1.1"/>
+          <text x="26" y="163" fill="#27409E">chain.json</text>
+          <text x="26" y="180" font-size="10" opacity=".7">append-only, hash-linked</text>
+        </g>
+
+        <!-- witness -->
+        <rect x="508" y="34" width="252" height="176" rx="4" fill="none" stroke="#27409E" stroke-width="1.3"/>
+        <text x="522" y="24" font-size="11.5" font-weight="600" fill="#27409E">WITNESS LAPTOP · second party</text>
+        <text x="522" y="56" font-size="10.5" fill="currentColor" opacity=".7" font-family="monospace">192.168.137.132</text>
+        <g font-size="11" fill="currentColor">
+          <rect x="524" y="68" width="220" height="30" rx="2" fill="none" stroke="currentColor" stroke-width=".9" opacity=".55"/>
+          <text x="534" y="87">node.py, 1 file, 3 packages</text>
+          <rect x="524" y="106" width="220" height="30" rx="2" fill="none" stroke="#27409E" stroke-width="1.1"/>
+          <text x="534" y="125" fill="#27409E" font-family="monospace" font-size="10">key 0b1088f7140ef514</text>
+          <rect x="524" y="144" width="220" height="48" rx="2" fill="none" stroke="currentColor" stroke-width=".9" opacity=".55"/>
+          <text x="534" y="163">its own witness log</text>
+          <text x="534" y="180" font-size="10" opacity=".7">independent second record</text>
+        </g>
+
+        <!-- link -->
+        <line x1="256" y1="104" x2="504" y2="104" stroke="#27409E" stroke-width="1.3" marker-end="url(#a2)"/>
+        <text x="380" y="97" font-size="10.5" text-anchor="middle" fill="#27409E">entry hash</text>
+        <line x1="504" y1="140" x2="256" y2="140" stroke="#27409E" stroke-width="1.3" marker-end="url(#a2)"/>
+        <text x="380" y="133" font-size="10.5" text-anchor="middle" fill="#27409E">concur_sig + witness head</text>
+        <text x="380" y="170" font-size="10" text-anchor="middle" fill="currentColor" opacity=".6">Wi-Fi hotspot · no internet needed</text>
+
+        <!-- fail closed -->
+        <rect x="0" y="240" width="760" height="76" rx="4" fill="none" stroke="currentColor" stroke-width=".9" opacity=".45"/>
+        <text x="16" y="262" font-size="11.5" font-weight="600" fill="currentColor">IF THE WITNESS IS UNREACHABLE</text>
+        <text x="16" y="282" font-size="11" fill="currentColor">The operation is <tspan font-weight="600">BLOCKED</tspan>, and the blocked attempt is itself written to the chain as a REFUSED entry.</text>
+        <text x="16" y="301" font-size="11" fill="#A8322A">Unplugging the co-signer becomes a way to log an operation, not a way to hide one.</text>
+      </svg>
+    </div>
+    <figcaption><strong>Confirmed on real hardware, 3 Sep 2026.</strong> The co-signature on entry
+      <code>seq 0</code> carries key id <code>0b1088f7140ef514</code>, which exists only on the
+      witness laptop. Operator layer 3/3 verified, witness layer 1/1 verified.</figcaption>
+  </figure>
+
+  <div class="note seal">
+    <h3>Why this is the hard part to copy</h3>
+    <p>Any team can hash a file. The difficulty is making the tool <em>refuse</em> when the second
+      party is missing, rather than quietly recording a weaker result, and doing that check
+      <em>before</em> the destructive step, not after. That behaviour is the product.</p>
+  </div>
+</section>
+
+<!-- ══ THE ENTRY / DIAGRAM 3 ══ -->
+<section id="entry">
+  <p class="eyebrow">What gets signed</p>
+  <h2>Sixteen fields, length-prefixed, then hashed</h2>
+
+  <p>Fields are never joined with a separator. Each is prefixed with its own length before
+    hashing, so no two different records can produce the same signing bytes. A pipe-joined
+    encoding in the predecessor codebase allowed exactly that collision; there is now a
+    regression test that must never be deleted.</p>
+
+  <figure>
+    <div class="figbox">
+      <svg viewBox="0 0 760 250" role="img" aria-label="Sixteen fields including outcome and custody tier are length-prefixed, concatenated with a domain tag, hashed with SHA-256 to produce the entry hash, then signed by the operator key and the witness key.">
+        <defs>
+          <marker id="a4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon points="0,0 10,5 0,10" fill="currentColor"/>
+          </marker>
+        </defs>
+        <rect x="0" y="26" width="250" height="164" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="12" y="18" font-size="11" font-weight="600" fill="currentColor">THE SIGNED PREIMAGE, 16 fields</text>
+        <g font-size="10" fill="currentColor" font-family="monospace">
+          <text x="14" y="46">entry_version · chain_id · seq</text>
+          <text x="14" y="63">prev_hash · op_type · target_ref</text>
+          <text x="14" y="80">timestamp · method · result_hash</text>
+          <text x="14" y="97">operator_decl · concur_decl</text>
+          <text x="14" y="114" fill="#27409E">custody_tier</text>
+          <text x="14" y="131" fill="#27409E">outcome</text>
+          <text x="14" y="148">presence_ref · operator_key_id</text>
+          <text x="14" y="165">tool_ref</text>
+          <text x="14" y="182" opacity=".6">len(f) ‖ f  for every field</text>
+        </g>
+
+        <line x1="254" y1="108" x2="298" y2="108" stroke="currentColor" stroke-width="1.2" marker-end="url(#a4)"/>
+        <text x="276" y="100" font-size="9.5" text-anchor="middle" fill="currentColor" opacity=".7">encode</text>
+
+        <rect x="302" y="82" width="150" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.2"/>
+        <text x="377" y="105" font-size="11.5" text-anchor="middle" fill="currentColor">SHA-256</text>
+        <text x="377" y="122" font-size="9.5" text-anchor="middle" fill="currentColor" opacity=".65">+ domain tag</text>
+
+        <line x1="456" y1="108" x2="500" y2="108" stroke="currentColor" stroke-width="1.2" marker-end="url(#a4)"/>
+
+        <rect x="504" y="82" width="150" height="52" rx="3" fill="none" stroke="#27409E" stroke-width="1.3"/>
+        <text x="579" y="105" font-size="11.5" text-anchor="middle" fill="#27409E">entry_hash</text>
+        <text x="579" y="122" font-size="9.5" text-anchor="middle" fill="currentColor" opacity=".65">becomes next prev_hash</text>
+
+        <line x1="579" y1="138" x2="579" y2="166" stroke="currentColor" stroke-width="1.2" marker-end="url(#a4)"/>
+        <rect x="470" y="170" width="120" height="30" rx="2" fill="none" stroke="currentColor" stroke-width="1"/>
+        <text x="530" y="189" font-size="10" text-anchor="middle" fill="currentColor">operator signs</text>
+        <rect x="604" y="170" width="120" height="30" rx="2" fill="none" stroke="#27409E" stroke-width="1.1"/>
+        <text x="664" y="189" font-size="10" text-anchor="middle" fill="#27409E">witness co-signs</text>
+        <line x1="600" y1="152" x2="650" y2="166" stroke="currentColor" stroke-width="1.1" marker-end="url(#a4)"/>
+
+        <text x="0" y="228" font-size="10.5" fill="currentColor" opacity=".75">outcome and custody_tier are INSIDE the signature, a failed wipe cannot be presented as a clean one.</text>
+      </svg>
+    </div>
+    <figcaption>Outcome quality lives inside the signed preimage. A flag kept outside the
+      signature would let the entry and the certificate describe a failed operation as a
+      successful one, the exact overclaim the project exists to prevent.</figcaption>
+  </figure>
+</section>
+
+<hr class="rule">
+
+<!-- ══ PROVEN ══ -->
+<section id="proven">
+  <p class="eyebrow">Evidence</p>
+  <h2>What is actually proven, and what is not</h2>
+
+  <p>Each row below is backed by a file in <code>evidence/</code> that a judge can open. The
+    right-hand column is deliberately blunt about what has <em>not</em> been demonstrated.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Claim</th><th>How it was tested</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Recovery is correct</td><td>NIST <strong>CFReDS</strong> public reference images, ground-truthed</td><td><span class="pill p-ok">100% precision &amp; recall</span> on L0/L1</td></tr>
+        <tr><td>Recovery is byte-exact</td><td>SHA-256 of the embedded file vs the carved file</td><td><span class="pill p-ok">4/4 in demo</span> · 140/140 fragment bench</td></tr>
+        <tr><td>Tamper is localised</td><td>alter one entry, re-verify</td><td><span class="pill p-ok">names exact seq</span> · 37 ms / 500 entries</td></tr>
+        <tr><td>Dual-party signing</td><td>two laptops, witness key only on machine B</td><td><span class="pill p-ok">CONFIRMED</span> 3 Sep 2026</td></tr>
+        <tr><td>Fail-closed</td><td>witness unreachable, no <code>--allow-degraded</code></td><td><span class="pill p-ok">blocked, REFUSED logged</span></td></tr>
+        <tr><td>Three verifiers agree</td><td>Python, browser JavaScript, Rust, same inputs</td><td><span class="pill p-ok">identical hashes</span></td></tr>
+        <tr><td>Post-quantum survival</td><td>strip the ML-DSA-65 signature, re-check</td><td><span class="pill p-ok">stripping detected</span></td></tr>
+        <tr><td>Claims resist attack</td><td>adversarial audit tries to falsify each one</td><td><span class="pill p-ok">8/8 survived</span></td></tr>
+        <tr><td>NIST <strong>Purge</strong> on SSD</td><td>needs firmware sanitize on real media</td><td><span class="pill p-warn">NOT TESTED</span> no lab access</td></tr>
+        <tr><td>Real flash wipe</td><td>needs a USB stick we may destroy</td><td><span class="pill p-warn">NOT TESTED</span></td></tr>
+        <tr><td>Bad-sector handling</td><td>logic tested; needs a genuinely failing drive</td><td><span class="pill p-warn">PARTIAL</span> simulated only</td></tr>
+        <tr><td>Mobile devices</td><td>probed a real Note 10+ read-only</td><td><span class="pill p-stop">OUT OF SCOPE</span> MTP, no block device</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note stop">
+    <h3>The honest bound on the custody claim</h3>
+    <p>The tier reached on real hardware is <code>WITNESS_COSIGNED</code>, <strong>not
+      <code>FULL_CUSTODY</code></strong>. Full custody additionally requires a confirmed
+      presence device, which is designed and not shipped. The tool refuses to print the
+      higher label, and so do we.</p>
+  </div>
+</section>
+
+<!-- ══ TIER LADDER ══ -->
+<section id="tiers">
+  <p class="eyebrow">Custody tiers</p>
+  <h2>The label always matches what actually happened</h2>
+
+  <figure>
+    <div class="figbox">
+      <svg viewBox="0 0 760 168" role="img" aria-label="Four custody tiers rise from software key through presence confirmed and witness cosigned to full custody. The system currently reaches witness cosigned on real hardware; full custody requires a presence device that is designed but not shipped.">
+        <g font-size="11" fill="currentColor">
+          <rect x="0" y="76" width="172" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1" opacity=".6"/>
+          <text x="86" y="97" text-anchor="middle" font-family="monospace" font-size="10.5">SOFTWARE_KEY</text>
+          <text x="86" y="113" text-anchor="middle" font-size="9.5" opacity=".7">operator signature only</text>
+
+          <rect x="192" y="76" width="172" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1" opacity=".6" stroke-dasharray="4 3"/>
+          <text x="278" y="97" text-anchor="middle" font-family="monospace" font-size="10.5">PRESENCE_CONFIRMED</text>
+          <text x="278" y="113" text-anchor="middle" font-size="9.5" opacity=".7">designed, not shipped</text>
+
+          <rect x="384" y="70" width="172" height="58" rx="3" fill="none" stroke="#0B6B4F" stroke-width="1.8"/>
+          <text x="470" y="92" text-anchor="middle" font-family="monospace" font-size="10.5" fill="#0B6B4F">WITNESS_COSIGNED</text>
+          <text x="470" y="108" text-anchor="middle" font-size="9.5" fill="#0B6B4F">reached on real hardware</text>
+          <text x="470" y="122" text-anchor="middle" font-size="9.5" opacity=".7">two machines, two keys</text>
+
+          <rect x="576" y="76" width="172" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1" opacity=".45" stroke-dasharray="4 3"/>
+          <text x="662" y="97" text-anchor="middle" font-family="monospace" font-size="10.5" opacity=".75">FULL_CUSTODY</text>
+          <text x="662" y="113" text-anchor="middle" font-size="9.5" opacity=".7">needs presence + witness</text>
+        </g>
+        <text x="0" y="30" font-size="11.5" font-weight="600" fill="currentColor">WEAKEST</text>
+        <text x="760" y="30" font-size="11.5" font-weight="600" text-anchor="end" fill="currentColor">STRONGEST</text>
+        <line x1="0" y1="42" x2="760" y2="42" stroke="currentColor" stroke-width=".7" opacity=".3"/>
+        <text x="470" y="156" font-size="10.5" text-anchor="middle" fill="#0B6B4F">↑ what the certificate says today</text>
+      </svg>
+    </div>
+    <figcaption>A certificate quotes the <em>weakest</em> tier among the operations it covers, so
+      one degraded step cannot hide behind three good ones.</figcaption>
+  </figure>
+</section>
+
+<hr class="rule">
+
+<!-- ══ DEMO ══ -->
+<section id="demo">
+  <p class="eyebrow">The demo</p>
+  <h2>What we run, in order</h2>
+
+  <p>The whole demo is one command on the operator laptop plus one on the witness. Everything
+    below is real: a real carve, a real secure file erase, a real blocked attempt, a real
+    certificate, a real tamper detection.</p>
+
+  <h3>Step 1, start the second party (witness laptop)</h3>
+<pre><span class="c"># one file and three packages, no repo needed on this machine</span>
+pip install fastapi uvicorn cryptography
+python node.py
+<span class="c"># → witness node on 0.0.0.0:8000, generates its OWN key on first run</span></pre>
+
+  <h3>Step 2, run the operations (operator laptop)</h3>
+<pre>cd D:\akhanda
+python scripts/demo_bundle.py --witness http://192.168.137.132:8000</pre>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>What it does</th><th>Why it is in the demo</th></tr></thead>
+      <tbody>
+        <tr><td>Carves 4 real files from a disk image</td><td>proves recovery is <strong>byte-identical</strong>, hash for hash</td></tr>
+        <tr><td>Securely erases 3 files, verifies the overwrite</td><td>problem statement module (b), on a real filesystem</td></tr>
+        <tr><td>Attempts an operation with the witness unreachable</td><td>it is <strong>blocked</strong>, and the refusal is written to the chain</td></tr>
+        <tr><td>Issues the NIST + BSA certificate</td><td>every field carries its clause reference</td></tr>
+        <tr><td>Alters one entry and re-verifies</td><td>verification fails and <strong>names seq 1</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Step 3, the resulting ledger</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>seq</th><th>operation</th><th>custody tier</th><th>outcome</th><th>second signature</th></tr></thead>
+      <tbody>
+        <tr><td class="num">0</td><td>RECOVER</td><td><span class="pill p-ok">WITNESS_COSIGNED</span></td><td>PARTIAL</td><td class="mono">0b1088f7140ef514</td></tr>
+        <tr><td class="num">1</td><td>ERASE</td><td><span class="pill p-seal">SOFTWARE_KEY</span></td><td>VERIFIED</td><td>, </td></tr>
+        <tr><td class="num">2</td><td><span class="pill p-stop">REFUSED</span></td><td><span class="pill p-seal">SOFTWARE_KEY</span></td><td>NOT_PERFORMED</td><td>, </td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note ok">
+    <h3>The moment that lands</h3>
+    <p>Row 2 is an operation that <em>did not happen</em>, permanently recorded. Ask any competing
+      tool to show you the log entry for an operation it refused to perform. There isn't one , 
+      a blocked attempt simply leaves no trace.</p>
+  </div>
+</section>
+
+<!-- ══ HONESTY / BUG ══ -->
+<section id="honesty">
+  <p class="eyebrow">Self-correction</p>
+  <h2>A bug we found in our own tool, hours before the deadline</h2>
+
+  <p>Building the demo dataset, recovery came back <strong>2 of 4</strong> byte-identical rather
+    than 4 of 4. The carved ZIP would not open at all, and the tool still reported
+    <code>truncated = false</code>.</p>
+
+  <p>The cause: the carver treated a footer <em>marker</em> as the end of the file. In a ZIP,
+    <code>PK\x05\x06</code> is only four bytes but it opens a 22-byte End of Central Directory
+    record, so 18 bytes were cut, producing an archive no reader will open.</p>
+
+  <p><strong>620 tests passed anyway</strong>, because the byte-identical test covered JPEG, PNG
+    and BMP: exactly the three formats whose footer marker <em>is</em> the last byte of the file.</p>
+
+  <div class="duo">
+    <div class="card">
+      <h3>What we fixed</h3>
+      <p class="k">The carver resolves the true trailer length, and when a trailer genuinely is
+        cut off it now reports <code>truncated = true</code> instead of claiming completeness.
+        Ten new tests cover both halves.</p>
+    </div>
+    <div class="card">
+      <h3>Why we are telling you</h3>
+      <p class="k">Reporting a corrupt file as complete is precisely the overclaim this project
+        exists to prevent. A team that hides that has learned nothing from building it.
+        <strong>4/4 now, and the ZIP opens.</strong></p>
+    </div>
+  </div>
+</section>
+
+<hr class="rule">
+
+<!-- ══ MARKET ══ -->
+<section id="market">
+  <p class="eyebrow">Scale &amp; economics</p>
+  <h2>Why this is a product, not a project</h2>
+
+  <div class="duo">
+    <div class="card">
+      <h3>The demand is regulatory, not discretionary</h3>
+      <p class="k">DPDP Act §8(7) requires erasure. BSA 2023 §63(4) requires the two-party
+        certificate. CERT-In, RBI and SEBI all impose retention and disposal duties. Organisations
+        do not choose whether to comply.</p>
+    </div>
+    <div class="card">
+      <h3>Reachable Indian market</h3>
+      <p class="k"><strong>≈ $650M</strong> serviceable slice (non-mobile), growing at
+        <strong>~40% CAGR</strong> per Deloitte, DSCI. Cited from the published figures, not
+        modelled by us.</p>
+    </div>
+  </div>
+
+  <h3>Where the cost actually falls</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Line item</th><th>Incumbent tools</th><th>Akhanda</th></tr></thead>
+      <tbody>
+        <tr><td>Licensing</td><td>per-seat, thousands to tens of thousands per year</td><td><span class="pill p-ok">open core</span></td></tr>
+        <tr><td>Hardware</td><td>appliances, dongles, dedicated workstations</td><td>two ordinary laptops</td></tr>
+        <tr><td>Witness node</td><td>, </td><td>one file, three packages</td></tr>
+        <tr><td>Network</td><td>site infrastructure</td><td>a phone hotspot, no internet</td></tr>
+        <tr><td>Certificate for Indian courts</td><td>manual drafting per case</td><td><span class="pill p-ok">emitted natively</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Why incumbents cannot simply add this</h3>
+  <ul class="clean">
+    <li><strong>Blancco and BitRaser are STQC-certified.</strong> Changing certificate structure
+      means recertification, a multi-year cost, which is exactly why a certified vendor moves slowly.</li>
+    <li><strong>EnCase and FTK are foreign products.</strong> Building a certificate native to one
+      country's evidence statute is poor economics for them, and carries export-control exposure.</li>
+    <li><strong>None of them cross the erasure/recovery boundary.</strong> The two functions live
+      in separate product lines with separate buyers.</li>
+    <li><strong>The conjunction is the moat</strong>, erasure and recovery in one ledger,
+      dual-signed, statute-native, post-quantum. Each piece exists somewhere; the combination does not.</li>
+  </ul>
+
+  <div class="note">
+    <h3>Stated plainly</h3>
+    <p>We are pre-revenue and pre-certification. The honest description is <em>a working prototype
+      with a named wedge, the BSA §63(4) certificate no tool emits natively, and a costed path to
+      a first lab and STQC certification.</em> Not a company yet.</p>
+  </div>
+</section>
+
+<!-- ══ LIMITS ══ -->
+<section id="limits">
+  <p class="eyebrow">Known limits</p>
+  <h2>Written down, because a gap that is written down is a limitation</h2>
+  <p>A gap that is <em>not</em> written down is an overclaim waiting for someone else to find.</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Limit</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td><strong>The chain cannot prove nothing was withheld.</strong> It proves nothing was altered after being written.</td><td><span class="pill p-warn">structural</span> recording refusals narrows it; nothing closes it</td></tr>
+        <tr><td>USB flash and SD cards cannot reach NIST Purge, no firmware sanitize exists to invoke</td><td><span class="pill p-seal">physics</span> the tool records Clear and says Clear</td></tr>
+        <tr><td>OpenTimestamps is not legally recognised in Indian courts</td><td>the same <em>class</em> of cryptographic guarantee, nothing stronger is claimed</td></tr>
+        <tr><td>Timestamps come from the local clock</td><td><span class="pill p-warn">disclosed</span> partly covered by external anchoring</td></tr>
+        <tr><td>Keys are readable files on disk</td><td><span class="pill p-warn">deferred</span> passphrase encryption available at rest</td></tr>
+        <tr><td>No access control on who may run the tool</td><td><span class="pill p-warn">out of scope</span> stated plainly</td></tr>
+        <tr><td>Presence device is designed, not shipped</td><td>so <code>FULL_CUSTODY</code> is never printed</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ══ RUN ══ -->
+<section id="run">
+  <p class="eyebrow">Reproduce it</p>
+  <h2>Run it yourself</h2>
+
+  <h3>Everything, from a clean checkout</h3>
+<pre><span class="c"># the full automation, 11 checks, ~6 minutes, nothing skipped silently</span>
+python scripts/run_all.py
+
+<span class="c"># the test suite alone</span>
+set PYTHONPATH=src
+python -m pytest tests/ -q          <span class="c"># 630 passed, 0 skipped</span>
+
+<span class="c"># the independent Rust verifier, no network, no config, no environment</span>
+cd rust/akhanda-verify &amp;&amp; cargo test</pre>
+
+  <h3>The files that matter</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Path</th><th>What it is</th></tr></thead>
+      <tbody>
+        <tr><td><code>src/attestation/core.py</code></td><td>the 16 signed fields, encoding, verification</td></tr>
+        <tr><td><code>src/erasure/engine.py</code></td><td>erasure, the six-gate write guard, bad-sector logging</td></tr>
+        <tr><td><code>src/recovery/engine.py</code></td><td>signature-based carving and extent resolution</td></tr>
+        <tr><td><code>src/witness/node.py</code></td><td>the second party, self-contained, copy it anywhere</td></tr>
+        <tr><td><code>src/certificate/generator.py</code></td><td>NIST + BSA certificate, with the clause map</td></tr>
+        <tr><td><code>rust/akhanda-verify/</code></td><td>third independent verifier, <code>#![forbid(unsafe_code)]</code></td></tr>
+        <tr><td><code>console/index.html</code></td><td>browser verifier, recomputes rather than trusting</td></tr>
+        <tr><td><code>scripts/demo_bundle.py</code></td><td>produces the entire demo dataset from real operations</td></tr>
+        <tr><td><code>evidence/</code></td><td>every number on this page, as generated output</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note seal">
+    <h3>The verification is implemented three times on purpose</h3>
+    <p>Python, JavaScript and Rust. Two implementations by one author can share a misreading of
+      the spec and agree while both are wrong. A third, in a language with different string and
+      integer semantics, catches that class of error. A test asserts all three produce identical
+      entry hashes and identical verdicts, it is the canary, and it must never be marked
+      <code>xfail</code>.</p>
+  </div>
+</section>
+
+<footer>
+  <p><strong>Akhanda</strong> · अखण्ड, “unbroken” · Syntax Squad · SIH26149, sponsored by NTRO.
+    Built on AetherProof, the team lead's own Apache-2.0 attestation engine, published before
+    this problem statement, disclosed provenance, not discovered.</p>
+  <p>Figures on this page were generated on 3 September 2026 and are reproducible with the
+    commands above.</p>
+</footer>
+
+</div>
+</div>

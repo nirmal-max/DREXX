@@ -1,0 +1,20 @@
+﻿{
+    "check":  "laptop-to-laptop physical link detection",
+    "ran_at":  "2026-09-01T22:26:03.6533146+05:30",
+    "host":  "GAREEB-KA-PC",
+    "thunderbolt_controller":  false,
+    "candidate_link_adapters":  [
+
+                                ],
+    "usb_ethernet_adapter":  false,
+    "real_adapters":  [
+                          {
+                              "name":  "Wi-Fi",
+                              "description":  "Intel(R) Wireless-AC 9560",
+                              "status":  "Up",
+                              "link_speed":  "86.7 Mbps"
+                          }
+                      ],
+    "verdict":  "NO_LINK_USBC_CANNOT_BRIDGE",
+    "guidance":  "No usable laptop-to-laptop link. This machine has NO Thunderbolt/USB4 controller, and a plain USB-C to USB-C cable cannot connect two hosts (USB is host-to-device; neither laptop will act as a device). Use a USB-to-Ethernet adapter + Ethernet cable (preferred), OR a phone hotspot joining both laptops (test it once before the day - venue/enterprise Wi-Fi often isolates clients)."
+}

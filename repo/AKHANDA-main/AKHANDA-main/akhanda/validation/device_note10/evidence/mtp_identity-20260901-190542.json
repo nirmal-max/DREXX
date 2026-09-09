@@ -1,0 +1,41 @@
+﻿{
+    "check":  "MTP device identity",
+    "ran_at":  "2026-09-01T19:05:42.3816282+05:30",
+    "host":  "GAREEB-KA-PC",
+    "boundary":  "device-level properties only; no file, folder or object was enumerated",
+    "device":  {
+                   "friendly_name":  "Karthikeyan\u0027s Note10+",
+                   "instance_id":  "USB\\VID_04E8\u0026PID_6860\u0026MS_COMP_MTP\u0026SAMSUNG_ANDROID\\6\u002610FCCC1\u00260\u00260000",
+                   "usb_serial":  "RF8M832R4DE",
+                   "mtp_name":  "Karthikeyan\u0027s Note10+"
+               },
+    "usb":  {
+                "vendor_id":  "04E8",
+                "vendor_name":  "Samsung Electronics",
+                "product_id":  "6860"
+            },
+    "storage":  [
+                    {
+                        "name":  "Internal storage",
+                        "Total Size":  "229 GB",
+                        "Free Space":  "157 GB"
+                    }
+                ],
+    "bsa_63_4_part_a":  {
+                            "Make \u0026 Model":  "Samsung Electronics / Karthikeyan\u0027s Note10+",
+                            "Serial Number":  "RF8M832R4DE",
+                            "IMEI/UIN/UID/MAC/Cloud ID":  "unavailable â€” the IMEI is not exposed over MTP; it requires adb or the handset UI",
+                            "Colour":  "requires human entry (physical attribute)",
+                            "Device source":  "Mobile"
+                        },
+    "nist_800_88r2":  {
+                          "Vendor/Make":  "Samsung Electronics",
+                          "Model Number":  "Karthikeyan\u0027s Note10+",
+                          "Serial Number":  "RF8M832R4DE",
+                          "Media Type":  "mobile handset, internal UFS â€” not host-addressable"
+                      },
+    "unavailable":  [
+
+                    ],
+    "verdict":  "IDENTIFIED"
+}

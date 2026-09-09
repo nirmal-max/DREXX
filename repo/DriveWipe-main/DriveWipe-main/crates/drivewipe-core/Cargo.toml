@@ -1,0 +1,60 @@
+[package]
+name = "drivewipe-core"
+version = "2.0.5"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+description = "Core library for DriveWipe — drive enumeration, wipe engine, verification, and reporting"
+
+[features]
+default = []
+pdf-report = ["dep:printpdf"]
+real-device-tests = []
+
+[dependencies]
+thiserror.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+crossbeam-channel.workspace = true
+aes.workspace = true
+ctr.workspace = true
+cipher.workspace = true
+rand.workspace = true
+zeroize.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+log.workspace = true
+dirs.workspace = true
+hostname.workspace = true
+printpdf = { workspace = true, optional = true }
+
+# New dependencies for overhaul
+sha2.workspace = true
+blake3.workspace = true
+hmac.workspace = true
+argon2.workspace = true
+regex.workspace = true
+byteorder.workspace = true
+crc32fast.workspace = true
+bitflags.workspace = true
+flate2.workspace = true
+zstd.workspace = true
+notify-rust.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+hex.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+nix.workspace = true
+libc.workspace = true
+
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+env_logger.workspace = true

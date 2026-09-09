@@ -1,0 +1,127 @@
+{
+  "check": "fragment reassembly validation bench",
+  "ran_at": "2026-09-04T05:55:33Z",
+  "wall_s": 1.4,
+  "cases": 10,
+  "positive": {
+    "total": 5,
+    "recovered": 5,
+    "rate_pct": 100.0
+  },
+  "negative": {
+    "total": 4,
+    "correctly_refused": 4,
+    "false_positives": 0
+  },
+  "limit": {
+    "total": 1,
+    "safely_refused": 1,
+    "returned_something_anyway": 0,
+    "meaning": "beyond the documented 2-fragment capability; silence is the correct answer and a plausible wrong file is the failure"
+  },
+  "wrong_files_reported": 0,
+  "ok": true,
+  "standard": "recovered means BYTE-IDENTICAL to the original by SHA-256, never 'a decoder accepted it'. A negative case passes only when NOTHING is reported.",
+  "results": [
+    {
+      "case": "000_0021/swapped#0",
+      "kind": "positive",
+      "passed": true,
+      "recovered": 1,
+      "matched": true,
+      "fragments": 2,
+      "boundary_recovered": true,
+      "detail": "2 fragments, order reversed, split at 9313109, decoy-salted gap 16384"
+    },
+    {
+      "case": "000_0021/inorder#0",
+      "kind": "positive",
+      "passed": true,
+      "recovered": 1,
+      "matched": true,
+      "fragments": 2,
+      "boundary_recovered": true,
+      "detail": "2 fragments, in order, split at 9313109, gap 8192"
+    },
+    {
+      "case": "000_0021/swapped#1",
+      "kind": "positive",
+      "passed": true,
+      "recovered": 1,
+      "matched": true,
+      "fragments": 2,
+      "boundary_recovered": true,
+      "detail": "2 fragments, order reversed, split at 6457960, plain gap 16384"
+    },
+    {
+      "case": "000_0021/inorder#1",
+      "kind": "positive",
+      "passed": true,
+      "recovered": 1,
+      "matched": true,
+      "fragments": 2,
+      "boundary_recovered": true,
+      "detail": "2 fragments, in order, split at 6457960, gap 8192"
+    },
+    {
+      "case": "000_0021/frag-at-image-end",
+      "kind": "positive",
+      "passed": true,
+      "recovered": 1,
+      "matched": true,
+      "fragments": 2,
+      "boundary_recovered": true,
+      "detail": "first fragment ends at the final byte of the image, split at 7779983"
+    },
+    {
+      "case": "000_0021/three-fragments",
+      "kind": "limit",
+      "passed": true,
+      "recovered": 0,
+      "matched": false,
+      "fragments": 0,
+      "boundary_recovered": false,
+      "detail": "THREE fragments shuffled at 3889991/9076647 \u2014 beyond the documented 2-fragment capability; must return nothing rather than a partial file"
+    },
+    {
+      "case": "000_0021/truncated-no-IEND",
+      "kind": "negative",
+      "passed": true,
+      "recovered": 0,
+      "matched": false,
+      "fragments": 0,
+      "boundary_recovered": false,
+      "detail": "first half only, no IEND \u2014 a partial file must not be reported as recovered"
+    },
+    {
+      "case": "000_0021/headless-no-IHDR",
+      "kind": "negative",
+      "passed": true,
+      "recovered": 0,
+      "matched": false,
+      "fragments": 0,
+      "boundary_recovered": false,
+      "detail": "second half only, no IHDR \u2014 the L3 shape; no dimensions, so no valid file"
+    },
+    {
+      "case": "decoys-only",
+      "kind": "negative",
+      "passed": true,
+      "recovered": 0,
+      "matched": false,
+      "fragments": 0,
+      "boundary_recovered": false,
+      "detail": "6 MB of PNG-SHAPED DECOYS with wrong CRCs \u2014 must recover nothing"
+    },
+    {
+      "case": "MIXED-two-different-pngs",
+      "kind": "negative",
+      "passed": true,
+      "recovered": 0,
+      "matched": false,
+      "fragments": 0,
+      "boundary_recovered": false,
+      "detail": "first half of one PNG + second half of ANOTHER \u2014 both halves CRC-valid; splicing them yields a file that decodes and is evidence of nothing"
+    }
+  ]
+}

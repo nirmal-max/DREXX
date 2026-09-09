@@ -1,0 +1,89 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+/*
+ * Copyright (c) 2023 Solidigm.
+ *
+ * Authors: leonardo.da.cunha@solidigm.com
+ */
+
+#include <errno.h>
+
+#include <libnvme.h>
+
+#include <ccan/endian/endian.h>
+
+#include "cleanup.h"
+#include "global-ctx.h"
+#include "nvme-print.h"
+#include "plugin.h"
+
+int sldgm_get_drive_info(int argc, char **argv, struct command *acmd, struct plugin *plugin)
+{
+	const char *desc = "Get drive HW information";
+	const char *FTL_unit_size_str = "FTL_unit_size";
+	__cleanup_nvme_global_ctx struct libnvme_global_ctx *ctx = NULL;
+	__cleanup_nvme_transport_handle struct libnvme_transport_handle *hdl = NULL;
+	nvme_print_flags_t flags;
+	struct libnvme_ctrl *c;
+	struct libnvme_ns *n;
+	struct nvme_id_ns ns = { 0 };
+	__u8 flbaf_inUse;
+	__u16 lba_size;
+	__u16 ftl_unit_size;
+	int err;
+
+	NVME_ARGS(opts);
+
+	err = parse_and_open(&ctx, &hdl, argc, argv, desc, opts);
+	if (err)
+		return err;
+
+	err = validate_output_format(nvme_args.output_format, &flags);
+	if ((err < 0) || !(flags == NORMAL || flags == JSON)) {
+		nvme_show_error("Invalid output format");
+		return err;
+	}
+
+	err = libnvme_scan_topology(ctx, NULL, NULL);
+	if (err)
+		return err;
+
+	err = libnvme_scan_ctrl(ctx, libnvme_transport_handle_get_name(hdl), &c);
+	if (!err)
+		n = libnvme_ctrl_first_ns(c);
+	else {
+		err = libnvme_scan_namespace(ctx,
+			libnvme_transport_handle_get_name(hdl), &n);
+		if (err) {
+			nvme_show_error("solidigm-vs-drive-info: drive missing namespace");
+			return err;
+		}
+	}
+
+	err = libnvme_ns_identify(n, &ns);
+	if (err) {
+		nvme_show_error("identify namespace: %s", libnvme_strerror(errno));
+		return err;
+	}
+
+	if (!(ns.nsfeat & 0x10)) {
+		nvme_show_error("solidigm-vs-drive-info: performance options not available");
+		return -EINVAL;
+	}
+
+	nvme_id_ns_flbas_to_lbaf_inuse(ns.flbas, &flbaf_inUse);
+	lba_size = 1 << ns.lbaf[flbaf_inUse].ds;
+	ftl_unit_size = (le16_to_cpu(ns.npwg) + 1) * lba_size / 1024;
+
+	if (flags == JSON) {
+		struct json_object *root = json_create_object();
+
+		json_object_add_value_int(root, FTL_unit_size_str, ftl_unit_size);
+		json_print_object(root, NULL);
+		printf("\n");
+		json_free_object(root);
+	} else {
+		printf("%s: %d\n", FTL_unit_size_str, ftl_unit_size);
+	}
+
+	return err;
+}

@@ -1,0 +1,553 @@
+<title>Akhanda Operating Guide</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+:root{
+  --paper:#F4F6F9; --card:#FFF; --sunk:#E9EDF3;
+  --ink:#12161F; --ink2:#3B4453; --dim:#68717F; --line:#D3D9E2;
+  --seal:#27409E; --seal-bg:#E8ECF9;
+  --ok:#0C6A47; --ok-bg:#E1EFE8;
+  --warn:#94600A; --warn-bg:#F7EEDC;
+  --stop:#A3322A; --stop-bg:#F7E6E4;
+  --a-bg:#1C2030; --a-fg:#E6E9EF;
+  --b-bg:#2A2418; --b-fg:#EFE7D6;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:#0C0F15; --card:#141922; --sunk:#1B212C;
+  --ink:#E4E8EF; --ink2:#B1B9C6; --dim:#848D9B; --line:#28303C;
+  --seal:#8DA3F2; --seal-bg:#1A2140;
+  --ok:#55B189; --ok-bg:#10251B;
+  --warn:#D69740; --warn-bg:#251B0E;
+  --stop:#DE7C73; --stop-bg:#2A1512;
+  --a-bg:#1C2030; --a-fg:#E6E9EF;
+  --b-bg:#2A2418; --b-fg:#EFE7D6;
+}}
+:root[data-theme="dark"]{
+  --paper:#0C0F15; --card:#141922; --sunk:#1B212C;
+  --ink:#E4E8EF; --ink2:#B1B9C6; --dim:#848D9B; --line:#28303C;
+  --seal:#8DA3F2; --seal-bg:#1A2140;
+  --ok:#55B189; --ok-bg:#10251B;
+  --warn:#D69740; --warn-bg:#251B0E;
+  --stop:#DE7C73; --stop-bg:#2A1512;
+  --a-bg:#1C2030; --a-fg:#E6E9EF;
+  --b-bg:#2A2418; --b-fg:#EFE7D6;
+}
+
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:"Public Sans",-apple-system,"Segoe UI",sans-serif;font-size:16px;line-height:1.62;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1120px;margin:0 auto;padding:0 22px 90px}
+.spine{max-width:73ch;margin-inline:auto}
+h1,h2,h3{font-family:Newsreader,Georgia,serif;margin:0;font-weight:600;letter-spacing:-.012em;text-wrap:balance}
+h1{font-size:clamp(2rem,4.4vw,3.05rem);line-height:1.08}
+h2{font-size:clamp(1.42rem,2.5vw,1.95rem);line-height:1.2}
+h3{font-size:1.12rem;line-height:1.32}
+p{margin:0 0 1em}
+.m,code{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace}
+code{background:var(--sunk);border:1px solid var(--line);border-radius:2px;padding:.06em .34em;font-size:.86em}
+a{color:var(--seal)}
+
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.7rem;font-weight:500;letter-spacing:.17em;
+  text-transform:uppercase;color:var(--dim);margin:0 0 .6rem}
+
+header.mast{border-bottom:1px solid var(--line);padding:52px 0 30px;margin-bottom:40px}
+.lede{font-size:1.13rem;color:var(--ink2);margin-top:1rem}
+
+section{margin:0 0 56px}
+.rule{border:0;height:1px;background:var(--line);margin:52px 0}
+
+/* step numbering that means something: it IS a sequence */
+.step{display:grid;grid-template-columns:auto 1fr;gap:16px;margin:0 0 26px;align-items:start}
+.num{font-family:"IBM Plex Mono",monospace;font-size:.78rem;font-weight:600;color:var(--seal);
+  background:var(--seal-bg);border:1px solid var(--seal);border-radius:50%;width:30px;height:30px;
+  display:grid;place-items:center;flex:none;margin-top:2px}
+.step h3{margin-bottom:.3rem}
+.step p:last-child{margin-bottom:0}
+
+pre{background:var(--sunk);border:1px solid var(--line);border-left:2px solid var(--seal);border-radius:3px;
+  padding:13px 15px;overflow-x:auto;font-size:.82rem;line-height:1.6;margin:12px 0;
+  font-family:"IBM Plex Mono",monospace;color:var(--ink)}
+pre .c{color:var(--dim)}
+
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:3px;background:var(--card);margin:18px 0}
+table{border-collapse:collapse;width:100%;font-size:.86rem;min-width:540px}
+th{font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--dim);font-weight:600;text-align:left;padding:9px 13px;background:var(--sunk);
+  border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+
+.note{border:1px solid var(--line);border-left:3px solid var(--dim);background:var(--card);
+  border-radius:3px;padding:15px 17px;margin:20px 0}
+.note.seal{border-left-color:var(--seal)}
+.note.ok{border-left-color:var(--ok)}
+.note.warn{border-left-color:var(--warn)}
+.note.stop{border-left-color:var(--stop)}
+.note h3{font-family:"Public Sans",sans-serif;font-size:.76rem;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--dim);margin:0 0 .45rem}
+.note p:last-child{margin-bottom:0}
+
+.tag{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:.68rem;font-weight:600;
+  padding:1px 6px;border:1px solid;border-radius:2px;white-space:nowrap}
+.t-ok{color:var(--ok);border-color:var(--ok);background:var(--ok-bg)}
+.t-wn{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+.t-st{color:var(--stop);border-color:var(--stop);background:var(--stop-bg)}
+.t-sl{color:var(--seal);border-color:var(--seal);background:var(--seal-bg)}
+
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;margin:20px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:3px;padding:17px 19px}
+.card h3{margin-bottom:.4rem}
+.card p:last-child{margin-bottom:0}
+.card p{color:var(--ink2);font-size:.94rem}
+
+.machine{border-radius:3px;padding:17px 19px;color:var(--a-fg);background:var(--a-bg)}
+.machine.b{background:var(--b-bg);color:var(--b-fg)}
+.machine h3{color:inherit;margin-bottom:.35rem}
+.machine p{color:inherit;opacity:.85;font-size:.93rem;margin:0 0 .5rem}
+.machine ul{margin:.4rem 0 0;padding-left:1.05em;font-size:.9rem;opacity:.9}
+.machine li{margin-bottom:.28em}
+
+figure{margin:24px 0}
+.figbox{background:var(--card);border:1px solid var(--line);border-radius:3px;padding:20px;overflow-x:auto}
+figure svg{display:block;max-width:100%;height:auto;margin-inline:auto;color:var(--ink)}
+figcaption{font-size:.82rem;color:var(--dim);margin-top:10px}
+
+ul.clean{margin:0 0 1em;padding-left:1.15em}
+ul.clean li{margin-bottom:.4em}
+footer{border-top:1px solid var(--line);padding-top:24px;color:var(--dim);font-size:.84rem}
+:focus-visible{outline:2px solid var(--seal);outline-offset:2px}
+</style>
+
+<div class="wrap">
+
+<header class="mast">
+  <div class="spine">
+    <p class="eyebrow">Akhanda · SIH26149 · Syntax Squad</p>
+    <h1>How to run the whole thing</h1>
+    <p class="lede">Written in plain words. What sits where, what each file is, what you press,
+      what the second laptop is actually for, and why any of it matters. No prior knowledge
+      assumed.</p>
+  </div>
+</header>
+
+<div class="spine">
+
+<!-- ══════════════ 1. THE MAP ══════════════ -->
+<section>
+  <p class="eyebrow">Part 1 · The map</p>
+  <h2>Two laptops, and what lives on each</h2>
+
+  <p>Everything below rests on one idea: <strong>the two laptops must not be able to stand in for
+    each other.</strong> If one person could produce both signatures, the second signature would
+    prove nothing at all.</p>
+
+  <div class="two">
+    <div class="machine">
+      <h3>Laptop A, the worker</h3>
+      <p>This machine. It does the actual work.</p>
+      <ul>
+        <li>The tool itself, at <span class="m">D:\akhanda SIH\akhanda\</span></li>
+        <li>Your signing key</li>
+        <li>The record file it produces</li>
+        <li>The screen you show people</li>
+      </ul>
+    </div>
+    <div class="machine b">
+      <h3>Laptop B, the witness (the LOQ)</h3>
+      <p>Holds one key and answers questions. Nothing else.</p>
+      <ul>
+        <li>One small program, <span class="m">node.py</span></li>
+        <li>Its own separate signing key</li>
+        <li>Its own separate copy of what it signed</li>
+        <li><strong>No case files. None.</strong></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note stop">
+    <h3>The most common misunderstanding</h3>
+    <p><strong>The screen never downloads files from laptop B, because laptop B has no files to
+      give.</strong> That is deliberate. If the witness also stored evidence, anyone who broke into
+      it would get the evidence <em>and</em> the key that vouches for it. It holds the key and
+      nothing worth stealing alongside it.</p>
+  </div>
+</section>
+
+<!-- ══════════════ 2. WHEN AADYA SENDS THE FRONTEND ══════════════ -->
+<section>
+  <p class="eyebrow">Part 2 · When the frontend arrives</p>
+  <h2>What to send me, and what I will do with it</h2>
+
+  <div class="step">
+    <div class="num">1</div>
+    <div>
+      <h3>Put her folder somewhere I can read</h3>
+      <p>Anywhere on the D drive is fine. If she sends a zip, unzip it first. Then tell me the
+        folder name. That is all I need to start.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">2</div>
+    <div>
+      <h3>I check whether it runs at all</h3>
+      <p>Some frontends need a build step and some do not. I will find out which, run it, and tell
+        you plainly whether it works before we spend time on anything else.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">3</div>
+    <div>
+      <h3>I connect it to the real data</h3>
+      <p>Her pages will be showing invented sample data. I replace that with the real record your
+        tool produced, so what a judge sees on screen is the actual output and not a mock-up.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">4</div>
+    <div>
+      <h3>I tell you what is missing, honestly</h3>
+      <p>If something she built cannot be connected because the tool does not produce that
+        information, I will say so rather than invent a number to fill the gap.</p>
+    </div>
+  </div>
+
+  <div class="note seal">
+    <h3>What I will ask you for</h3>
+    <p><strong>Almost certainly nothing.</strong> No accounts to create, no keys to buy, no server
+      to rent. The tool writes files, the page reads files. If her version genuinely needs
+      something extra, I will name it and explain why before you spend anything.</p>
+    <p>The one question I may ask: whether to keep your current screen as the safe fallback. My
+      answer in advance is <strong>yes, keep it</strong>, a demo with no working screen is a lost
+      demo, and having two is free.</p>
+  </div>
+</section>
+
+<hr class="rule">
+
+<!-- ══════════════ 3. RUNNING IT ══════════════ -->
+<section>
+  <p class="eyebrow">Part 3 · Running the prototype</p>
+  <h2>The whole sequence, in order</h2>
+
+  <p>Do these in order. Each one depends on the one before it.</p>
+
+  <div class="step">
+    <div class="num">1</div>
+    <div>
+      <h3>Put both laptops on the same hotspot</h3>
+      <p>Use <strong>your phone's hotspot, or this laptop's own hotspot</strong>. Do not use campus
+        wi-fi. Many campus networks deliberately stop two laptops from talking to each other, even
+        though both have internet, and you will not discover this until the moment you need it.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">2</div>
+    <div>
+      <h3>Start the witness on laptop B, and leave the window open</h3>
+<pre>python node.py</pre>
+      <p>You should see <span class="m">Application startup complete</span>. That window must stay
+        open for the whole demo. Closing it stops the witness.</p>
+      <p><strong>Closing it does not break anything quietly</strong>, the tool will refuse to run
+        and will record the refusal. That is correct behaviour, but not what you want on stage.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">3</div>
+    <div>
+      <h3>Check laptop A can reach it</h3>
+<pre>curl http://192.168.137.132:8000/witness/pubkey</pre>
+      <p>You want a short line of text back containing a <span class="m">key_id</span>. Nothing
+        back means either the window in step 2 is closed, or laptop B's firewall is blocking it.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">4</div>
+    <div>
+      <h3>Do the actual work on laptop A</h3>
+<pre>cd "D:\akhanda SIH\akhanda"
+python scripts/demo_bundle.py --witness http://192.168.137.132:8000</pre>
+      <p>About five seconds. This is the step that <strong>creates the files</strong>. It wipes some
+        files, recovers some files, deliberately tries one job with the witness switched off so you
+        can show it refusing, and writes the certificate.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="num">5</div>
+    <div>
+      <h3>Open the screen</h3>
+<pre>cd "D:\akhanda SIH\console-app"
+python -m http.server 8080</pre>
+      <p>Then open <span class="m">http://localhost:8080</span> in a browser. Click
+        <strong>Open chain.json</strong> and choose the file the last step made. Put laptop B's
+        address in the witness box and press <strong>Connect</strong>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ 4. THE FILES ══════════════ -->
+<section>
+  <p class="eyebrow">Part 4 · The files</p>
+  <h2>What each file is, in plain words</h2>
+
+  <p>Everything the tool makes lands in one folder:
+    <span class="m">D:\akhanda SIH\akhanda\demo_bundle\</span></p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>File</th><th>What it actually is</th><th>Used for</th></tr></thead>
+      <tbody>
+        <tr><td class="m"><strong>chain.json</strong></td>
+            <td>The record book. Every action, in order, each one locked to the one before it. <strong>This is the file you open on the screen.</strong></td>
+            <td>The main demo</td></tr>
+        <tr><td class="m">chain_tampered.json</td>
+            <td>A copy with one entry deliberately altered, to prove the tool catches it.</td>
+            <td>The tamper demo</td></tr>
+        <tr><td class="m">certificate.json<br>certificate.txt</td>
+            <td>The court document. Every line marked with the exact law or standard it answers.</td>
+            <td>Show a judge</td></tr>
+        <tr><td class="m">byte_identical_proof.json</td>
+            <td>For each recovered file, the fingerprint before and after. Identical means the file came back perfectly.</td>
+            <td>Proving recovery works</td></tr>
+        <tr><td class="m">recover_result.json</td>
+            <td>Every file found, and honestly whether any came back incomplete.</td>
+            <td>Detail if asked</td></tr>
+        <tr><td class="m">erase_result.json</td>
+            <td>What was wiped, and whether the wipe was checked afterwards.</td>
+            <td>Detail if asked</td></tr>
+        <tr><td class="m">MANIFEST.json</td>
+            <td>Which steps ran and which failed. A failed step is written down, never hidden.</td>
+            <td>Honesty record</td></tr>
+        <tr><td class="m">recovered\</td>
+            <td>The actual recovered files. You can open them.</td>
+            <td>Show they really opened</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note stop">
+    <h3>One folder you must never share</h3>
+    <p><span class="m">demo_bundle\_akhanda_home\</span> contains <strong>your private signing
+      key</strong>. Never put it on a USB you hand someone, never email it, never upload it. Anyone
+      holding that key can sign records as you.</p>
+  </div>
+
+  <h3>What gets uploaded, and what never does</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Thing</th><th>Goes online?</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>The screen (the web page)</td><td><span class="tag t-ok">yes, safe</span></td><td>It only reads and checks. It holds no key.</td></tr>
+        <tr><td>The record and the certificate</td><td><span class="tag t-ok">safe to show</span></td><td>They are meant to be shown. They contain fingerprints, never keys.</td></tr>
+        <tr><td>The tool that wipes disks</td><td><span class="tag t-st">never</span></td><td>A disk wiper reachable from the internet is a weapon.</td></tr>
+        <tr><td>The witness program</td><td><span class="tag t-st">never</span></td><td>It holds a signing key. It stays on your own small network.</td></tr>
+        <tr><td>Your private key</td><td><span class="tag t-st">never</span></td><td>It is the one secret in the whole system.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<hr class="rule">
+
+<!-- ══════════════ 5. WHY ══════════════ -->
+<section>
+  <p class="eyebrow">Part 5 · Why it is built this way</p>
+  <h2>The reasoning, so you can defend it</h2>
+
+  <figure>
+    <div class="figbox">
+      <svg viewBox="0 0 720 210" role="img" aria-label="Loose certificates each signed alone survive the deletion of one without any sign, while records joined in a chain break and point at the exact missing record.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon points="0,0 10,5 0,10" fill="currentColor"/></marker>
+          <marker id="ax" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <polygon points="0,0 10,5 0,10" fill="#A3322A"/></marker>
+        </defs>
+        <text x="0" y="13" font-size="11.5" font-weight="600" fill="currentColor">EVERY OTHER TOOL, each page signed on its own</text>
+        <g font-size="11" fill="currentColor">
+          <rect x="0" y="26" width="104" height="38" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"/>
+          <text x="52" y="49" text-anchor="middle">Job 1</text>
+          <rect x="124" y="26" width="104" height="38" rx="2" fill="none" stroke="#A3322A" stroke-width="1.1" stroke-dasharray="4 3"/>
+          <text x="176" y="43" text-anchor="middle" fill="#A3322A">Job 2</text>
+          <text x="176" y="57" text-anchor="middle" font-size="9.5" fill="#A3322A">removed</text>
+          <rect x="248" y="26" width="104" height="38" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"/>
+          <text x="300" y="49" text-anchor="middle">Job 3</text>
+          <rect x="372" y="26" width="104" height="38" rx="2" fill="none" stroke="currentColor" stroke-width="1.1"/>
+          <text x="424" y="49" text-anchor="middle">Job 4</text>
+        </g>
+        <text x="498" y="42" font-size="11.5" font-weight="600" fill="#A3322A">Nothing looks wrong</text>
+        <text x="498" y="57" font-size="10.5" fill="#A3322A">the gap is invisible</text>
+
+        <line x1="0" y1="88" x2="720" y2="88" stroke="currentColor" stroke-width=".7" opacity=".28"/>
+
+        <text x="0" y="116" font-size="11.5" font-weight="600" fill="#27409E">AKHANDA, each record locked to the one before</text>
+        <g font-size="11" fill="currentColor">
+          <rect x="0" y="130" width="104" height="44" rx="2" fill="none" stroke="#27409E" stroke-width="1.3"/>
+          <text x="52" y="150" text-anchor="middle">Job 1</text>
+          <text x="52" y="165" text-anchor="middle" font-size="9" opacity=".7">start</text>
+          <rect x="124" y="130" width="104" height="44" rx="2" fill="none" stroke="#A3322A" stroke-width="1.3" stroke-dasharray="4 3"/>
+          <text x="176" y="150" text-anchor="middle" fill="#A3322A">Job 2</text>
+          <text x="176" y="165" text-anchor="middle" font-size="9" fill="#A3322A">removed</text>
+          <rect x="248" y="130" width="104" height="44" rx="2" fill="none" stroke="#27409E" stroke-width="1.3"/>
+          <text x="300" y="150" text-anchor="middle">Job 3</text>
+          <text x="300" y="165" text-anchor="middle" font-size="9" fill="#A3322A">link broken</text>
+          <rect x="372" y="130" width="104" height="44" rx="2" fill="none" stroke="#27409E" stroke-width="1.3"/>
+          <text x="424" y="150" text-anchor="middle">Job 4</text>
+          <text x="424" y="165" text-anchor="middle" font-size="9" opacity=".7">follows Job 3</text>
+        </g>
+        <line x1="104" y1="152" x2="122" y2="152" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar)"/>
+        <line x1="228" y1="152" x2="246" y2="152" stroke="#A3322A" stroke-width="1.1" marker-end="url(#ax)" stroke-dasharray="3 2"/>
+        <line x1="352" y1="152" x2="370" y2="152" stroke="currentColor" stroke-width="1.1" marker-end="url(#ar)"/>
+        <text x="498" y="146" font-size="11.5" font-weight="600" fill="#A3322A">It fails, and says</text>
+        <text x="498" y="161" font-size="11.5" font-weight="600" fill="#A3322A">exactly which record</text>
+        <text x="498" y="177" font-size="10" fill="currentColor" opacity=".7">37 thousandths of a second</text>
+      </svg>
+    </div>
+    <figcaption>The single idea the whole project rests on. Everything else exists to support it.</figcaption>
+  </figure>
+
+  <div class="two">
+    <div class="card">
+      <h3>Why a second laptop</h3>
+      <p>A signature only means something if the person it accuses could not have forged it. Put
+        both keys on one machine and the operator can sign as both. Put the second key on a machine
+        they cannot log into, and the second signature becomes real evidence.</p>
+    </div>
+    <div class="card">
+      <h3>Why it refuses instead of carrying on</h3>
+      <p>If a missing witness simply meant a weaker record, anyone could unplug it and quietly do
+        unwatched work. Because the tool <em>stops</em> and <em>writes down that it stopped</em>,
+        unplugging the witness becomes a way to leave a mark, not a way to avoid one.</p>
+    </div>
+    <div class="card">
+      <h3>Why the check happens first</h3>
+      <p>Wiping cannot be undone. Checking the witness afterwards would be asking permission for
+        something already done. The check happens before a single byte is destroyed.</p>
+    </div>
+    <div class="card">
+      <h3>Why the browser does the checking</h3>
+      <p>If our own program says "this is valid", you are trusting us. When the page recalculates
+        it in front of you, on your own machine, you are trusting arithmetic. A doubter can open
+        the browser tools and watch it happen.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════ 6. THE PROBLEM STATEMENT ══════════════ -->
+<section>
+  <p class="eyebrow">Part 6 · Against the problem statement</p>
+  <h2>How this answers SIH26149</h2>
+
+  <p>The statement asks for an <em>integrated secure data erasure and advanced file recovery tool
+    for digital forensics and data sanitization</em>. Taking each word seriously:</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>What is asked</th><th>What we do</th><th>State</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Secure data erasure</strong></td><td>Wipes whole disks and individual files, checks the wipe afterwards, and records the honest grade achieved</td><td><span class="tag t-ok">built</span></td></tr>
+        <tr><td><strong>Advanced file recovery</strong></td><td>Recovers deleted files, including files broken into pieces, and returns them byte for byte or not at all</td><td><span class="tag t-ok">built</span></td></tr>
+        <tr><td><strong>Integrated</strong></td><td>Both live in one record book. This is the part nobody else does, elsewhere wiping and recovery are separate products with separate logs</td><td><span class="tag t-ok">built</span></td></tr>
+        <tr><td><strong>For digital forensics</strong></td><td>Produces the two-person certificate Indian courts have required since July 2024</td><td><span class="tag t-ok">built</span></td></tr>
+        <tr><td><strong>Data sanitization</strong></td><td>Follows the international NIST standard and states which grade was truly reached</td><td><span class="tag t-ok">built</span></td></tr>
+        <tr><td>Tamper-evident reporting</td><td>Remove a record and verification fails, naming the exact one</td><td><span class="tag t-ok">proven</span></td></tr>
+        <tr><td>Highest wipe grade on solid state drives</td><td>The code is written and tested, but needs lab hardware we could not borrow</td><td><span class="tag t-wn">not tested</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note ok">
+    <h3>The sentence that wins the room</h3>
+    <p>"Every tool in this space signs each certificate on its own. That proves one page was not
+      edited. It does not prove the file is complete. <strong>We are the only ones who can show
+      you which record is missing.</strong>"</p>
+  </div>
+</section>
+
+<hr class="rule">
+
+<!-- ══════════════ 7. SCALE AND FUTURE ══════════════ -->
+<section>
+  <p class="eyebrow">Part 7 · Growth</p>
+  <h2>Where it goes from here</h2>
+
+  <h3>How it grows without getting expensive</h3>
+  <ul class="clean">
+    <li><strong>One witness serves a whole laboratory.</strong> Twenty workstations can all send
+      their records to the same second machine. The cost does not rise for each new user, which is
+      exactly how the tools we compete with make their money.</li>
+    <li><strong>The record stays fast as it grows.</strong> Tested on five hundred records, a
+      tampered one is found in thirty-seven thousandths of a second. Case files can build up for
+      years.</li>
+    <li><strong>Nothing to install centrally.</strong> No server room, no database, no yearly
+      renewal. A laboratory that adopts it is not signing up to a dependency.</li>
+  </ul>
+
+  <h3>The upgrades that would matter most</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Upgrade</th><th>What it would change</th><th>Effort</th></tr></thead>
+      <tbody>
+        <tr><td><strong>The presence device</strong></td><td>Lifts us from the second highest trust level to the highest, by proving a human was physically present, not just a running program</td><td>designed already</td></tr>
+        <tr><td><strong>Government certification</strong></td><td>STQC approval is what lets a real laboratory buy it. This is the single biggest gap between a prototype and a product</td><td>months, and money</td></tr>
+        <tr><td><strong>One real laboratory pilot</strong></td><td>Turns "it works on our laptops" into "it works on their evidence". Worth more than any feature</td><td>a relationship, not code</td></tr>
+        <tr><td><strong>Outside time-stamping</strong></td><td>Today the clock is your own computer's. An independent time source closes the last gap a lawyer could pick at</td><td>partly built</td></tr>
+        <tr><td><strong>Highest-grade wiping on solid state drives</strong></td><td>Written and tested, but unproven until we borrow real drives</td><td>needs hardware only</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note warn">
+    <h3>The honest limit, and why saying it is a strength</h3>
+    <p>The record proves nothing was <strong>changed</strong>. It cannot prove nothing was
+      <strong>hidden</strong> before it was ever written down. No ledger in the world can. Recording
+      refusals narrows the gap; nothing closes it.</p>
+    <p>Say this before a judge asks. A team that names its own limit is believed on everything
+      else. A team caught hiding one is believed on nothing.</p>
+  </div>
+</section>
+
+<!-- ══════════════ 8. CHECKLIST ══════════════ -->
+<section>
+  <p class="eyebrow">Part 8 · Before you present</p>
+  <h2>The list to run through</h2>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Check</th><th>How you know it is fine</th></tr></thead>
+      <tbody>
+        <tr><td>Both laptops on your own hotspot</td><td>Not campus wi-fi. Not negotiable.</td></tr>
+        <tr><td>Witness running on laptop B</td><td>The window says startup complete, and stays open</td></tr>
+        <tr><td>Laptop A can reach it</td><td>The curl command returns a key id</td></tr>
+        <tr><td>Fresh records made <em>with</em> the witness</td><td>The screen shows a co-signer on the first row</td></tr>
+        <tr><td>The screen loads and turns green</td><td>Integrity reads verified</td></tr>
+        <tr><td>Connect shows the match line</td><td>The live key equals the one that signed the record</td></tr>
+        <tr><td>You have rehearsed tamper and restore</td><td>Once, out loud, before the day</td></tr>
+        <tr><td>One power strip</td><td>The venue gives one socket per team</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="note seal">
+    <h3>Move the witness off the USB stick</h3>
+    <p>You ran <span class="m">node.py</span> from the USB drive. If that stick is unplugged, or is
+      needed for something else, the witness stops. <strong>Copy the folder onto laptop B's own
+      hard drive and run it from there</strong> before the day.</p>
+  </div>
+</section>
+
+<footer>
+  <p><strong>Akhanda</strong> · अखण्ड, "unbroken" · Syntax Squad · GITAM (Deemed to be University),
+    Hyderabad · Smart India Hackathon 2026, problem statement SIH26149, sponsored by NTRO.</p>
+  <p>Every figure here was measured on the machines described, on 3 September 2026.</p>
+</footer>
+
+</div>
+</div>

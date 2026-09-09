@@ -1,0 +1,52 @@
+﻿{
+    "check":  "read-only mobile device probe",
+    "ran_at":  "2026-09-01T18:47:52.5331509+05:30",
+    "host":  "GAREEB-KA-PC",
+    "boundaries":  [
+                       "no write to the device under any flag",
+                       "no enumeration of the owner\u0027s files - topology answers the question, their photographs do not",
+                       "no backup taken"
+                   ],
+    "devices":  [
+                    {
+                        "class":  "WPD",
+                        "name":  "Karthikeyan\u0027s Note10+",
+                        "status":  "OK",
+                        "instance_id":  "USB\\VID_04E8\u0026PID_6860\u0026MS_COMP_MTP\u0026SAMSUNG_ANDROID\\6\u002610FCCC1\u00260\u00260000"
+                    },
+                    {
+                        "class":  "Modem",
+                        "name":  "SAMSUNG Mobile USB Modem",
+                        "status":  "OK",
+                        "instance_id":  "USB\\VID_04E8\u0026PID_6860\u0026MODEM\\6\u002610FCCC1\u00260\u00260001"
+                    },
+                    {
+                        "class":  "USB",
+                        "name":  "SAMSUNG Mobile USB Composite Device ",
+                        "status":  "OK",
+                        "instance_id":  "USB\\VID_04E8\u0026PID_6860\\RF8M832R4DE"
+                    },
+                    {
+                        "class":  "USB",
+                        "name":  "SAMSUNG Mobile USB Connectivity Device V2",
+                        "status":  "OK",
+                        "instance_id":  "USB\\VID_04E8\u0026PID_6860\u0026CONN2\\6\u002610FCCC1\u00260\u00260003"
+                    }
+                ],
+    "block_devices":  [
+                          {
+                              "index":  0,
+                              "model":  "NVMe INTEL SSDPEKNW512GZL",
+                              "interface":  "SCSI",
+                              "size":  512105932800,
+                              "device_path":  "\\\\.\\PhysicalDrive0"
+                          }
+                      ],
+    "verdict":  "MTP_ONLY_NO_BLOCK_DEVICE",
+    "reachable":  {
+                      "block_level_imaging":  false,
+                      "block_level_erasure":  false,
+                      "file_level_via_mtp":  true,
+                      "note":  "MTP exposes named objects, not sectors. File-level access through it reads what the phone chooses to present, which is not a forensic image and carries no guarantee of completeness."
+                  }
+}

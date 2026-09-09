@@ -1,0 +1,162 @@
+{
+  "check": "adversarial audit of AKHANDA's own claims",
+  "ran_at": "2026-09-04T05:55:27Z",
+  "standard": "a claim SURVIVES only when a genuine attempt to falsify it ran and failed; anything that could not be attacked is UNFALSIFIABLE, which is an unmeasured claim rather than a strong one",
+  "counts": {
+    "SURVIVED": 8
+  },
+  "claims": [
+    {
+      "claim": "carve.false_positives",
+      "asserted": "0 false positives / 100% precision at 8 GB",
+      "attack": "count signature magic bytes present in the filler itself",
+      "verdict": "SURVIVED",
+      "detail": "The filler contains 1042 signature-header occurrences across 3 types in 64 MB, and the carver still reported no false positives \u2014 so it rejected them on structure, not by never seeing one.",
+      "data": {
+        "header_hits_in_64mb": {
+          "jpg:ffd8ff": 4,
+          "bmp:424d": 1036,
+          "pcx:0a0501": 2
+        },
+        "total": 1042
+      }
+    },
+    {
+      "claim": "chain.tamper_detection",
+      "asserted": "tamper classes caught and localised",
+      "attack": "assert each mutation actually changes the signed bytes",
+      "verdict": "SURVIVED",
+      "detail": "all 7 mutations genuinely move the signed preimage and all 7 are caught, including the tool_ref forgery that only became possible after ENTRY_VERSION 3",
+      "data": {
+        "edit_declaration": {
+          "really_mutated": true,
+          "caught": true,
+          "broken_seq": 2,
+          "reason": "entry content altered: hash mismatch"
+        },
+        "swap_result_hash": {
+          "really_mutated": true,
+          "caught": true,
+          "broken_seq": 2,
+          "reason": "entry content altered: hash mismatch"
+        },
+        "flip_outcome": {
+          "really_mutated": true,
+          "caught": true,
+          "broken_seq": 2,
+          "reason": "entry content altered: hash mismatch"
+        },
+        "upgrade_tier": {
+          "really_mutated": true,
+          "caught": true,
+          "broken_seq": 2,
+          "reason": "entry content altered: hash mismatch"
+        },
+        "forge_tool_ref": {
+          "really_mutated": true,
+          "caught": true,
+          "broken_seq": 2,
+          "reason": "entry content altered: hash mismatch"
+        },
+        "delete_middle": {
+          "really_mutated": true,
+          "caught": true,
+          "broken_seq": 3,
+          "reason": "seq out of order at index 2"
+        },
+        "reorder": {
+          "really_mutated": true,
+          "caught": true,
+          "broken_seq": 2,
+          "reason": "seq out of order at index 1"
+        }
+      }
+    },
+    {
+      "claim": "corpus.regression_gate",
+      "asserted": "the corpus catches carver regressions",
+      "attack": "delete the JPEG signature and re-replay the pinned cases",
+      "verdict": "SURVIVED",
+      "detail": "baseline {'REPRODUCED': 5} -> with JPEG removed {'DRIFTED': 5} -> restored {'REPRODUCED': 5}. The gate fails when the carver changes and recovers when it is put back.",
+      "data": {
+        "baseline_ok": true,
+        "baseline": {
+          "REPRODUCED": 5
+        },
+        "with_jpg_removed_ok": false,
+        "broken": {
+          "DRIFTED": 5
+        },
+        "restored_ok": true
+      }
+    },
+    {
+      "claim": "rust.independence",
+      "asserted": "the Rust verifier independently agrees",
+      "attack": "feed it clean, tampered and wrong-version chains",
+      "verdict": "SURVIVED",
+      "detail": "clean exits 0, tampered exits 1, an ENTRY_VERSION 2 chain exits 1. It discriminates rather than always passing.",
+      "data": {
+        "clean_exit": 0,
+        "tampered_exit": 1,
+        "wrong_version_exit": 1
+      }
+    },
+    {
+      "claim": "erase.bad_sectors",
+      "asserted": "bad sectors are skipped, logged and signed",
+      "attack": "count the raises, then try to hide the skipped ranges from the digest",
+      "verdict": "SURVIVED",
+      "detail": "the fixture raised EIO 2 times in the real write path; the result records 1 range(s), refuses VERIFIED, accounts for every byte, and removing bad_ranges CHANGES the signed digest (True)",
+      "data": {
+        "oserrors_raised": 2,
+        "bad_ranges": 1,
+        "bytes_skipped": 512,
+        "verified": false,
+        "outcome": "PARTIAL",
+        "hiding_them_changes_digest": true,
+        "bytes_accounted": true
+      }
+    },
+    {
+      "claim": "tests.substance",
+      "asserted": "562 tests, all meaningful",
+      "attack": "scan every test for a missing assertion or a tautological one",
+      "verdict": "SURVIVED",
+      "detail": "all 562 collected test functions carry a real assertion or an expected-raise",
+      "data": {
+        "scanned": 562,
+        "suspicious": []
+      }
+    },
+    {
+      "claim": "case.omission",
+      "asserted": "deleting a whole device from a case is detected",
+      "attack": "confirm the surviving chains still verify, so the root does the work",
+      "verdict": "SURVIVED",
+      "detail": "every surviving chain verifies perfectly on its own, and only the case root notices the deletion \u2014 so the finding is not an artefact of the chains breaking",
+      "data": {
+        "survivors_still_verify": true,
+        "manifest_ok": false,
+        "missing": [
+          "usb"
+        ],
+        "root_changed": true
+      }
+    },
+    {
+      "claim": "toolref.identifies_build",
+      "asserted": "tool_ref identifies the build that wrote an entry",
+      "attack": "change a real constant in a real attested module and re-derive the digest",
+      "verdict": "SURVIVED",
+      "detail": "changing BLOCK_SIZE in erasure/engine.py moved the digest c508412d47c60e56 -> fee0ee0831ffe9ff, and reverting restored it",
+      "data": {
+        "before": "c508412d47c60e56",
+        "after_code_change": "fee0ee0831ffe9ff",
+        "restored": "c508412d47c60e56",
+        "moved": true,
+        "restored_ok": true
+      }
+    }
+  ]
+}

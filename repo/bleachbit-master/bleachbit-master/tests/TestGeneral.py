@@ -1,0 +1,549 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2008-2026 Andrew Ziem.
+#
+# This work is licensed under the terms of the GNU GPL, version 3 or
+# later.  See the COPYING file in the top-level directory.
+
+"""
+Test case for module General
+"""
+
+# standard library
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import warnings
+from unittest import mock
+
+# local
+from bleachbit import General, IS_POSIX, IS_WINDOWS, logger
+from bleachbit.FileUtilities import exe_exists, exists_in_path
+from bleachbit.General import (
+    boolstr_to_bool,
+    chownself,
+    get_executable,
+    get_real_uid,
+    get_real_username,
+    makedirs,
+    run_external,
+    run_external_nowait,
+    sanitize_root_env,
+    shell_split,
+    sudo_mode)
+from tests import common
+from tests.common import also_with_sudo
+
+
+class GeneralTestCase(common.BleachbitTestCase):
+    """Test case for module General"""
+
+    def test_boolstr_to_bool(self):
+        """Test case for method boolstr_to_bool"""
+        tests = (('True', True),
+                 ('true', True),
+                 ('False', False),
+                 ('false', False))
+
+        for test in tests:
+            self.assertEqual(boolstr_to_bool(test[0]), test[1])
+
+    def test_get_executable(self):
+        """Test for get_executable()"""
+        exe = get_executable()
+        self.assertIsInstance(exe, str)
+        self.assertGreater(len(exe), 0)
+        self.assertEqual(exe, exe.strip())
+        self.assertTrue(exe_exists(exe))
+        if sys.executable:
+            self.assertEqual(exe, sys.executable)
+
+    @also_with_sudo
+    def test_get_real_uid(self):
+        """Test for get_real_uid()"""
+        if not IS_POSIX:
+            self.assertRaises(RuntimeError, get_real_uid)
+            return
+
+        # Basic functionality test
+        uid = get_real_uid()
+        self.assertIsInstance(uid, int)
+        self.assertTrue(0 <= uid <= 65535)
+
+        # Multiple calls should return same value
+        uid2 = get_real_uid()
+        self.assertEqual(uid, uid2)
+
+        # Test relationship with sudo_mode()
+        if sudo_mode():
+            self.assertGreater(uid, 0)
+            self.assertNotEqual(uid, os.geteuid())
+        else:
+            self.assertEqual(uid, os.getuid())
+
+        # Test that UID is exists in passwd
+        # Import pwd here because it would fail on Windows.
+        import pwd  # pylint: disable=import-outside-toplevel
+        try:
+            pwd_entry = pwd.getpwuid(uid)
+            self.assertIsInstance(pwd_entry.pw_name, str)
+            self.assertGreater(len(pwd_entry.pw_name), 0)
+        except KeyError:
+            # UID might not be in passwd database in some test environments
+            pass
+
+        # Test environment variable consistency
+        sudo_uid_env = os.getenv('SUDO_UID')
+        if sudo_uid_env:
+            self.assertEqual(uid, int(sudo_uid_env))
+
+        # Test with empty LOGNAME (if not in sudo mode)
+        if not sudo_mode():
+            with common.set_temporary_env('LOGNAME', None):
+                uid_no_logname = get_real_uid()
+                self.assertIsInstance(uid_no_logname, int)
+                self.assertTrue(0 <= uid_no_logname <= 65535)
+
+        # Debug logging for troubleshooting
+        logger.debug("os.getenv('LOGNAME') = %s", os.getenv('LOGNAME'))
+        logger.debug("os.getenv('SUDO_UID') = %s", os.getenv('SUDO_UID'))
+        logger.debug('os.geteuid() = %d', os.geteuid())
+        logger.debug('os.getuid() = %d', os.getuid())
+        logger.debug('get_real_uid() = %d', uid)
+        logger.debug('sudo_mode() = %s', sudo_mode())
+
+        try:
+            logger.debug('os.getlogin() = %s', os.getlogin())
+        except Exception:
+            logger.exception('os.getlogin() raised exception')
+
+        # Test that function doesn't modify global state
+        uid_after = get_real_uid()
+        self.assertEqual(uid, uid_after)
+
+    def test_get_real_uid_numeric_login_without_passwd_entry(self):
+        """Docker containers may advertise UID as username without /etc/passwd."""
+        if not IS_POSIX:
+            self.skipTest('POSIX-only behavior')
+
+        # Ensure the code path executes past the SUDO_UID shortcut.
+        env_overrides = {'SUDO_UID': ''}
+        with mock.patch.dict(os.environ, env_overrides, clear=False):
+            with mock.patch('os.getlogin', return_value='1000'):
+                with mock.patch('pwd.getpwnam', side_effect=KeyError):
+                    uid = get_real_uid()
+        self.assertEqual(uid, 1000)
+
+    def test_sanitize_root_env_non_root(self):
+        """Not running as root: environment is returned unchanged."""
+        env = {'PATH': '/tmp/evil', 'LD_PRELOAD': 'evil.so'}
+        with mock.patch('os.geteuid', return_value=1000, create=True):
+            self.assertEqual(sanitize_root_env(env), env)
+
+    def test_sanitize_root_env_root(self):
+        """As root: drop code-loading vars and PATH entries a non-root user could write."""
+        dropped_vars = ('LD_PRELOAD', 'LD_LIBRARY_PATH', 'LD_AUDIT',
+                        'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH',
+                        'DYLD_FRAMEWORK_PATH',
+                        'GCONV_PATH', 'LOCPATH', 'NLSPATH', 'HOSTALIASES',
+                        'PYTHONPATH', 'PYTHONHOME', 'PYTHONSTARTUP',
+                        'PYTHONEXECUTABLE',
+                        'BASH_ENV', 'ENV', 'SHELLOPTS', 'BASHOPTS', 'IFS',
+                        'PERL5LIB', 'PERL5OPT', 'RUBYLIB', 'RUBYOPT',
+                        'NODE_OPTIONS')
+        env = {var: '/tmp/evil' for var in dropped_vars}
+        env['PATH'] = '/usr/bin' + os.pathsep + '/tmp/evil'
+        env['HOME'] = '/root'
+        with mock.patch('os.geteuid', return_value=0, create=True), \
+                mock.patch('bleachbit.General._path_dir_is_root_safe',
+                           side_effect=lambda d: d == '/usr/bin'):
+            result = sanitize_root_env(env)
+        self.assertEqual(result['PATH'], '/usr/bin')
+        for dropped in dropped_vars:
+            self.assertNotIn(dropped, result)
+        self.assertEqual(result['HOME'], '/root')
+
+    @common.skipIfWindows
+    def test_run_external_nowait_sanitizes_env_when_called_directly(self):
+        """run_external_nowait() must sanitize env even when not called via run_external()
+
+        Some callers (e.g. GuiApplication's self-restart) call this directly,
+        bypassing run_external()'s own sanitize_root_env() call.
+        """
+        hostile_env = {'PATH': '/usr/bin' + os.pathsep + '/tmp/evil',
+                       'LD_PRELOAD': '/tmp/evil.so'}
+        captured = {}
+
+        def fake_popen(args, **kwargs):
+            captured['env'] = kwargs.get('env')
+            proc = mock.Mock()
+            return proc
+
+        with mock.patch('os.geteuid', return_value=0, create=True), \
+                mock.patch('bleachbit.General._path_dir_is_root_safe',
+                           side_effect=lambda d: d == '/usr/bin'), \
+                mock.patch('bleachbit.General.subprocess.Popen', side_effect=fake_popen):
+            run_external_nowait(['/bin/true'], env=hostile_env)
+        self.assertNotIn('LD_PRELOAD', captured['env'])
+        self.assertEqual(captured['env']['PATH'], '/usr/bin')
+        # the caller's own dict must not be mutated in place
+        self.assertIn('LD_PRELOAD', hostile_env)
+
+    def test_get_real_uid_non_numeric_sudo_uid(self):
+        """A bogus SUDO_UID must not crash; fall through instead."""
+        if not IS_POSIX:
+            self.skipTest('POSIX-only behavior')
+
+        with mock.patch.dict(os.environ, {'SUDO_UID': 'not-a-number'}, clear=False):
+            with mock.patch('os.getlogin', return_value='root'):
+                uid = get_real_uid()
+        self.assertIsInstance(uid, int)
+        self.assertGreaterEqual(uid, 0)
+
+    def test_chownself_root_guard(self):
+        """chownself() must refuse /root and its descendants, including
+        via a non-canonical path spelling that a raw substring check
+        would miss."""
+        if not IS_POSIX:
+            self.skipTest('POSIX-only behavior')
+
+        with mock.patch.object(General, 'get_real_uid', return_value=1000), \
+                mock.patch.object(os, 'chown') as mock_chown:
+            for path in ('/root', '/root/', '/root/.ssh/authorized_keys',
+                         '/home/x/../../root', '/home/x/../../root/.bashrc'):
+                with self.subTest(path=path):
+                    chownself(path)
+                    mock_chown.assert_not_called()
+
+            # a sibling directory that merely starts with the string
+            # "root" must not be treated as /root
+            chownself('/rootlookalike/file')
+            mock_chown.assert_called_once()
+            mock_chown.reset_mock()
+
+            # an ordinary path is still chowned
+            chownself('/home/user/file')
+            mock_chown.assert_called_once()
+
+    @also_with_sudo
+    def test_get_real_username(self):
+        """Test for get_real_username()"""
+        if not IS_POSIX:
+            self.assertRaises(RuntimeError, get_real_username)
+            return
+        username = get_real_username()
+        self.assertIsInstance(username, str)
+        self.assertGreater(len(username), 0)
+        if sudo_mode():
+            self.assertNotEqual(username, 'root')
+
+    def test_get_real_username_container_env_fallback(self):
+        """Ensure container fallback uses LOGNAME when getpass fails."""
+        if not IS_POSIX:
+            self.skipTest('POSIX-only behavior')
+
+        env = {'LOGNAME': 'containeruser'}
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch('os.getlogin', side_effect=OSError('no tty')):
+                with mock.patch('getpass.getuser', side_effect=KeyError):
+                    username = get_real_username()
+        self.assertEqual(username, 'containeruser')
+
+    def test_get_real_username_container_uid_fallback(self):
+        """Ensure fallback returns UID string when everything else fails."""
+        if not IS_POSIX:
+            self.skipTest('POSIX-only behavior')
+
+        env = {}
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch('os.getlogin', side_effect=OSError('no tty')):
+                with mock.patch('getpass.getuser', side_effect=OSError('no user')):
+                    with mock.patch('os.getuid', return_value=4242):
+                        username = get_real_username()
+        self.assertEqual(username, '4242')
+
+    @also_with_sudo
+    def test_makedirs(self):
+        """Unit test for makedirs"""
+
+        dir = os.path.join(self.tempdir, 'just', 'a', 'directory', 'adventure')
+        # directory does not exist
+        makedirs(dir)
+        self.assertLExists(dir)
+        # directory already exists
+        makedirs(dir)
+        self.assertLExists(dir)
+        # clean up
+        shutil.rmtree(os.path.join(self.tempdir, 'just'))
+
+    def test_run_external(self):
+        """Unit test for run_external"""
+        args = {'nt': ['cmd.exe', '/c', 'dir', r'%windir%\system32', '/s', '/b'],
+                'posix': ['find', '/usr/bin']}
+        (rc, _stdout, stderr) = run_external(args[os.name])
+        self.assertEqual(0, rc)
+        self.assertEqual(0, len(stderr))
+
+    @common.skipUnlessWindows
+    def test_run_external_quote(self):
+        """Unit test for run_external() with quoted command"""
+        tests = [
+            (('cmd.exe', '/c', 'echo "hello world"'), 'hello world'),
+            ((os.path.expandvars('%windir%\\system32\\ping.exe'), '/?'), 'Usage: ping')
+        ]
+        for args, expected in tests:
+            (rc, stdout, stderr) = run_external(args)
+            self.assertEqual(0, rc)
+            self.assertIn(expected, stdout.strip())
+            self.assertEqual(0, len(stderr))
+
+    def test_run_external_does_not_exist(self):
+        """Unit test for run_external() with non-existent command"""
+        self.assertRaises(OSError, run_external, ['cmddoesnotexist'])
+        args = {'nt': ['cmd.exe', '/c', 'dir', r'c:\doesnotexist'],
+                'posix': ['ls', '/doesnotexist']}
+        (rc, _stdout, _stderr) = run_external(args[os.name])
+        self.assertNotEqual(0, rc)
+
+    def test_run_external_nowait(self):
+        """Unit test for run_external() with wait=False"""
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("error")
+
+            output_file = os.path.join(self.tempdir, 'run_external_nowait.txt')
+
+            cmd = [
+                sys.executable,
+                '-c',
+                (
+                    'import pathlib, sys, time; '
+                    'time.sleep(2); '
+                    'pathlib.Path(sys.argv[1]).write_text('
+                    '"done", encoding="utf-8")'
+                ),
+                output_file,
+            ]
+
+            self.assertNotExists(output_file)
+
+            (rc, stdout, stderr) = run_external(cmd, wait=False)
+            self.assertEqual(0, rc)
+            self.assertEqual(0, len(stdout))
+            self.assertEqual(0, len(stderr))
+
+            self.assertNotExists(output_file)
+
+            for _ in range(200):
+                if os.path.exists(output_file):
+                    break
+                time.sleep(0.1)
+            self.assertExists(output_file)
+
+    @common.skipUnlessWindows
+    def test_run_external_nowait_no_kwargs(self):
+        """Test run_external_nowait with kwargs=None"""
+        cmd = ['cmd.exe', '/c', 'exit', '0']
+        result = run_external_nowait(cmd)
+        self.assertTrue(result)
+
+    def test_run_external_command_completion(self):
+        """Test that run_external() commands complete successfully"""
+        with warnings.catch_warnings(record=True):
+            # Any warning is an error.
+            warnings.simplefilter("error")
+            with tempfile.TemporaryDirectory() as temp_dir:
+                test_file = os.path.join(temp_dir, 'test_file.txt')
+
+                if IS_POSIX:
+                    cmd = ['touch', test_file]
+                    expected_stdout = ''
+                else:
+                    cmd = ['cmd.exe', '/c', 'copy', 'nul', test_file]
+                    expected_stdout = '1 file(s) copied.'
+
+                # Wait for the command to complete.
+                (rc, stdout, stderr) = run_external(cmd, timeout=5)
+                self.assertEqual(0, rc, stderr)
+                self.assertEqual('', stderr)
+                self.assertEqual(expected_stdout, stdout.strip())
+                self.assertExists(test_file)
+
+                os.unlink(test_file)
+                self.assertNotExists(test_file)
+
+                # Test with wait=False
+                (rc, stdout, stderr) = run_external(cmd, wait=False, timeout=5)
+
+                self.assertEqual(0, rc)
+                self.assertEqual('', stdout)
+                self.assertEqual('', stderr)
+                # Poll for file creation. Touch normally completes in milliseconds,
+                # so one second is plenty.
+                for _ in range(100):
+                    if os.path.exists(test_file):
+                        break
+                    time.sleep(0.01)
+                self.assertExists(test_file)
+
+    def test_run_external_with_timeout_failure(self):
+        """Test run_external() with timeout value that is too short"""
+        if IS_POSIX:
+            args = ['sleep', '5']
+        else:
+            args = ['ping', '-n', '10', '127.0.0.1']
+        with self.assertRaises(subprocess.TimeoutExpired):
+            run_external(args, timeout=1)
+
+    def test_run_external_stdout(self):
+        """Test that run_external properly captures stdout"""
+        if IS_POSIX:
+            args = ['echo', 'test output']
+        else:
+            args = ['cmd.exe', '/c', 'echo test output']
+        (rc, stdout, stderr) = run_external(args)
+        self.assertEqual(0, rc)
+        self.assertIn('test output', stdout)
+        self.assertEqual('', stderr)
+
+    def test_run_external_stderr(self):
+        """Test that run_external properly captures stderr"""
+        if IS_POSIX:
+            args = ['sh', '-c', 'echo "error message" >&2']
+        else:
+            args = ['cmd.exe', '/c', 'echo error message 1>&2']
+        (rc, stdout, stderr) = run_external(args)
+        self.assertEqual(0, rc)
+        self.assertEqual('', stdout)
+        self.assertIn('error message', stderr)
+
+    def test_run_external_return_codes(self):
+        """Test that run_external() properly returns non-zero exit codes"""
+        if IS_POSIX:
+            args = ['false']
+        else:
+            args = ['cmd.exe', '/c', 'exit 1']
+        (rc, _, _) = run_external(args)
+        self.assertEqual(1, rc)
+
+    @common.skipIfWindows
+    def test_run_external_clean_env(self):
+        """Unit test for clean_env parameter to run_external()"""
+
+        def run(args, clean_env):
+            (rc, stdout, _stderr) = run_external(args, clean_env=clean_env)
+            self.assertEqual(rc, 0)
+            return stdout.rstrip('\n')
+
+        # clean_env should set language to C
+        run(['sh', '-c', '[ "x$LANG" = "xC" ]'], clean_env=True)
+        run(['sh', '-c', '[ "x$LC_ALL" = "xC" ]'], clean_env=True)
+
+        # clean_env parameter should not alter the PATH, and the PATH
+        # should not be empty
+        path_clean = run(['bash', '-c', 'echo $PATH'], clean_env=True)
+        if os.getenv('PATH'):
+            self.assertEqual(common.get_env('PATH'), path_clean)
+        self.assertGreater(len(path_clean), 10)
+
+        path_unclean = run(['bash', '-c', 'echo $PATH'], clean_env=False)
+        self.assertEqual(path_clean, path_unclean)
+
+        # With parent environment set to English and parameter clean_env=False,
+        # expect English
+        with common.set_temporary_env('LC_ALL', 'C'):
+            (rc, _, stderr) = run_external(
+                ['ls', '/doesnotexist'], clean_env=False)
+            # GNU ls returns 2 for missing files, while BSD/macOS ls returns 1
+            self.assertIn(
+                rc, (1, 2), 'ls /doesnotexist returned exit code %s' % rc)
+            self.assertIn('No such file', stderr)
+
+            # Set parent environment to Spanish.
+            with common.set_temporary_env('LC_ALL', 'es_MX.UTF-8'):
+                (rc, _, stderr) = run_external(
+                    ['ls', '/doesnotexist'], clean_env=False)
+                self.assertIn(
+                    rc, (1, 2), 'ls /doesnotexist returned exit code %s' % rc)
+                if os.path.exists('/usr/share/locale-langpack/es/LC_MESSAGES/coreutils.mo'):
+                    # Spanish language pack is installed.
+                    self.assertIn('No existe el archivo', stderr)
+
+                # Here the parent environment has Spanish, but the child process
+                # should use English.
+                (rc, _, stderr) = run_external(
+                    ['ls', '/doesnotexist'], clean_env=True)
+                self.assertIn(
+                    rc, (1, 2), 'ls /doesnotexist returned exit code %s' % rc)
+                self.assertIn('No such file', stderr)
+
+    def test_run_external_invalid(self):
+        """Unit test for run_external() with invalid arguments"""
+        with self.assertRaises(AssertionError):
+            run_external(None)
+        with self.assertRaises(AssertionError):
+            run_external('foo')
+        with self.assertRaises(ValueError):
+            run_external([None, 'foo'])
+        with self.assertRaises(ValueError):
+            run_external(['hello', None])
+        with self.assertRaises(ValueError):
+            run_external([''])
+        with self.assertRaises(AssertionError):
+            run_external([])
+
+    def test_run_external_timeout(self):
+        """Unit test for run_external() with timeout"""
+        args = None
+        if IS_POSIX:
+            args = ['sleep', '10']
+        if IS_WINDOWS:
+            args = ['ping', '-n', '10', '127.0.0.1']
+        start_time = time.time()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            run_external(args, timeout=1)
+        elapsed_time = time.time() - start_time
+        self.assertLess(elapsed_time, 2)
+
+    @common.skipIfWindows
+    def test_dconf(self):
+        """Unit test for dconf"""
+        if not exists_in_path('dconf'):
+            self.skipTest('dconf not found')
+        if sudo_mode():
+            self.skipTest('dconf not supported in sudo mode')
+        # pylint: disable=import-outside-toplevel
+        from bleachbit.GtkShim import is_gtk_available
+        if not is_gtk_available():
+            self.skipTest('dconf not supported without GUI')
+        args = ['dconf', 'write',
+                '/apps/bleachbit/test', 'true']
+        (rc, stdout, stderr) = run_external(args)
+        self.assertEqual(0, rc, stderr)
+        self.assertEqual('', stderr)
+        self.assertEqual('', stdout)
+
+    def test_shell_split(self):
+        """Unit test for shell_split()"""
+        tests = [('', []),
+                 ('a', ['a']),
+                 ('a b', ['a', 'b'])
+                 ]
+        if IS_WINDOWS:
+            tests.append(('"a b"', ['a b']))
+            tests.append(('"a b" c', ['a b', 'c']))
+            tests.append(("echo 'a b'", ['echo', "'a b'"]))
+            tests.append(('echo a\\ b', ['echo', 'a\\', 'b']))
+        elif IS_POSIX:
+            tests.append(("echo 'a b'", ['echo', 'a b']))
+            tests.append(("echo 'a b' c", ['echo', 'a b', 'c']))
+            tests.append(('echo a\\ b', ['echo', 'a b']))
+        for test in tests:
+            self.assertEqual(test[1], shell_split(test[0]))
+
+    @common.skipIfWindows
+    @also_with_sudo
+    def test_sudo_mode(self):
+        """Unit test for sudo_mode"""
+        self.assertIsInstance(sudo_mode(), bool)

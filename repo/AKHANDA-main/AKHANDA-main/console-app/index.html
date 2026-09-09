@@ -1,0 +1,554 @@
+<title>Akhanda Custody Console</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --bg:#F1F2F0; --panel:#FFF; --sunk:#E8EAE7; --rail:#20241F; --rail-fg:#C7CCC4; --rail-dim:#767D73;
+  --fg:#14171380; --fg:#141713; --fg2:#474D46; --dim:#6C7369; --line:#CCD0C9; --hair:#E2E5E0;
+  --acc:#7A5B1E; --acc-bg:#F2ECDD;
+  --ok:#1F6B45; --ok-bg:#E1EEE7;
+  --warn:#94540D; --warn-bg:#F6EADA;
+  --bad:#96302A; --bad-bg:#F6E3E1;
+  --focus:#7A5B1E;
+  color-scheme:light dark;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0F1210; --panel:#171B18; --sunk:#1E231F; --rail:#0A0C0A; --rail-fg:#BFC5BC; --rail-dim:#666D64;
+  --fg:#E1E5DF; --fg2:#AEB5AC; --dim:#7F867D; --line:#2B312C; --hair:#232823;
+  --acc:#C5A052; --acc-bg:#241E10;
+  --ok:#54B085; --ok-bg:#132419;
+  --warn:#D08F3C; --warn-bg:#241A0E;
+  --bad:#DB7A70; --bad-bg:#271413;
+  --focus:#C5A052;
+}}
+:root[data-theme="dark"]{
+  --bg:#0F1210; --panel:#171B18; --sunk:#1E231F; --rail:#0A0C0A; --rail-fg:#BFC5BC; --rail-dim:#666D64;
+  --fg:#E1E5DF; --fg2:#AEB5AC; --dim:#7F867D; --line:#2B312C; --hair:#232823;
+  --acc:#C5A052; --acc-bg:#241E10;
+  --ok:#54B085; --ok-bg:#132419;
+  --warn:#D08F3C; --warn-bg:#241A0E;
+  --bad:#DB7A70; --bad-bg:#271413;
+  --focus:#C5A052;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--fg);
+  font-family:"IBM Plex Sans",-apple-system,"Segoe UI",sans-serif;
+  font-size:13px;line-height:1.5;-webkit-font-smoothing:antialiased
+}
+.m{font-family:"IBM Plex Mono",ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.005em}
+
+/* shell */
+.app{display:grid;grid-template-columns:198px 1fr;height:100vh;overflow:hidden}
+
+/* rail */
+.rail{background:var(--rail);color:var(--rail-fg);display:flex;flex-direction:column;overflow:hidden}
+.logo{padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.07)}
+.logo b{display:block;color:#fff;font-size:15px;font-weight:600;letter-spacing:-.01em}
+.logo span{display:block;font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.15em;
+  text-transform:uppercase;color:var(--rail-dim);margin-top:3px}
+.rail nav{padding:8px 0;flex:1;overflow-y:auto}
+.rail nav button{display:flex;gap:8px;align-items:center;width:100%;background:0;border:0;
+  color:var(--rail-fg);font:inherit;font-size:12.5px;text-align:left;padding:7px 16px;cursor:pointer;
+  border-left:2px solid transparent}
+.rail nav button kbd{font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--rail-dim);
+  border:1px solid rgba(255,255,255,.14);padding:0 4px;border-radius:2px;margin-left:auto}
+.rail nav button:hover{background:rgba(255,255,255,.05);color:#fff}
+.rail nav button[aria-current=true]{background:rgba(255,255,255,.08);color:#fff;border-left-color:var(--acc)}
+.railfoot{padding:10px 16px;border-top:1px solid rgba(255,255,255,.07);font-size:10.5px;
+  color:var(--rail-dim);line-height:1.6}
+
+.main{display:flex;flex-direction:column;min-width:0;overflow:hidden}
+
+/* toolbar */
+.tbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--panel);
+  border-bottom:1px solid var(--line);padding:7px 12px;flex:none}
+.tbar .sep{width:1px;height:20px;background:var(--line)}
+.tbar label.file{cursor:pointer}
+.tbar label.file input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.btn{font:inherit;font-size:12px;font-weight:500;padding:5px 10px;cursor:pointer;background:var(--panel);
+  color:var(--fg);border:1px solid var(--line);border-radius:2px;display:inline-flex;align-items:center;gap:6px}
+.btn:hover:not(:disabled){border-color:var(--dim);background:var(--sunk)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.pri{background:var(--rail);color:#fff;border-color:var(--rail)}
+.btn.pri:hover{background:#000}
+.btn.dgr{color:var(--bad);border-color:var(--bad)}
+.btn.dgr:hover:not(:disabled){background:var(--bad-bg)}
+input[type=text],select{font:inherit;font-size:12px;padding:5px 7px;background:var(--panel);color:var(--fg);
+  border:1px solid var(--line);border-radius:2px}
+input[type=text]{font-family:"IBM Plex Mono",monospace;font-size:11.5px;min-width:190px}
+
+/* status strip */
+.strip{display:flex;flex-wrap:wrap;background:var(--panel);border-bottom:1px solid var(--line);flex:none}
+.cell{padding:6px 12px;border-right:1px solid var(--hair);min-width:0}
+.cell .k{font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+.cell .v{font-size:12px;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px}
+.cell.grow{flex:1;border-right:0;text-align:right}
+.led{display:inline-flex;align-items:center;gap:6px;font-weight:600}
+.led::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.led.ok{color:var(--ok)}.led.bad{color:var(--bad)}.led.idle{color:var(--dim)}.led.warn{color:var(--warn)}
+
+.body{flex:1;overflow-y:auto;padding:14px}
+.view[hidden]{display:none}
+.vh{margin-bottom:12px}
+.vh h2{font-size:16px}
+.vh p{margin:3px 0 0;color:var(--fg2);max-width:78ch;font-size:12.5px}
+
+/* panel */
+.p{background:var(--panel);border:1px solid var(--line);border-radius:2px;margin-bottom:12px}
+.p>h3{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);
+  padding:8px 12px;border-bottom:1px solid var(--hair);font-family:"IBM Plex Mono",monospace}
+.p .in{padding:12px}
+.p .in p{margin:0 0 8px;color:var(--fg2)}
+.p .in p:last-child{margin:0}
+
+/* table */
+.tw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:12px;min-width:600px}
+th{font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--dim);font-weight:600;text-align:left;padding:7px 10px;background:var(--sunk);
+  border-bottom:1px solid var(--line);white-space:nowrap;position:sticky;top:0}
+td{padding:6px 10px;border-bottom:1px solid var(--hair);vertical-align:top}
+tbody tr:last-child td{border-bottom:0}
+tr.r{cursor:pointer}
+tr.r:hover td{background:var(--sunk)}
+td.st{border-left:3px solid var(--line);width:0;padding:0}
+tr.ok td.st{border-left-color:var(--ok)}
+tr.wn td.st{border-left-color:var(--warn)}
+tr.bd td.st{border-left-color:var(--bad)}
+
+.tg{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:9.5px;font-weight:600;
+  padding:1px 5px;border:1px solid;border-radius:2px;white-space:nowrap}
+.g-ok{color:var(--ok);border-color:var(--ok);background:var(--ok-bg)}
+.g-wn{color:var(--warn);border-color:var(--warn);background:var(--warn-bg)}
+.g-bd{color:var(--bad);border-color:var(--bad);background:var(--bad-bg)}
+.g-dm{color:var(--dim);border-color:var(--line);background:var(--sunk)}
+.g-ac{color:var(--acc);border-color:var(--acc);background:var(--acc-bg)}
+.h{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--fg2)}
+
+.det td{padding:0;background:var(--sunk)}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(215px,1fr))}
+.kv div{padding:7px 10px;border-right:1px solid var(--hair);border-bottom:1px solid var(--hair);min-width:0}
+.kv .k{font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.11em;text-transform:uppercase;color:var(--dim)}
+.kv .v{font-family:"IBM Plex Mono",monospace;font-size:11px;margin-top:2px;word-break:break-all}
+
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:12px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:2px;margin-bottom:12px}
+.stats div{background:var(--panel);padding:9px 11px}
+.stats .n{font-family:"IBM Plex Mono",monospace;font-size:18px;font-weight:600;color:var(--ok);line-height:1.1}
+.stats .k{font-size:10.5px;color:var(--dim);margin-top:2px;line-height:1.3}
+
+.log{font-family:"IBM Plex Mono",monospace;font-size:11px;line-height:1.75;background:var(--rail);
+  color:#B9C0B6;padding:9px 11px;height:150px;overflow-y:auto;white-space:pre-wrap;border-radius:2px}
+.log .t{color:#6E756B}.log .g{color:#63C08F}.log .r{color:#E08A80}.log .y{color:#D9A75B}.log b{color:#fff;font-weight:500}
+
+.cl{display:block;font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--acc);margin-top:2px;line-height:1.4}
+ul.l{margin:0;padding-left:16px;color:var(--fg2);font-size:12px}
+ul.l li{margin-bottom:5px}
+.drop{border:1.5px dashed var(--line);border-radius:2px;padding:14px;text-align:center;color:var(--dim);font-size:12px}
+.drop.on{border-color:var(--acc);background:var(--acc-bg);color:var(--acc)}
+
+@media(max-width:820px){
+  .app{grid-template-columns:1fr;height:auto;overflow:visible}
+  .rail{height:auto}
+  .rail nav{display:flex;overflow-x:auto;padding:0}
+  .rail nav button{border-left:0;border-bottom:2px solid transparent;white-space:nowrap;padding:9px 12px}
+  .rail nav button[aria-current=true]{border-left:0;border-bottom-color:var(--acc)}
+  .rail nav button kbd{display:none}
+  .railfoot{display:none}
+  .body{overflow:visible}
+  .cell .v{max-width:150px}
+}
+:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+</style>
+
+<div class="app">
+  <aside class="rail">
+    <div class="logo"><b>Akhanda</b><span>Custody Console</span></div>
+    <nav id="nav">
+      <button data-v="ledger" aria-current="true">Ledger<kbd>1</kbd></button>
+      <button data-v="integrity">Integrity<kbd>2</kbd></button>
+      <button data-v="certificate">Certificate<kbd>3</kbd></button>
+      <button data-v="evidence">Evidence<kbd>4</kbd></button>
+    </nav>
+    <div class="railfoot">
+      <span id="rfSrc">sample chain</span><br>
+      <span class="m" id="rfClock">, </span>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="tbar">
+      <label class="file btn" tabindex="0">Open chain.json<input type="file" id="fileIn" accept=".json,application/json"></label>
+      <button class="btn" id="btnSample">Load sample</button>
+      <span class="sep"></span>
+      <span style="font-size:11px;color:var(--dim)" class="m">witness</span>
+      <input type="text" id="witUrl" value="http://192.168.137.132:8000" spellcheck="false" aria-label="Witness node URL">
+      <button class="btn" id="btnConn">Connect</button>
+      <span class="sep"></span>
+      <button class="btn pri" id="btnVerify">Verify</button>
+    </div>
+
+    <div class="strip">
+      <div class="cell"><div class="k">Chain</div><div class="v m" id="sChain">, </div></div>
+      <div class="cell"><div class="k">Entries</div><div class="v m" id="sCount">, </div></div>
+      <div class="cell"><div class="k">Head</div><div class="v m" id="sHead">, </div></div>
+      <div class="cell"><div class="k">Weakest tier</div><div class="v m" id="sTier">, </div></div>
+      <div class="cell"><div class="k">Witness</div><div class="v"><span class="led idle" id="sWit">not connected</span></div></div>
+      <div class="cell grow"><div class="k">Integrity</div><div class="v"><span class="led idle" id="sInt">idle</span></div></div>
+    </div>
+
+    <div class="body">
+
+      <!-- LEDGER -->
+      <section class="view" id="v-ledger">
+        <div class="vh"><h2>Ledger</h2>
+          <p>Every operation, in order. Each entry commits to the hash of the one before it, so an
+             entry cannot be removed from the middle without breaking every link after it. Click a
+             row for the signed fields.</p></div>
+        <div class="p"><div class="tw"><table>
+          <thead><tr><th></th><th>Seq</th><th>Operation</th><th>Method</th><th>Outcome</th>
+            <th>Custody tier</th><th>Co-signer</th><th>Entry hash</th><th>Timestamp</th></tr></thead>
+          <tbody id="tbLedger"></tbody></table></div></div>
+        <div class="grid2">
+          <div class="p"><h3>The refused entry</h3><div class="in">
+            <p>A <span class="tg g-wn">REFUSED</span> row is an operation that <b>did not happen</b>,
+               recorded permanently. The witness was unreachable, so the tool blocked the run and wrote
+               the refusal into the chain.</p>
+            <p>Ask a competing tool to show the log entry for an operation it declined to perform.
+               There isn't one, a blocked attempt leaves no trace.</p></div></div>
+          <div class="p"><h3>Reading custody tiers</h3><div class="in">
+            <p><span class="tg g-ok">WITNESS_COSIGNED</span> a second key, on a physically separate
+               machine, signed this entry.</p>
+            <p><span class="tg g-dm">SOFTWARE_KEY</span> operator signature only, honest, and
+               visibly weaker.</p>
+            <p style="color:var(--dim)">The ladder is SOFTWARE_KEY &lt; PRESENCE_CONFIRMED &lt;
+               WITNESS_COSIGNED &lt; FULL_CUSTODY. <b>FULL_CUSTODY is never printed</b>, it needs a
+               presence device, which is designed and not shipped.</p></div></div>
+        </div>
+      </section>
+
+      <!-- INTEGRITY -->
+      <section class="view" id="v-integrity" hidden>
+        <div class="vh"><h2>Integrity</h2>
+          <p>Verification runs in this browser. The page re-implements the length-prefixed encoding
+             and SHA-256 and recomputes every entry hash, it never asks a server whether the chain is
+             valid. Open DevTools and watch <span class="m">crypto.subtle.digest</span> run.</p></div>
+        <div class="tbar" style="border:1px solid var(--line);border-radius:2px;margin-bottom:12px">
+          <select id="selSeq" aria-label="Entry to alter"></select>
+          <button class="btn dgr" id="btnTamper">Alter selected entry</button>
+          <button class="btn" id="btnRestore" disabled>Restore</button>
+          <span class="sep"></span>
+          <span style="font-size:11.5px;color:var(--dim)">Alters a signed field in memory. The file on disk is untouched.</span>
+        </div>
+        <div class="p"><div class="tw"><table>
+          <thead><tr><th></th><th>Seq</th><th>Link</th><th>Recorded hash</th><th>Recomputed here</th><th>Verdict</th></tr></thead>
+          <tbody id="tbVerify"></tbody></table></div></div>
+        <div class="p" id="pVerdict"><h3 id="vTitle">Verdict</h3><div class="in"><p id="vText">Press Verify.</p></div></div>
+        <div class="p"><h3>Session log</h3><div class="log" id="log"></div></div>
+      </section>
+
+      <!-- CERTIFICATE -->
+      <section class="view" id="v-certificate" hidden>
+        <div class="vh"><h2>Certificate</h2>
+          <p>NIST SP 800-88 Rev. 2 and BSA 2023 §63(4). Every field carries the clause it answers,
+             printed beneath the value.</p></div>
+        <div class="grid2">
+          <div class="p"><h3>Part A, person in charge</h3><div class="kv" id="kvA"></div></div>
+          <div class="p"><h3>Part B, expert</h3><div class="kv" id="kvB"></div></div>
+        </div>
+        <div class="p"><h3>Sanitization</h3><div class="kv" id="kvS"></div></div>
+        <div class="p"><h3>Media and custody</h3><div class="kv" id="kvM"></div></div>
+        <div class="p"><h3>Stated limits, printed on the certificate itself</h3><div class="in">
+          <ul class="l">
+            <li><b>Integrity, not completeness.</b> Establishes that recorded operations were not altered. Cannot establish that every operation was recorded.</li>
+            <li><b>Tail truncation.</b> Removing the most recent entries leaves a shorter, self-consistent chain. Only the witness's own head record separates a truncated chain from a short one.</li>
+            <li><b>Partial dual signature.</b> 1 of 2 performed entries carries both signatures.</li>
+            <li><b>No confirmed external anchor.</b> Timestamps are the operator's own clock.</li>
+            <li><b>Blocked attempts.</b> 1 operation was refused; reported separately, never folded into the result.</li>
+            <li><b>Form, not admissibility.</b> Fields map to named clauses. Whether a court admits it is for the court.</li>
+          </ul></div></div>
+      </section>
+
+      <!-- EVIDENCE -->
+      <section class="view" id="v-evidence" hidden>
+        <div class="vh"><h2>Evidence</h2>
+          <p>Produced by <span class="m">scripts/run_all.py</span> and
+             <span class="m">scripts/demo_bundle.py</span>. Reproducible, not projected.</p></div>
+        <div class="stats">
+          <div><div class="n">630</div><div class="k">tests pass<br>0 skipped</div></div>
+          <div><div class="n">11/11</div><div class="k">automation<br>checks</div></div>
+          <div><div class="n">8/8</div><div class="k">claims survived<br>falsification</div></div>
+          <div><div class="n">4/4</div><div class="k">byte-identical<br>recovery</div></div>
+          <div><div class="n">3</div><div class="k">verifiers<br>agree</div></div>
+          <div><div class="n">0</div><div class="k">HIGH severity<br>findings</div></div>
+        </div>
+        <div class="p"><h3>Byte-identical recovery, original against carved</h3>
+          <div class="tw"><table>
+            <thead><tr><th></th><th>File</th><th>Original SHA-256</th><th>Carved SHA-256</th><th></th></tr></thead>
+            <tbody id="tbProof"></tbody></table></div></div>
+        <div class="grid2">
+          <div class="p"><h3>Confirmed on real hardware</h3><div class="in">
+            <p>Two laptops over a hotspot, 3 September 2026. The co-signature on entry 0 carries key
+               <span class="m">0b1088f7140ef514</span>, which exists only on the witness machine.
+               Operator layer 3/3 verified, witness layer 1/1.</p></div></div>
+          <div class="p"><h3>Not tested, stated plainly</h3><div class="in">
+            <p>NIST <b>Purge</b> on an SSD, a real flash wipe, and genuine bad-sector handling all
+               require lab media we could not obtain. The logic is unit-tested; the physics is not
+               confirmed.</p></div></div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const SAMPLE={"chain_id":"1d33c5ee78fbc0c1","entries":[
+{"seq":0,"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","op_type":"RECOVER","target_ref":"D:\\akhanda\\demo_bundle_g1\\seized_media.dd","timestamp":"2026-09-03T11:23:38Z","method":"Clear","result_hash":"49bfb22ed641139dd7d302af63a18665475018662a14485fd9bb2ae1ab7bf6a6","operator_decl":"(operator not named)","concur_decl":"(expert not named)","custody_tier":"WITNESS_COSIGNED","outcome":"PARTIAL","presence_ref":"","operator_key_id":"9608a3150d1394a4","tool_ref":"akhanda/0.1.0+c508412d47c60e56","chain_id":"1d33c5ee78fbc0c1","entry_version":"3","entry_hash":"0ae0900cd62d360dac7061c38797ceb7084f38b8f5b1d5ff286d69fca8bf0602","operator_sig":"e18d1074b527f9db822b068682274b62177ca31914e88487a4e4e349005cff0781b1b8ffa2e1f7e45f777d4d8e7114a6d6879697a869689c650fcf4bccede502","concur_sig":"83c82e70abd9e471c684f746876be07936278898050aa10215e4ec9c34351f53cf7a218a3e4a71051865c38e4f5619ee41c94d68fd39c2159d81a9b1db29ae02","concur_key_id":"0b1088f7140ef514","witness_head_hash":"d5e27957058227649195b190d686962838a330f547a0836a834eda4687656d3d","witness_seq":0},
+{"seq":1,"prev_hash":"0ae0900cd62d360dac7061c38797ceb7084f38b8f5b1d5ff286d69fca8bf0602","op_type":"ERASE","target_ref":"D:\\akhanda\\demo_bundle_g1\\to_erase","timestamp":"2026-09-03T11:23:39Z","method":"Clear","result_hash":"c1d23013434166198ee541810309bea50bd8b40c78221f7799f4505efd4df0fd","operator_decl":"(operator not named)","concur_decl":"(expert not named)","custody_tier":"SOFTWARE_KEY","outcome":"VERIFIED","presence_ref":"","operator_key_id":"9608a3150d1394a4","tool_ref":"akhanda/0.1.0+c508412d47c60e56","chain_id":"1d33c5ee78fbc0c1","entry_version":"3","entry_hash":"ef4d5f8b47fcee4f3f7992e0e7720cc4e9437a8ce5f57b429a678507919796ca","operator_sig":"4df2daa3a96c29abd508df4a7bea977c23a151a2881819f5bfcf2d1d4966607be9ee92a322c87f59011374dea146c43f8e890d2564257ae454dc094fde21e707","concur_sig":"","concur_key_id":"","witness_head_hash":"","witness_seq":-1},
+{"seq":2,"prev_hash":"ef4d5f8b47fcee4f3f7992e0e7720cc4e9437a8ce5f57b429a678507919796ca","op_type":"REFUSED","target_ref":"D:\\akhanda\\demo_bundle_g1\\seized_media.dd","timestamp":"2026-09-03T11:23:41Z","method":"NotPerformed","result_hash":"0f2fb000236ede87aed20a7bec80eade24825b134eabb166ea5783219df34968","operator_decl":"(operator not named)","concur_decl":"(expert not named)","custody_tier":"SOFTWARE_KEY","outcome":"NOT_PERFORMED","presence_ref":"","operator_key_id":"9608a3150d1394a4","tool_ref":"akhanda/0.1.0+c508412d47c60e56","chain_id":"1d33c5ee78fbc0c1","entry_version":"3","entry_hash":"6dc136125366ad9a247adc5243eaeed0621bc676b2cd99fa3739df004bf472df","operator_sig":"59f5c62cbb9269aa12b028287a1f22fe2d06892e1101bd98489f1f4c5f4703b4424ea1c5f81878367c57cf05b9174f9681b567cf7b8ebd3d0d0ba51d82246007","concur_sig":"","concur_key_id":"","witness_head_hash":"","witness_seq":-1}]};
+
+/* Real SHA-256 values from demo-data/byte_identical_proof.json, original vs carved. */
+const PROOF=[
+["evidence_photo.png","11fbb38d6f425fd7086f333c50b5008bdd16658e033282e6213cb5287aa70fe1","11fbb38d6f425fd7086f333c50b5008bdd16658e033282e6213cb5287aa70fe1",true],
+["scene.jpg","06bb067faa42a3ceff95489f1bb50f1d12f28027a3f4d9aa5f87bcaf6e19e492","06bb067faa42a3ceff95489f1bb50f1d12f28027a3f4d9aa5f87bcaf6e19e492",true],
+["case_notes.zip","6ce879f4df9cf6676f9c7d0b87f3368cdd323ceb880d723333234949a5303680","6ce879f4df9cf6676f9c7d0b87f3368cdd323ceb880d723333234949a5303680",true],
+["report.pdf","d0f6a58a134ccc32dc91addecc5973cef73c22ba29eb43162cf289504f6b9293","d0f6a58a134ccc32dc91addecc5973cef73c22ba29eb43162cf289504f6b9293",true]];
+
+const CERT={
+A:[["Name","Pulkit Srivastava","BSA Sch. Part A, Party"],["Key id","9608a3150d1394a4","Ed25519 over the entry hash"],
+   ["Organisation","Syntax Squad, GITAM","BSA Sch. Part A"],["Entries signed","0, 1, 2","all covered entries"]],
+B:[["Name","Syntax Squad Examiner","BSA Sch. Part B, Expert"],["Key id","0b1088f7140ef514","held on a separate machine"],
+   ["Key custody","separate witness machine","the workstation never holds it"],["Re-verified","1 of 1 signature","against a held public key"]],
+S:[["Method type","Clear","NIST §2.5 + App. G, Method Type"],["Method used","single-pass overwrite of every host-addressable block, then read-back","NIST App. G, Method Used"],
+   ["Tool used","Akhanda 0.1.0","NIST App. G, Tool Used (with version)"],["Verification","sub-sample read-back at spread offsets","NIST §4.7, Verification Method"]],
+M:[["Media type","Flash Memory","NIST App. G, Media Type"],["Witness node","192.168.137.132:8000","independent co-signer"],
+   ["Presence device","not used for these entries","recorded, not implied"],["Hash of record","4a35a2ba707e646e…f21fedaf","BSA §63, identification"]]};
+
+/* ── verification core: mirrors src/attestation/core.py ─────────────── */
+const HASHED_FIELDS=["entry_version","chain_id","seq","prev_hash","op_type","target_ref","timestamp",
+  "method","result_hash","operator_decl","concur_decl","custody_tier","outcome","presence_ref",
+  "operator_key_id","tool_ref"];
+const DOMAIN="akhanda.entry.v2", ZERO="0".repeat(64), te=new TextEncoder();
+
+function encodeEntry(e){
+  const parts=[te.encode(DOMAIN)];
+  for(const n of HASHED_FIELDS){
+    const raw=te.encode(String(e[n]??"")), len=new Uint8Array(4);
+    new DataView(len.buffer).setUint32(0,raw.length,false);
+    parts.push(len,raw);
+  }
+  const out=new Uint8Array(parts.reduce((n,p)=>n+p.length,0));
+  let o=0; for(const p of parts){out.set(p,o);o+=p.length;}
+  return out;
+}
+async function sha256Hex(b){
+  const d=await crypto.subtle.digest("SHA-256",b);
+  return [...new Uint8Array(d)].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+async function verifyChain(ch){
+  const rows=[]; let prev=ZERO, broken=null;
+  const cid=ch.entries.length?ch.entries[0].chain_id:"";
+  for(let i=0;i<ch.entries.length;i++){
+    const e=ch.entries[i], pr=[];
+    if(e.seq!==i) pr.push("sequence out of order");
+    if(e.chain_id!==cid) pr.push("belongs to a different chain");
+    if(e.prev_hash!==prev) pr.push("does not link to the previous entry");
+    const rec=await sha256Hex(encodeEntry(e));
+    if(rec!==e.entry_hash) pr.push("content altered: hash mismatch");
+    if(pr.length&&broken===null) broken=e.seq;
+    rows.push({e,pr,rec}); prev=e.entry_hash;
+  }
+  return {rows,broken};
+}
+
+/* ── state ──────────────────────────────────────────────────────────── */
+let original=structuredClone(SAMPLE), working=structuredClone(SAMPLE), sourceName="built-in sample";
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const mid=(h,a=8,b=8)=>!h?", ":(h.length<=a+b+1?h:h.slice(0,a)+"…"+h.slice(-b));
+const now=()=>new Date().toISOString().replace("T"," ").slice(0,19);
+
+function log(html){
+  const el=$("#log");
+  el.innerHTML+='<span class="t">'+now()+"</span>  "+html+"\n";
+  el.scrollTop=el.scrollHeight;
+}
+
+/* ── ledger ─────────────────────────────────────────────────────────── */
+function rowCls(e){return e.op_type==="REFUSED"?"wn":(e.outcome==="VERIFIED"?"ok":"wn");}
+function outTag(o){
+  if(o==="VERIFIED")return '<span class="tg g-ok">VERIFIED</span>';
+  if(o==="NOT_PERFORMED")return '<span class="tg g-dm">NOT_PERFORMED</span>';
+  return '<span class="tg g-wn">'+esc(o)+'</span>';
+}
+function renderLedger(){
+  const b=$("#tbLedger"); b.innerHTML="";
+  working.entries.forEach(e=>{
+    const tr=document.createElement("tr"); tr.className="r "+rowCls(e);
+    tr.innerHTML='<td class="st"></td><td class="m">'+e.seq+'</td><td><b>'+esc(e.op_type)+'</b></td>'+
+      '<td class="m">'+esc(e.method)+'</td><td>'+outTag(e.outcome)+'</td>'+
+      '<td>'+(e.custody_tier==="WITNESS_COSIGNED"?'<span class="tg g-ok">WITNESS_COSIGNED</span>':'<span class="tg g-dm">'+esc(e.custody_tier)+'</span>')+'</td>'+
+      '<td class="m">'+(e.concur_key_id?'<span class="tg g-ac">'+esc(e.concur_key_id)+'</span>':", ")+'</td>'+
+      '<td class="h" title="'+esc(e.entry_hash)+'">'+mid(e.entry_hash)+'</td>'+
+      '<td class="h">'+esc(e.timestamp)+'</td>';
+    const d=document.createElement("tr"); d.className="det"; d.hidden=true;
+    d.innerHTML='<td colspan="9"><div class="kv">'+
+      kv("Target",e.target_ref)+kv("Result hash",e.result_hash)+kv("Previous hash",e.prev_hash)+
+      kv("Operator key",e.operator_key_id)+kv("Tool build",e.tool_ref)+kv("Entry version",e.entry_version)+
+      kv("Operator signature",mid(e.operator_sig,14,14))+
+      kv("Witness signature",e.concur_sig?mid(e.concur_sig,14,14):"none, single-machine custody")+
+      kv("Witness head",e.witness_head_hash||", ")+kv("Witness seq",e.witness_seq)+
+      "</div></td>";
+    tr.onclick=()=>{d.hidden=!d.hidden;};
+    b.append(tr,d);
+  });
+}
+const kv=(k,v)=>'<div><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+"</div></div>";
+
+/* ── verify ─────────────────────────────────────────────────────────── */
+function weakest(){
+  const ord=["SOFTWARE_KEY","PRESENCE_CONFIRMED","WITNESS_COSIGNED","FULL_CUSTODY"];
+  const p=working.entries.filter(e=>e.op_type!=="REFUSED");
+  return p.length?p.map(e=>e.custody_tier).sort((a,b)=>ord.indexOf(a)-ord.indexOf(b))[0]:", ";
+}
+async function runVerify(announce){
+  const t0=performance.now();
+  const res=await verifyChain(working);
+  const ms=(performance.now()-t0).toFixed(1);
+  const b=$("#tbVerify"); b.innerHTML="";
+  res.rows.forEach(r=>{
+    const bad=r.pr.length>0, link=!r.pr.includes("does not link to the previous entry");
+    const tr=document.createElement("tr"); tr.className=bad?"bd":"ok";
+    tr.innerHTML='<td class="st"></td><td class="m">'+r.e.seq+'</td>'+
+      '<td>'+(link?'<span class="tg g-ok">intact</span>':'<span class="tg g-bd">broken</span>')+'</td>'+
+      '<td class="h" title="'+esc(r.e.entry_hash)+'">'+mid(r.e.entry_hash)+'</td>'+
+      '<td class="h" style="color:'+(bad?"var(--bad)":"var(--ok)")+'" title="'+esc(r.rec)+'">'+mid(r.rec)+'</td>'+
+      '<td>'+(bad?'<span class="tg g-bd">'+esc(r.pr[0])+'</span>':'<span class="tg g-ok">matches</span>')+'</td>';
+    b.append(tr);
+  });
+  const led=$("#sInt"), p=$("#pVerdict");
+  if(res.broken===null){
+    led.className="led ok"; led.textContent="verified";
+    $("#vTitle").textContent="Chain verified, "+res.rows.length+" entries, links intact";
+    $("#vText").innerHTML="Every entry hash was recomputed from its signed fields and matched the recorded value, in <b>"+ms+" ms</b>. This browser reached that conclusion independently; it did not ask a server.";
+    if(announce) log('<b>verify</b> <span class="g">OK</span> '+res.rows.length+" entries · "+ms+" ms");
+  }else{
+    led.className="led bad"; led.textContent="BROKEN at seq "+res.broken;
+    const r=res.rows.find(x=>x.e.seq===res.broken);
+    $("#vTitle").textContent="Verification failed at sequence "+res.broken;
+    $("#vText").innerHTML="<b>"+esc(r.pr.join("; "))+"</b>. The break is localised to one entry, the tool names which, rather than reporting a vague failure. Entries after it also fail, because each commits to the hash of the one before.";
+    if(announce) log('<b>verify</b> <span class="r">FAILED</span> at seq '+res.broken+", "+esc(r.pr[0]));
+  }
+  $("#sTier").textContent=weakest();
+}
+
+/* ── witness: a real network call, honestly reported ────────────────── */
+async function connectWitness(){
+  const url=$("#witUrl").value.replace(/\/+$/,""), led=$("#sWit");
+  led.className="led warn"; led.textContent="connecting…";
+  log('<b>witness</b> GET '+esc(url)+"/witness/pubkey");
+  const ctl=new AbortController(); const t=setTimeout(()=>ctl.abort(),4000);
+  try{
+    const pk=await (await fetch(url+"/witness/pubkey",{signal:ctl.signal,cache:"no-store"})).json();
+    const hd=await (await fetch(url+"/witness/head",{cache:"no-store"})).json();
+    clearTimeout(t);
+    led.className="led ok"; led.textContent="key "+pk.key_id;
+    log('<b>witness</b> <span class="g">CONNECTED</span> key_id='+esc(pk.key_id)+" seq="+hd.seq+" records="+hd.count);
+    const onChain=new Set(working.entries.map(e=>e.concur_key_id).filter(Boolean));
+    if(onChain.size&&!onChain.has(pk.key_id))
+      log('<span class="y">note</span> live witness key differs from the co-signer on this chain ('+[...onChain].join(",")+"), a different witness, or a different run");
+    else if(onChain.has(pk.key_id))
+      log('<span class="g">match</span> live witness holds the key that co-signed seq 0');
+  }catch(err){
+    clearTimeout(t);
+    led.className="led bad"; led.textContent="unreachable";
+    log('<b>witness</b> <span class="r">UNREACHABLE</span>, '+esc(err.name==="AbortError"?"timed out after 4 s":err.message));
+    log('<span class="t">a hosted page cannot reach a witness on your LAN. Run this console locally, or point it at a reachable node.</span>');
+  }
+}
+
+/* ── loading a chain ────────────────────────────────────────────────── */
+async function loadChain(obj,name){
+  if(!obj||!Array.isArray(obj.entries)) throw new Error("not a chain: no entries array");
+  original=structuredClone(obj); working=structuredClone(obj); sourceName=name;
+  $("#sChain").textContent=obj.chain_id||", ";
+  $("#sCount").textContent=obj.entries.length;
+  $("#sHead").textContent=obj.entries.length?mid(obj.entries.at(-1).entry_hash):", ";
+  $("#rfSrc").textContent=name;
+  $("#selSeq").innerHTML=obj.entries.map(e=>'<option value="'+e.seq+'">seq '+e.seq+", "+e.op_type+"</option>").join("");
+  $("#btnRestore").disabled=true;
+  renderLedger(); renderCert(); renderProof();
+  log('<b>load</b> '+esc(name)+", chain "+esc(obj.chain_id||"?")+", "+obj.entries.length+" entries");
+  await runVerify(true);
+}
+
+function renderCert(){
+  const put=(id,rows)=>$(id).innerHTML=rows.map(([k,v,c])=>
+    '<div><div class="k">'+esc(k)+'</div><div class="v">'+esc(v)+'</div><span class="cl">'+esc(c)+"</span></div>").join("");
+  put("#kvA",CERT.A); put("#kvB",CERT.B); put("#kvS",CERT.S); put("#kvM",CERT.M);
+}
+function renderProof(){
+  $("#tbProof").innerHTML=PROOF.map(([f,o,c,ok])=>
+    '<tr class="'+(ok?"ok":"bd")+'"><td class="st"></td><td class="m">'+esc(f)+"</td>"+
+    '<td class="h" title="'+esc(o)+'">'+mid(o,10,8)+"</td>"+
+    '<td class="h" title="'+esc(c)+'">'+(c?mid(c,10,8):", ")+"</td>"+
+    "<td>"+(ok?'<span class="tg g-ok">identical</span>':'<span class="tg g-bd">differs</span>')+"</td></tr>").join("");
+}
+
+/* ── wiring ─────────────────────────────────────────────────────────── */
+function show(v){
+  document.querySelectorAll("#nav button").forEach(b=>b.setAttribute("aria-current",b.dataset.v===v));
+  document.querySelectorAll(".view").forEach(s=>s.hidden=s.id!=="v-"+v);
+}
+$("#nav").onclick=e=>{const b=e.target.closest("button[data-v]"); if(b) show(b.dataset.v);};
+addEventListener("keydown",e=>{
+  if(e.target.matches("input,select,textarea"))return;
+  const m={1:"ledger",2:"integrity",3:"certificate",4:"evidence"}[e.key];
+  if(m) show(m);
+});
+$("#btnVerify").onclick=()=>runVerify(true);
+$("#btnConn").onclick=connectWitness;
+$("#btnSample").onclick=()=>loadChain(structuredClone(SAMPLE),"built-in sample");
+$("#fileIn").onchange=async ev=>{
+  const f=ev.target.files[0]; if(!f)return;
+  try{ await loadChain(JSON.parse(await f.text()),f.name); }
+  catch(err){ log('<b>load</b> <span class="r">FAILED</span> '+esc(f.name)+", "+esc(err.message)); }
+  ev.target.value="";
+};
+addEventListener("dragover",e=>{e.preventDefault();});
+addEventListener("drop",async e=>{
+  e.preventDefault();
+  const f=e.dataTransfer.files[0]; if(!f)return;
+  try{ await loadChain(JSON.parse(await f.text()),f.name); }
+  catch(err){ log('<b>drop</b> <span class="r">FAILED</span> '+esc(f.name)+", "+esc(err.message)); }
+});
+$("#btnTamper").onclick=async()=>{
+  const seq=Number($("#selSeq").value), e=working.entries.find(x=>x.seq===seq);
+  e.target_ref+="-ALTERED";
+  $("#btnRestore").disabled=false;
+  log('<b>tamper</b> <span class="y">seq '+seq+'</span> target_ref modified in memory; signature left untouched');
+  renderLedger(); await runVerify(true); show("integrity");
+};
+$("#btnRestore").onclick=async()=>{
+  working=structuredClone(original); $("#btnRestore").disabled=true;
+  log("<b>restore</b> original chain reloaded");
+  renderLedger(); await runVerify(true);
+};
+
+(async function(){
+  setInterval(()=>{$("#rfClock").textContent=now()+"Z";},1000);
+  $("#rfClock").textContent=now()+"Z";
+  const local=["localhost","127.0.0.1",""].includes(location.hostname);
+  log("<b>session</b> "+(local?"running locally, the witness on your LAN is reachable"
+      :"hosted at "+esc(location.hostname)+", a LAN witness will NOT be reachable from here"));
+  await loadChain(structuredClone(SAMPLE),"built-in sample");
+  log('<span class="t">open a chain.json, or drop one anywhere on this page, to verify your own file</span>');
+})();
+</script>

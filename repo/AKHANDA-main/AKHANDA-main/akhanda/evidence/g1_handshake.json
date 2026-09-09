@@ -1,0 +1,52 @@
+{
+  "check": "G1 live handshake",
+  "ran_at": "2026-09-01T13:36:08Z",
+  "operator_key_id": "d5735685d7fb9e8e",
+  "phases": [
+    {
+      "phase": "B - witness killed before signing",
+      "witness_url": "http://127.0.0.1:9",
+      "witness_reachable": false,
+      "preflight": {
+        "ok": false,
+        "required_tier": "WITNESS_COSIGNED",
+        "reachable_tier": "SOFTWARE_KEY",
+        "missing": [
+          "witness co-signer"
+        ],
+        "reason": "witness co-signer unavailable; required WITNESS_COSIGNED, only SOFTWARE_KEY reachable \u2014 operation blocked"
+      },
+      "blocked": true,
+      "required_tier": "WITNESS_COSIGNED",
+      "reachable_tier": "SOFTWARE_KEY",
+      "refusal_record": {
+        "outcome": "REFUSED",
+        "attempted_op": "ERASE",
+        "attempted_target": "g1-handshake-target",
+        "intended_method": "Clear",
+        "performed": false,
+        "required_tier": "WITNESS_COSIGNED",
+        "reachable_tier": "SOFTWARE_KEY",
+        "missing_components": [
+          "witness co-signer"
+        ],
+        "reason": "witness co-signer unavailable; required WITNESS_COSIGNED, only SOFTWARE_KEY reachable \u2014 operation blocked",
+        "timestamp": "2026-09-01T13:36:10Z",
+        "honest_note": "The operation was blocked before it ran. Nothing on the target was read, written, or destroyed. This entry exists so that a blocked attempt is distinguishable from an attempt that was never made."
+      },
+      "refused_entry": {
+        "seq": 0,
+        "op_type": "REFUSED",
+        "method": "NotPerformed",
+        "outcome": "NOT_PERFORMED",
+        "custody_tier": "SOFTWARE_KEY",
+        "entry_hash": "d3be03ee2293ce6fc82066c92496a03d7e497dfa4414c0495b9d67fd2c7834a5",
+        "has_concur_sig": false
+      },
+      "refused_chain_still_verifies": true,
+      "verdict": "PASS",
+      "meaning": "With the witness down, the operation was blocked before the destructive step, and the blocked attempt is itself in the chain as a REFUSED entry carrying no co-signature. Unplugging the co-signer is a way to LOG an operation, not a way to hide one."
+    }
+  ],
+  "overall": "PASS"
+}

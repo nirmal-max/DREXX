@@ -1,0 +1,45 @@
+[package]
+name = "drivewipe-cli"
+version = "2.0.5"
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+description = "Command-line interface for DriveWipe"
+
+[[bin]]
+name = "drivewipe"
+path = "src/main.rs"
+
+[features]
+default = ["pdf-report", "gui"]
+pdf-report = ["drivewipe-core/pdf-report"]
+# The desktop interface. Disable it for static musl and headless server builds,
+# where the windowing stack is unavailable or unwanted; the CLI and TUI are
+# unaffected.
+gui = ["dep:drivewipe-gui"]
+
+[dependencies]
+drivewipe-core = { path = "../drivewipe-core" }
+drivewipe-tui = { path = "../drivewipe-tui" }
+drivewipe-gui = { path = "../drivewipe-gui", optional = true }
+clap.workspace = true
+dialoguer.workspace = true
+indicatif.workspace = true
+console.workspace = true
+crossbeam-channel.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+log.workspace = true
+env_logger.workspace = true
+ctrlc.workspace = true
+anyhow.workspace = true
+toml.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true

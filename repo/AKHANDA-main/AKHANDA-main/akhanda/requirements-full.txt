@@ -1,0 +1,32 @@
+# Everything the project needs, with the versions that were running on the
+# machine where the 630 tests passed. Use this file, not requirements.txt:
+# the original omits Pillow, which the recovery tests and the demo generator
+# both import, and omits the checking tools.
+
+# --- the tool itself -------------------------------------------------
+cryptography>=42.0          # 50.0.0 on the reference machine. Ed25519, SHA-256, ML-DSA
+pillow>=10.0                # 12.3.0, real PNG/JPEG fixtures for the recovery tests
+
+# --- the witness node (also needed on the second laptop) -------------
+fastapi>=0.110              # 0.141.1
+uvicorn>=0.29               # 0.52.4
+
+# --- optional hardware -----------------------------------------------
+pyserial>=3.5               # presence device only; absence degrades to SOFTWARE_KEY
+
+# --- testing and checking --------------------------------------------
+pytest>=8.0                 # 9.0.3
+bandit>=1.7                 # 1.9.4 , security scan, run by scripts/run_all.py
+pip-audit>=2.7              # 2.10.1, dependency vulnerability check
+
+# --- building the documents ------------------------------------------
+python-pptx>=1.0            # 1.0.2 , regenerates the SIH deck
+pypdf>=4.0                  # 6.16.2, reads the PDFs back to verify them
+
+# --- deliberately NOT installed --------------------------------------
+# opentimestamps-client     external anchoring. It was not installed on the
+#                           reference machine either. Its absence is recorded
+#                           in the chain as unanchored, never as anchored.
+# node                      optional; without it the Python-vs-JavaScript
+#                           agreement test SKIPS and says so, rather than
+#                           silently passing.

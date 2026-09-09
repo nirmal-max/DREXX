@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 260" width="880" height="260" role="img" aria-label="Three independent implementations of the verification path, in Python, in JavaScript inside the console, and in Rust, all converging on one identical entry hash, with a test asserting they agree.">
+  <defs>
+    <marker id="vf-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 z" fill="#7d766b"/>
+    </marker>
+  </defs>
+
+  <rect width="880" height="260" fill="#faf9f6"/>
+
+  <text x="30" y="26" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="11" fill="#7d766b" letter-spacing="1.6">THE VERIFICATION PATH, WRITTEN THREE TIMES ON PURPOSE</text>
+
+  <rect x="30" y="52" width="220" height="60" fill="none" stroke="#14120f" stroke-width="1.3"/>
+  <text x="140" y="78" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#14120f" text-anchor="middle">Python</text>
+  <text x="140" y="97" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#7d766b" text-anchor="middle">src/attestation/core.py</text>
+
+  <rect x="330" y="52" width="220" height="60" fill="none" stroke="#14120f" stroke-width="1.3"/>
+  <text x="440" y="78" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#14120f" text-anchor="middle">JavaScript</text>
+  <text x="440" y="97" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#7d766b" text-anchor="middle">in the browser console</text>
+
+  <rect x="630" y="52" width="220" height="60" fill="none" stroke="#14120f" stroke-width="1.3"/>
+  <text x="740" y="78" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="12" fill="#14120f" text-anchor="middle">Rust</text>
+  <text x="740" y="97" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#7d766b" text-anchor="middle">no deps, no network, no unsafe</text>
+
+  <g stroke="#7d766b" stroke-width="1.2" fill="none" marker-end="url(#vf-arrow)">
+    <path d="M140,112 L140,140 L432,140 L432,158"/>
+    <path d="M440,112 L440,152"/>
+    <path d="M740,112 L740,140 L448,140 L448,158"/>
+  </g>
+
+  <rect x="286" y="162" width="308" height="52" fill="#ebf3f0" stroke="#2c6249" stroke-width="1.8"/>
+  <text x="440" y="184" font-family="Helvetica,Arial,sans-serif" font-size="12" fill="#2c6249" text-anchor="middle" font-weight="bold">one identical entry hash</text>
+  <text x="440" y="203" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#2c6249" text-anchor="middle">test_three_implementations.py asserts it</text>
+
+  <line x1="30" y1="230" x2="850" y2="230" stroke="#ddd9d1" stroke-width="1"/>
+  <text x="30" y="250" font-family="Helvetica,Arial,sans-serif" font-size="12" fill="#4a453d">Two implementations written by one author can share a misreading of the specification. A third catches it.</text>
+</svg>

@@ -1,0 +1,60 @@
+{
+  "gap": "G9 / G1 - hardware validation of the co-signer",
+  "status": "CONFIRMED",
+  "confirmed_utc": "2026-09-03T11:25:03.065670+00:00",
+  "what_was_proven": "An entry in the operator laptop's chain carries a second Ed25519 signature produced by a key that exists only on a physically separate machine, and that signature verifies against that machine's public key. The witness kept its own independent record of the same entry hash.",
+  "transport": {
+    "type": "Wi-Fi hotspot hosted by the operator laptop",
+    "operator_ip": "192.168.137.1",
+    "witness_ip": "192.168.137.132",
+    "client_isolation": false,
+    "note": "verified in both directions"
+  },
+  "operator_machine": {
+    "role": "operator",
+    "chain_id": "1d33c5ee78fbc0c1",
+    "repo": "D:\u0007khanda"
+  },
+  "witness_machine": {
+    "role": "witness (second party)",
+    "os_user": "ricky",
+    "python": "3.14",
+    "install": "node.py + 3 pip packages, no repo",
+    "key_id": "0b1088f7140ef514",
+    "pubkey_hex": "f9229f5c618494f69083dfaf0283191b84661576643e1a87854a5446a6ecbb45",
+    "head_hash": "d5e27957058227649195b190d686962838a330f547a0836a834eda4687656d3d",
+    "witness_seq": 0,
+    "records_held": 1
+  },
+  "distinct_keys": {
+    "operator_laptop_local_witness_key": "2a292481edd5d5d1",
+    "laptop_b_witness_key": "0b1088f7140ef514",
+    "note": "different keys prove the co-signature did not originate on the demo laptop"
+  },
+  "dual_signed_entry": {
+    "seq": 0,
+    "op_type": "RECOVER",
+    "entry_hash": "0ae0900cd62d360dac7061c38797ceb7084f38b8f5b1d5ff286d69fca8bf0602",
+    "concur_key_id": "0b1088f7140ef514",
+    "witness_seq": 0,
+    "custody_tier": "WITNESS_COSIGNED"
+  },
+  "witness_independent_record": [
+    {
+      "seq": 0,
+      "entry_hash": "0ae0900cd62d360dac7061c38797ceb7084f38b8f5b1d5ff286d69fca8bf0602",
+      "witness_head_hash": "d5e27957058227649195b190d686962838a330f547a0836a834eda4687656d3d",
+      "concur_sig": "83c82e70abd9e471c684f746876be07936278898050aa10215e4ec9c34351f53cf7a218a3e4a71051865c38e4f5619ee41c94d68fd39c2159d81a9b1db29ae02"
+    }
+  ],
+  "verification": {
+    "chain_ok": true,
+    "operator_layer_ran": true,
+    "operator_sigs_verified": 3,
+    "concur_layer_ran": true,
+    "concur_sigs_verified": 1,
+    "dual_signed_entries": 1,
+    "report": "ChainReport(ok, 3 entries, 3 verified, 1 dual-signed)"
+  },
+  "honest_bound": "The tier achieved is WITNESS_COSIGNED, not FULL_CUSTODY. FULL_CUSTODY additionally requires a confirmed presence device, which is designed but not shipped. Claiming FULL_CUSTODY here would be an overclaim. What is proven is dual-party signing across physically separate machines - and that the chain still cannot prove nothing was withheld before it was written (G8, structural)."
+}

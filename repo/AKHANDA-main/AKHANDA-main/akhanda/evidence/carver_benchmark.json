@@ -1,0 +1,189 @@
+{
+  "corpus": "NIST CFReDS FileCarving",
+  "ground_truth_files": 7,
+  "generated_utc": "2026-08-26T19:04:14Z",
+  "results": [
+    {
+      "image": "L0_Graphic.dd",
+      "bytes": 64769536,
+      "seconds": 0.48,
+      "throughput_mb_s": 128.9,
+      "reported": 6,
+      "exact": 6,
+      "recovered": [
+        "000_0021.png",
+        "02010025.pcx",
+        "09260002.jpg",
+        "100_0018.tif",
+        "100_0183.gif",
+        "100_0304crop.bmp"
+      ],
+      "present": [
+        "09260002.jpg",
+        "000_0021.png",
+        "100_0183.gif",
+        "100_0018.tif",
+        "100_0304crop.bmp",
+        "02010025.pcx"
+      ],
+      "precision": 100.0,
+      "recall": 100.0,
+      "recall_vs_corpus": 85.7,
+      "high_confidence": 6,
+      "high_precision": 100.0,
+      "by_type": {
+        "png": 1,
+        "pcx": 1,
+        "jpg": 1,
+        "bmp": 1,
+        "tif": 1,
+        "gif": 1
+      },
+      "by_confidence": {
+        "HIGH": 6,
+        "MEDIUM": 0,
+        "LOW": 0
+      },
+      "outcome": "VERIFIED",
+      "level": "L0",
+      "level_note": "non-fragmented \u2014 the case signature carving is designed for"
+    },
+    {
+      "image": "L1_Graphic.dd",
+      "bytes": 64769536,
+      "seconds": 0.48,
+      "throughput_mb_s": 128.8,
+      "reported": 6,
+      "exact": 6,
+      "recovered": [
+        "000_0021.png",
+        "02010025.pcx",
+        "09260002.jpg",
+        "100_0018.tif",
+        "100_0183.gif",
+        "100_0304crop.bmp"
+      ],
+      "present": [
+        "09260002.jpg",
+        "000_0021.png",
+        "100_0183.gif",
+        "100_0018.tif",
+        "100_0304crop.bmp",
+        "02010025.pcx"
+      ],
+      "precision": 100.0,
+      "recall": 100.0,
+      "recall_vs_corpus": 85.7,
+      "high_confidence": 6,
+      "high_precision": 100.0,
+      "by_type": {
+        "jpg": 1,
+        "tif": 1,
+        "bmp": 1,
+        "pcx": 1,
+        "gif": 1,
+        "png": 1
+      },
+      "by_confidence": {
+        "HIGH": 6,
+        "MEDIUM": 0,
+        "LOW": 0
+      },
+      "outcome": "VERIFIED",
+      "level": "L1",
+      "level_note": "sequential fragmentation"
+    },
+    {
+      "image": "L2_Graphic.dd",
+      "bytes": 64769536,
+      "seconds": 0.46,
+      "throughput_mb_s": 134.7,
+      "reported": 3,
+      "exact": 0,
+      "recovered": [],
+      "present": [],
+      "precision": 0.0,
+      "recall": null,
+      "recall_vs_corpus": 0.0,
+      "high_confidence": 3,
+      "high_precision": 0.0,
+      "by_type": {
+        "jpg": 1,
+        "bmp": 1,
+        "pcx": 1
+      },
+      "by_confidence": {
+        "HIGH": 3,
+        "MEDIUM": 0,
+        "LOW": 0
+      },
+      "outcome": "VERIFIED",
+      "level": "L2",
+      "level_note": "non-sequential fragmentation"
+    },
+    {
+      "image": "L3_Graphic.dd",
+      "bytes": 48236032,
+      "seconds": 0.72,
+      "throughput_mb_s": 63.8,
+      "reported": 2,
+      "exact": 0,
+      "recovered": [],
+      "present": [],
+      "precision": 0.0,
+      "recall": null,
+      "recall_vs_corpus": 0.0,
+      "high_confidence": 2,
+      "high_precision": 0.0,
+      "by_type": {
+        "jpg": 1,
+        "pcx": 1
+      },
+      "by_confidence": {
+        "HIGH": 2,
+        "MEDIUM": 0,
+        "LOW": 0
+      },
+      "outcome": "VERIFIED",
+      "level": "L3",
+      "level_note": "missing fragments"
+    },
+    {
+      "image": "L4_Graphic.dd",
+      "bytes": 49470976,
+      "seconds": 0.38,
+      "throughput_mb_s": 123.1,
+      "reported": 5,
+      "exact": 2,
+      "recovered": [
+        "000_0021.png",
+        "100_0018.tif"
+      ],
+      "present": [
+        "02010026.jpg",
+        "000_0021.png",
+        "100_0018.tif"
+      ],
+      "precision": 40.0,
+      "recall": 66.7,
+      "recall_vs_corpus": 28.6,
+      "high_confidence": 5,
+      "high_precision": 40.0,
+      "by_type": {
+        "jpg": 1,
+        "bmp": 1,
+        "tif": 1,
+        "pcx": 1,
+        "png": 1
+      },
+      "by_confidence": {
+        "HIGH": 5,
+        "MEDIUM": 0,
+        "LOW": 0
+      },
+      "outcome": "VERIFIED",
+      "level": "L4",
+      "level_note": "nested files"
+    }
+  ]
+}

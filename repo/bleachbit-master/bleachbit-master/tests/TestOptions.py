@@ -1,0 +1,749 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2008-2026 Andrew Ziem.
+#
+# This work is licensed under the terms of the GNU GPL, version 3 or
+# later.  See the COPYING file in the top-level directory.
+
+
+"""
+Test case for module Options
+"""
+
+import errno
+import os
+import sys
+import threading
+from unittest import mock
+
+from tests.common import pytest
+
+from tests import common
+import bleachbit.Options
+from bleachbit import IS_WINDOWS
+from bleachbit.Options import (
+    _option_index, _option_sort_key, _section_sort_key)
+from bleachbit.Log import is_debugging_enabled_via_cli
+
+
+class FakeTimer:
+    """Fake timer to replace threading.Timer"""
+    instances = []
+
+    def __init__(self, interval, function, args=(), kwargs=None):
+        """Init the fake timer"""
+        self.interval = interval
+        self.function = function
+        self.args = args
+        self.kwargs = kwargs or {}
+        self.daemon = False
+        self.started = False
+        self.cancelled = False
+        self.__class__.instances.append(self)
+
+    def cancel(self):
+        """Cancel the fake timer."""
+        self.cancelled = True
+
+    def fire(self):
+        """Fire the fake timer."""
+        if not self.cancelled:
+            self.function(*self.args, **self.kwargs)
+
+    def start(self):
+        """Start the fake timer."""
+        self.started = True
+
+
+class OptionsTestCase(common.BleachbitTestCase):
+    """Test case for class Options"""
+
+    def _write_seed_options_file(self):
+        """Write a seed options file for testing"""
+        with open(bleachbit.options_file, 'w', encoding='utf-8-sig') as handle:
+            handle.write(f'''[bleachbit]
+version={bleachbit.APP_VERSION}
+shred=False
+check_online_updates=True
+[hashpath]
+[list/shred_drives]
+''')
+
+    def test_option_index(self):
+        """Unit test for _option_index"""
+        self.assertEqual(_option_index('0'), 0)
+        self.assertEqual(_option_index('3'), 3)
+        self.assertEqual(_option_index('1_type'), 1)
+        self.assertEqual(_option_index('2_path'), 2)
+
+    def _write_private_options_file(self, contents):
+        """Point options_file to a file of this test only and seed it
+
+        This keeps the seed out of the options file shared by the whole
+        test case.
+        """
+        filename = os.path.join(self.tempdir, f'{self.id()}.ini')
+        patcher = mock.patch('bleachbit.options_file', filename)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        with open(filename, 'w', encoding='utf-8-sig') as handle:
+            handle.write(contents)
+        return filename
+
+    @staticmethod
+    def _section_keys(contents, section):
+        """Return the keys of one section of an ini file"""
+        keys = []
+        in_section = False
+        for line in contents.splitlines():
+            if line.startswith('['):
+                in_section = line == f'[{section}]'
+            elif in_section and '=' in line:
+                keys.append(line.split('=')[0].strip())
+        return keys
+
+    def test_option_sort_key(self):
+        """Unit test for _option_sort_key"""
+        self.assertEqual(
+            sorted(['10_path', '2_path', '1_path'], key=_option_sort_key),
+            ['1_path', '2_path', '10_path'])
+        self.assertEqual(
+            sorted(['shred', 'debug', 'Auto'], key=_option_sort_key),
+            ['Auto', 'debug', 'shred'])
+        # numeric keys come before named keys
+        self.assertEqual(
+            sorted(['debug', '1'], key=_option_sort_key), ['1', 'debug'])
+
+    def test_sorted_file(self):
+        """Test that the file is written with sections and keys sorted"""
+        filename = self._write_private_options_file('''[tree]
+system.tmp = True
+firefox.cache = True
+[bleachbit]
+shred = False
+auto_hide = True
+''')
+        o = bleachbit.Options.Options()
+        o.set_list('sort_test', ['a'] * 11)
+        o.close()
+        with open(filename, 'r', encoding='utf-8-sig') as handle:
+            contents = handle.read()
+
+        sections = [line[1:-1]
+                    for line in contents.splitlines() if line.startswith('[')]
+        self.assertIn('bleachbit', sections)
+        self.assertIn('tree', sections)
+        self.assertEqual(sections, sorted(sections, key=_section_sort_key))
+
+        for section in sections:
+            keys = self._section_keys(contents, section)
+            self.assertEqual(keys, sorted(keys, key=_option_sort_key), section)
+
+        # a list must not be written as 1, 10, 2
+        self.assertEqual(self._section_keys(contents, 'list/sort_test'),
+                         [str(i) for i in range(11)])
+
+    def test_defaults_are_written(self):
+        """Test that untouched preferences are written to the file"""
+        filename = self._write_private_options_file(
+            '[bleachbit]\nshred = True\n')
+        o = bleachbit.Options.Options()
+        o.close()
+        with open(filename, 'r', encoding='utf-8-sig') as handle:
+            contents = handle.read()
+
+        keys = self._section_keys(contents, 'bleachbit')
+        for bkey in bleachbit.Options.boolean_keys:
+            self.assertIn(bkey, keys)
+        # an existing value must not be replaced by the default
+        self.assertIn('shred = True', contents)
+
+        o2 = bleachbit.Options.Options()
+        try:
+            self.assertTrue(o2.get('shred'))
+            for bkey in bleachbit.Options.boolean_keys:
+                self.assertIsInstance(o2.get(bkey), bool)
+        finally:
+            o2.close()
+
+    def test_Options(self):
+        """Unit test for class Options"""
+        o = bleachbit.Options.options
+        value = o.get("check_online_updates")
+
+        # toggle a boolean
+        o.toggle('check_online_updates')
+        self.assertEqual(not value, o.get("check_online_updates"))
+
+        # restore original boolean
+        o.set("check_online_updates", value)
+        self.assertEqual(value, o.get("check_online_updates"))
+
+        # test delayed commit
+        shred = o.get("shred")
+        o.set("shred", not shred)
+        self.assertEqual(not shred, o.get("shred"))
+
+        o.restore()  # abandon uncommitted changes
+        self.assertEqual(shred, o.get("shred"))
+
+        o.set("shred", shred)
+        o.close()  # commit
+        self.assertEqual(shred, o.get("shred"))
+
+        # try a list
+        list_values = ['a', 'b', 'c']
+        o.set_list("list_test", list_values)
+        self.assertEqual(list_values, o.get_list("list_test"))
+
+        # these should always be set
+        for bkey in bleachbit.Options.boolean_keys:
+            self.assertIsInstance(o.get(bkey), bool)
+
+        # language
+        value = o.get_language('en')
+        self.assertIsInstance(value, bool)
+        o.set_language('en', True)
+        self.assertTrue(o.get_language('en'))
+        o.set_language('en', False)
+        self.assertFalse(o.get_language('en'))
+        o.set_language('en', value)
+
+        # tree
+        o.set_tree("parent", "child", True)
+        self.assertTrue(o.get_tree("parent", "child"))
+        o.set_tree("parent", "child", False)
+        self.assertFalse(o.get_tree("parent", "child"))
+        o.config.remove_option("tree", "parent.child")
+        self.assertFalse(o.get_tree("parent", "child"))
+
+    def test_keep_list(self):
+        """Test for get_whitelist_paths() / set_whitelist_paths()"""
+        o = bleachbit.Options.options
+        # FIXME: finish renaming whitelist to keep list
+        self.assertIsInstance(o.get_whitelist_paths(), list)
+        keep_list = [('file', '/home/foo'), ('folder', '/home'),
+                     ('file', '/home/unicode/кодирование')]
+        old_keep_list = o.get_whitelist_paths()
+        o.config.remove_section('whitelist/paths')
+        self.assertIsInstance(o.get_whitelist_paths(), list)
+        self.assertEqual(o.get_whitelist_paths(), [])
+        o.set_whitelist_paths(keep_list)
+        self.assertIsInstance(o.get_whitelist_paths(), list)
+        self.assertEqual(set(keep_list), set(o.get_whitelist_paths()))
+        o.set_whitelist_paths(old_keep_list)
+        o.close()
+        self.assertEqual(set(old_keep_list), set(o.get_whitelist_paths()))
+
+    def test_init_configuration(self):
+        """Test for init_configuration()"""
+        if os.path.exists(bleachbit.options_file):
+            os.remove(bleachbit.options_file)
+        self.assertNotExists(bleachbit.options_file)
+        bleachbit.Options.init_configuration()
+        self.assertExists(bleachbit.options_file)
+
+    def test_open_config_write_refuses_symlink(self):
+        """The config write must not follow a symlink to another file"""
+        filename = self.write_file('cfg_target', b'keepme')
+        with mock.patch('bleachbit.FileUtilities.os.path.islink',
+                        side_effect=lambda p: p == filename):
+            with self.assertRaises(OSError):
+                # nested with() so a regression that returns a handle
+                # instead of raising does not leak it
+                with bleachbit.Options._open_config_write(filename):
+                    pass
+        with open(filename, 'rb') as f:
+            self.assertEqual(f.read(), b'keepme')
+
+    def test_is_corrupt(self):
+        """Test is_corrupt()"""
+        def _test_is_corrupt(contents, expect_is_corrupt):
+            with open(bleachbit.options_file, 'w', encoding='utf-8-sig') as f:
+                f.write(contents)
+            o = bleachbit.Options.Options()
+            try:
+                self.assertEqual(o.is_corrupt(), expect_is_corrupt)
+            finally:
+                # cancel any real flush timer restore() may have scheduled
+                o.cancel_pending_flush()
+
+        # test blank
+        _test_is_corrupt('', False)
+        _test_is_corrupt('[bleachbit]\n', False)
+
+        # test valid but non-standard boolean
+        _test_is_corrupt('[bleachbit]\nshred=f\n', False)
+
+        # test invalid boolean
+        # https://github.com/bleachbit/bleachbit/issues/560#issuecomment-497361700
+        _test_is_corrupt("[bleachbit]\nshred=['True']\n", True)
+        os.remove(bleachbit.options_file)
+
+    def test_purge(self):
+        """Test purging"""
+        # By default ConfigParser stores keys (the filenames) as lowercase.
+        # This needs special consideration when combined with purging.
+        o1 = bleachbit.Options.Options()
+        pathname = self.write_file('foo.xml')
+        myhash = '0ABCD'
+        o1.set_hashpath(pathname, myhash)
+        o1.close()
+        self.assertEqual(myhash, o1.get_hashpath(pathname))
+        if IS_WINDOWS:
+            # check case sensitivity
+            self.assertEqual(myhash, o1.get_hashpath(pathname.upper()))
+
+        # reopen
+        o2 = bleachbit.Options.Options()
+        # write something, which triggers the purge
+        o2.set('dummypath', 'dummyvalue', 'hashpath')
+        o2.commit()
+        # verify the path was not purged
+        self.assertTrue(os.path.exists(pathname))
+        self.assertEqual(myhash, o2.get_hashpath(pathname))
+
+        # delete the path
+        os.remove(pathname)
+        # close and reopen
+        o2.close()
+        o3 = bleachbit.Options.Options()
+        # write something, which triggers the purge
+        o3.set('dummypath', 'dummyvalue', 'hashpath')
+        o3.commit()
+        # verify the path was purged
+        self.assertIsNone(o3.get_hashpath(pathname))
+        o3.close()
+
+    def test_abbreviations(self):
+        """Test non-standard, abbreviated booleans T and F"""
+
+        # set values
+        o = bleachbit.Options.options
+        if not o.config.has_section('test'):
+            o.config.add_section('test')
+        o.config.set('test', 'test_t_upper', 'T')
+        o.config.set('test', 'test_f_upper', 'F')
+        o.config.set('test', 'test_t_lower', 't')
+        o.config.set('test', 'test_f_lower', 'f')
+
+        # read
+        self.assertEqual(o.config.getboolean('test', 'test_t_upper'), True)
+        self.assertEqual(o.config.getboolean('test', 'test_t_lower'), True)
+        self.assertEqual(o.config.getboolean('test', 'test_f_upper'), False)
+        self.assertEqual(o.config.getboolean('test', 'test_f_lower'), False)
+
+    def test_percent(self):
+        """Test that the percent sign can be used without quoting the string"""
+        # https://github.com/bleachbit/bleachbit/issues/205
+
+        opt = bleachbit.Options.options.config
+        if not opt.has_section('test'):
+            opt.add_section('test')
+        opt.set('test', 'filename', '/var/log/samba/log.%m')
+
+        # read
+        self.assertEqual(opt.get('test', 'filename'), '/var/log/samba/log.%m')
+
+    def test_error_disk_full(self):
+        """Test graceful degradation when disk is full"""
+        disk_full_error = OSError('No space left on device')
+        disk_full_error.errno = errno.ENOSPC
+        o = bleachbit.Options.Options()
+        try:
+            with mock.patch('builtins.open', side_effect=disk_full_error):
+                with self.assertLogs(level='ERROR') as log_context:
+                    o.set('test_key', 'test_value')
+                    o.commit()
+            self.assertIn('Disk was full', log_context.output[0])
+            self.assertIn(bleachbit.options_file, log_context.output[0])
+            self.assertEqual(o.get('test_key'), 'test_value')
+        finally:
+            # forced commit() failure above never clears dirty/cancels the timer
+            o.cancel_pending_flush()
+
+    def test_error_permission(self):
+        """Test graceful degradation with permission errors"""
+        permission_error = PermissionError('Permission denied')
+        permission_error.errno = errno.EACCES
+        o = bleachbit.Options.Options()
+        try:
+            with mock.patch('builtins.open', side_effect=permission_error):
+                with self.assertLogs(level='ERROR') as log_context:
+                    o.set('test_key', 'test_value')
+                    o.commit()
+            self.assertIn('Permission denied', log_context.output[0])
+            self.assertIn(bleachbit.options_file, log_context.output[0])
+            self.assertEqual(o.get('test_key'), 'test_value')
+        finally:
+            o.cancel_pending_flush()
+
+    def test_warning(self):
+        """Test warning preferences"""
+        o = bleachbit.Options.options
+        self.assertFalse(o.get_warning_preference('test_key'))
+        o.remember_warning_preference('test_key')
+        self.assertTrue(o.get_warning_preference('test_key'))
+        o.close()
+
+    def test_warning_keys_with_colons(self):
+        """Test restoring warning preferences with colons in keys"""
+        with open(bleachbit.options_file, 'w', encoding='utf-8-sig') as handle:
+            handle.write('''[bleachbit]
+[warnings]
+cleaner:google_chrome:passwords = True
+cleaner:microsoft_edge:passwords = True
+''')
+        o = None
+        try:
+            if sys.version_info >= (3, 10):
+                with self.assertNoLogs('bleachbit.Options', level='ERROR'):
+                    o = bleachbit.Options.Options()
+            else:
+                o = bleachbit.Options.Options()
+            self.assertTrue(o.get_warning_preference(
+                'cleaner:google_chrome:passwords'))
+            self.assertTrue(o.get_warning_preference(
+                'cleaner:microsoft_edge:passwords'))
+        finally:
+            if o is not None:
+                o.close()
+
+    def test_corrupt_warning_preferences_are_migrated(self):
+        """Test migration of warning preferences corrupted by colon parsing"""
+        with open(bleachbit.options_file, 'w', encoding='utf-8-sig') as handle:
+            handle.write('''[bleachbit]
+[warnings]
+cleaner = google_chrome:passwords = True
+protected_path = /tmp = True
+''')
+        o = bleachbit.Options.Options()
+        try:
+            self.assertTrue(o.get_warning_preference(
+                'cleaner:google_chrome:passwords'))
+            self.assertTrue(o.get_warning_preference('protected_path:/tmp'))
+            self.assertFalse(o.config.has_option('warnings', 'cleaner'))
+            self.assertFalse(o.config.has_option('warnings', 'protected_path'))
+            o.commit()
+        finally:
+            o.close()
+        with open(bleachbit.options_file, 'r', encoding='utf-8-sig') as handle:
+            contents = handle.read()
+        self.assertIn('cleaner:google_chrome:passwords = True', contents)
+        self.assertIn('protected_path:/tmp = True', contents)
+        self.assertNotIn('cleaner = google_chrome:passwords = True', contents)
+        self.assertNotIn('protected_path = /tmp = True', contents)
+
+    def test_overrides(self):
+        """Test CLI override functionality"""
+        o = bleachbit.Options.options
+
+        debug_default = is_debugging_enabled_via_cli()
+
+        # Check defaults which are assumed in later tests.
+        self.assertFalse(o.get('shred'))
+        self.assertEqual(o.get('debug'), debug_default)
+        self.assertTrue(o.get('delete_confirmation'))
+
+        # Test basic override
+        o.set_override('shred', True)
+        self.assertTrue(o.get('shred'))
+
+        # Test that override takes precedence over get
+        o.set('shred', False)
+        self.assertTrue(o.get('shred'))  # override should still return True
+
+        # Test multiple overrides
+        o.set_override('debug', True)
+        o.set_override('delete_confirmation', False)
+        self.assertTrue(o.get('debug'))
+        self.assertFalse(o.get('delete_confirmation'))
+
+        # Test that flush doesn't write overridden values
+        # First set persistent values different from overrides
+        o.set('shred', False)
+        o.set('debug', False)
+        o.set('delete_confirmation', True)
+        o.commit()
+
+        # Verify overrides still work after flush
+        self.assertTrue(o.get('shred'))
+        self.assertTrue(o.get('debug'))
+        self.assertFalse(o.get('delete_confirmation'))
+
+        # Create new instance to verify persistent values were written correctly
+        o2 = bleachbit.Options.Options()
+        self.assertFalse(o2.get('shred'))
+        self.assertEqual(o2.get('debug'), debug_default)
+        self.assertTrue(o2.get('delete_confirmation'))
+        o2.close()
+
+    def test_override_does_not_persist(self):
+        """Test that overrides don't persist after process restart"""
+        o = bleachbit.Options.options
+
+        # Set an override
+        o.set_override('shred', True)
+        self.assertTrue(o.get('shred'))
+
+        # Create new instance (simulating process restart)
+        o2 = bleachbit.Options.Options()
+        # Override should not exist in new instance
+        self.assertNotIn(('bleachbit', 'shred'), o2.overrides)
+        o2.close()
+
+        # Clean up
+        o.reset_overrides()
+
+    def test_override_with_sections(self):
+        """Test overrides work with different sections"""
+        o = bleachbit.Options.options
+
+        # Test override in non-default section
+        if not o.config.has_section('test_section'):
+            o.config.add_section('test_section')
+        o.config.set('test_section', 'test_key', 'original_value')
+
+        o.set_override('test_key', 'override_value', section='test_section')
+        self.assertEqual(
+            o.get('test_key', section='test_section'), 'override_value')
+
+        # Verify flush doesn't write override
+        o.commit()
+        o2 = bleachbit.Options.Options()
+        self.assertEqual(
+            o2.get('test_key', section='test_section'), 'original_value')
+        o2.close()
+
+        # Clean up
+        o.reset_overrides()
+        if o.config.has_section('test_section'):
+            o.config.remove_section('test_section')
+
+    def test_flush_mechanisms_timer_and_close(self):
+        """Test that changes flush correctly via timer fire or explicit close()."""
+        with mock.patch('bleachbit.Options.threading.Timer', FakeTimer):
+            for commit_method in ['timer', 'close']:
+                with self.subTest(commit=commit_method):
+                    self._write_seed_options_file()
+                    o = bleachbit.Options.Options()
+
+                    def assert_pending_changes_uncommitted(instance):
+                        self.assertFalse(instance.get('shred'))
+                        self.assertIsNone(instance.get_list('list_test'))
+                        self.assertEqual([], instance.get_whitelist_paths())
+                        self.assertEqual([], instance.get_custom_paths())
+                        self.assertFalse(instance.get_language('zz'))
+                        self.assertFalse(instance.get_tree('system', 'cache'))
+                        self.assertFalse(
+                            instance.get_warning_preference('warn_key'))
+
+                    # Ensure initial state has no pending changes
+                    assert_pending_changes_uncommitted(o)
+
+                    # Guard against premature flush
+                    with mock.patch('builtins.open', side_effect=AssertionError('unexpected flush')):
+                        o.set('shred', True)
+                        o.set_list('list_test', ['a', 'b'])
+                        o.set_whitelist_paths([('file', '/tmp/a')])
+                        o.set_custom_paths([('folder', '/tmp/b')])
+                        o.set_language('zz', True)
+                        o.set_tree('system', 'cache', True)
+                        o.remember_warning_preference('warn_key')
+
+                    pending_timer = FakeTimer.instances[-1]
+                    self.assertTrue(pending_timer.started)
+
+                    # Verify uncommitted changes are invisible to new instance
+                    o2 = bleachbit.Options.Options()
+                    assert_pending_changes_uncommitted(o2)
+                    o2.close()
+
+                    # Commit via the specific mechanism being tested
+                    if commit_method == 'timer':
+                        pending_timer.fire()
+                    else:
+                        o.close()
+
+                    # Verify all changes persisted
+                    o3 = bleachbit.Options.Options()
+                    self.assertTrue(o3.get('shred'))
+                    self.assertEqual(['a', 'b'], o3.get_list('list_test'))
+                    self.assertEqual([('file', '/tmp/a')],
+                                     o3.get_whitelist_paths())
+                    self.assertEqual([('folder', '/tmp/b')],
+                                     o3.get_custom_paths())
+                    self.assertTrue(o3.get_language('zz'))
+                    self.assertTrue(o3.get_tree('system', 'cache'))
+                    self.assertTrue(o3.get_warning_preference('warn_key'))
+                    o3.close()
+
+                    if commit_method == 'timer':
+                        o.close()
+
+    def test_mutators_flush_atomically_with_lock(self):
+        """Test that mutating self.config and scheduling the flush is atomic"""
+        self._write_seed_options_file()
+
+        mutators = (
+            ('set', lambda o: o.set('shred', 'RACE_PROBE')),
+            ('set_list', lambda o: o.set_list('race_list', ['x'])),
+            ('set_tree', lambda o: o.set_tree(
+                'race_parent', 'race_child', True)),
+            ('remember_warning_preference',
+             lambda o: o.remember_warning_preference('race_key')),
+        )
+
+        with mock.patch('bleachbit.Options.threading.Timer', FakeTimer):
+            for name, mutate in mutators:
+                with self.subTest(mutator=name):
+                    o = bleachbit.Options.Options()
+                    entered = threading.Event()
+                    finish = threading.Event()
+                    real_schedule_flush = o._Options__schedule_flush
+
+                    # blocks mid-flush so a concurrent lock probe can check who holds the lock
+                    def blocking_schedule_flush():
+                        entered.set()
+                        finish.wait(timeout=5)
+                        real_schedule_flush()
+
+                    with mock.patch.object(
+                            o, '_Options__schedule_flush',
+                            side_effect=blocking_schedule_flush):
+                        t = threading.Thread(
+                            target=mutate, args=(o,))
+                        t.start()
+                        self.assertTrue(
+                            entered.wait(timeout=5),
+                            f'{name}() never reached __schedule_flush')
+                        acquired = o._flush_lock.acquire(timeout=0.2)
+                        if acquired:
+                            o._flush_lock.release()
+                        finish.set()
+                        t.join(timeout=5)
+
+                    self.assertFalse(
+                        acquired,
+                        f'{name}() released _flush_lock between '
+                        'mutating self.config and scheduling the '
+                        'flush - a concurrent background flush could '
+                        'observe and persist the change before '
+                        'restore() gets a chance to discard it')
+                    # cancel_pending_flush(), not close(): probe values must never hit disk
+                    o.cancel_pending_flush()
+
+    def test_restore_does_not_expose_partial_configuration(self):
+        """Test restore() keeps setters out until all sections are rebuilt."""
+        self._write_seed_options_file()
+        o = bleachbit.Options.Options()
+        entered_read = threading.Event()
+        continue_restore = threading.Event()
+        setter_finished = threading.Event()
+        restore_errors = []
+        setter_errors = []
+        original_read_file = o.config.read_file
+
+        def blocking_read_file(*args, **kwargs):
+            entered_read.set()
+            continue_restore.wait(timeout=5)
+            return original_read_file(*args, **kwargs)
+
+        def restore():
+            try:
+                o.restore()
+            except Exception as error:
+                restore_errors.append(error)
+
+        def set_option():
+            try:
+                o.set('race_probe', 'True')
+            except Exception as error:
+                setter_errors.append(error)
+            finally:
+                setter_finished.set()
+
+        restore_thread = threading.Thread(target=restore)
+        setter_thread = threading.Thread(target=set_option)
+        try:
+            with mock.patch.object(
+                    o.config, 'read_file', side_effect=blocking_read_file):
+                restore_thread.start()
+                self.assertTrue(entered_read.wait(timeout=5))
+                setter_thread.start()
+
+                self.assertFalse(
+                    setter_finished.wait(timeout=0.2),
+                    'set() ran while restore() had cleared self.config')
+
+                continue_restore.set()
+                restore_thread.join(timeout=5)
+                setter_thread.join(timeout=5)
+
+            self.assertFalse(restore_thread.is_alive())
+            self.assertFalse(setter_thread.is_alive())
+            self.assertEqual([], restore_errors)
+            self.assertEqual([], setter_errors)
+            self.assertTrue(o.get('race_probe'))
+        finally:
+            continue_restore.set()
+            restore_thread.join(timeout=5)
+            setter_thread.join(timeout=5)
+            o.cancel_pending_flush()
+            o.close()
+
+    def test_close_unregisters_atexit_and_is_idempotent(self):
+        """Test close() unregisters its atexit callback and only flushes once."""
+        self._write_seed_options_file()
+        with mock.patch('bleachbit.Options.atexit.unregister') as mock_unregister:
+            o = bleachbit.Options.Options()
+            with mock.patch.object(o, '_Options__flush') as mock_flush:
+                o.close()
+                o.close()
+
+            mock_flush.assert_called_once_with(force=False)
+            mock_unregister.assert_called_once()
+
+    @pytest.mark.no_xdist
+    def test_unicode_paths(self):
+        """Test that paths with various Unicode characters"""
+        # On Linux, os.listdir() may return filenames with surrogate-escaped
+        # bytes (e.g. invalid UTF-8 byte sequences decoded with
+        # 'surrogateescape').  These contain unpaired surrogates (U+D800 to
+        # U+DFFF) which cannot be encoded as UTF-8, causing UnicodeEncodeError
+        # when ConfigParser writes the .ini file.
+        # https://github.com/bleachbit/bleachbit/issues/2082
+
+        test_cases = [
+            ('surrogate', '/tmp/invalid_unicode_surrogate_\udce9'),
+            ('cjk', '/tmp/中文日本語한국어'),
+            ('european', '/tmp/àéïöüñçß'),
+            ('cyrillic', '/tmp/кодирование'),
+            ('arabic', '/tmp/العربية'),
+            ('emoji', '/tmp/🎉🚀💻'),
+            ('mixed', '/tmp/mixed_中文_àéï_\udce9'),
+        ]
+
+        def verify_paths(o, keep_list, custom_list):
+            """Helper to verify whitelist and custom paths"""
+            o.set_whitelist_paths(keep_list)
+            o.commit()
+            self.assertEqual(keep_list, o.get_whitelist_paths())
+
+            o.set_custom_paths(custom_list)
+            o.commit()
+            self.assertEqual(custom_list, o.get_custom_paths())
+
+            # Verify round-trip: new instance reads from disk
+            o2 = bleachbit.Options.Options()
+            self.assertEqual(keep_list, o2.get_whitelist_paths())
+            self.assertEqual(custom_list, o2.get_custom_paths())
+            o2.close()
+
+        o = bleachbit.Options.options
+        for name, path in test_cases:
+            with self.subTest(unicode_type=name):
+                keep_list = [('file', path)]
+                custom_list = [('folder', path)]
+                verify_paths(o, keep_list, custom_list)
+
+        o.close()

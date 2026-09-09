@@ -1,0 +1,596 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (c) 2008-2026 Andrew Ziem.
+#
+# This work is licensed under the terms of the GNU GPL, version 3 or
+# later.  See the COPYING file in the top-level directory.
+
+
+"""
+Test case for module Cleaner
+"""
+
+import glob
+import logging
+import os
+import shutil
+from unittest import mock
+from xml.dom.minidom import parseString
+
+import bleachbit
+from bleachbit import IS_WINDOWS, IS_POSIX
+from bleachbit.Action import ActionProvider, Command
+from bleachbit.Cleaner import Cleaner, System, backends, create_simple_cleaner, simpler_cleaner_process_path, register_cleaners
+from bleachbit.FileUtilities import extended_path_undo
+from bleachbit.PathUtils import path_startswith
+
+from tests import common
+
+logger = logging.getLogger('bleachbit')
+
+
+def action_to_cleaner(action_str):
+    """Given an action XML fragment, return a cleaner"""
+    return actions_to_cleaner([action_str])
+
+
+def actions_to_cleaner(action_strs):
+    """Given multiple action XML fragments, return one cleaner"""
+
+    cleaner = Cleaner()
+    for count, action_str in enumerate(action_strs, start=1):
+        dom = parseString(action_str)
+        action_node = dom.childNodes[0]
+        command = action_node.getAttribute('command')
+        provider = None
+        for actionplugin in ActionProvider.plugins:
+            if actionplugin.action_key == command:
+                provider = actionplugin(action_node)
+        cleaner.add_action(f'option{count}', provider)
+        cleaner.add_option(
+            f'option{count}', f'name{count}', f'description{count}')
+    return cleaner
+
+
+def register_all_cleaners():
+    """Register all cleaners for testing; leaves winapp2.ini in the shared personal_cleaners_dir"""
+    if IS_WINDOWS:
+        from tests.TestWinapp import get_winapp2  # pylint: disable=import-outside-toplevel
+
+        os.makedirs(bleachbit.personal_cleaners_dir, exist_ok=True)
+        print(f"personal_cleaners_dir: {bleachbit.personal_cleaners_dir}")
+        shutil.copyfile(
+            get_winapp2(),
+            os.path.join(bleachbit.personal_cleaners_dir, 'winapp2.ini'),
+        )
+    # Previously, we guarded registration with `if not backends`, but
+    # this was unreliable under pytest-xdist, like if a test created
+    # a single test cleaner.
+    list(register_cleaners())
+    assert len(backends) > 1
+
+
+class CleanerTestCase(common.BleachbitTestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        """Set up CleanerTestCase class"""
+        super().setUpClass()
+        # Register all cleaners once for the whole class so that tests can
+        # rely on `backends` being populated even when run in isolation.
+        # register_all_cleaners() is idempotent.
+        register_all_cleaners()
+
+    def test_add_action(self):
+        """Unit test for Cleaner.add_action()"""
+        self.actions = []
+        if IS_WINDOWS:
+            self.actions += [
+                '<action command="delete" search="file" path="$WINDIR\\explorer.exe"/>',
+                '<action command="delete" search="glob" path="$WINDIR\\system32\\*.dll"/>',
+                '<action command="delete" search="walk.files" path="$WINDIR\\system32\\"/>',
+                '<action command="delete" search="walk.all" path="$WINDIR\\system32\\"/>']
+        elif IS_POSIX:
+            print(__file__)
+            self.actions += [
+                f'<action command="delete" search="file" path="{__file__}"/>',
+                '<action command="delete" search="glob" path="/bin/*sh"/>',
+                '<action command="delete" search="walk.files" path="/bin/"/>',
+                '<action command="delete" search="walk.all" path="/var/log/"/>']
+        else:
+            raise AssertionError('Unknown OS.')
+        self.assertGreater(len(self.actions), 0)
+
+        for action_str in self.actions:
+            cleaner = action_to_cleaner(action_str)
+            count = 0
+            for cmd in cleaner.get_commands('option1'):
+                for result in cmd.execute(False):
+                    self.assertEqual(result['n_deleted'], 1)
+                    pathname = result['path']
+                    self.assertLExists(
+                        pathname, f"Does not exist: '{pathname}'")
+                    count += 1
+                    common.validate_result(self, result)
+            self.assertGreater(count, 0, f"No files found for {action_str}")
+        # should yield nothing
+        cleaner.add_option('option2', 'name2', 'description2')
+        for cmd in cleaner.get_commands('option2'):
+            print(cmd)
+            raise AssertionError('option2 should yield nothing')
+        # should fail
+        self.assertRaises(
+            RuntimeError, cleaner.get_commands('option3').__next__)
+
+    def test_multiple_actions_per_option(self):
+        """Multiple actions under one option run in registration order, and
+        actions added after get_commands()/get_deep_scan() are reflected."""
+
+        class _StubAction:
+            """Minimal action provider yielding sentinel values."""
+
+            def __init__(self, token):
+                self.token = token
+
+            def get_commands(self):
+                yield self.token
+
+            def get_deep_scan(self):
+                yield ('deep', self.token)
+
+        cleaner = Cleaner()
+        cleaner.add_option('opt', 'name', 'description')
+        cleaner.add_action('opt', _StubAction('a'))
+        cleaner.add_action('opt', _StubAction('b'))
+
+        # Both actions run, in registration order
+        self.assertEqual(list(cleaner.get_commands('opt')), ['a', 'b'])
+        self.assertEqual(list(cleaner.get_deep_scan('opt')),
+                         [('deep', 'a'), ('deep', 'b')])
+
+        # Adding an action after the index is built must be reflected
+        cleaner.add_action('opt', _StubAction('c'))
+        self.assertEqual(list(cleaner.get_commands('opt')), ['a', 'b', 'c'])
+        self.assertEqual(list(cleaner.get_deep_scan('opt')),
+                         [('deep', 'a'), ('deep', 'b'), ('deep', 'c')])
+
+        # A registered option with no actions yields nothing without raising
+        cleaner.add_option('empty', 'name2', 'description2')
+        self.assertEqual(list(cleaner.get_commands('empty')), [])
+
+    def test_deep_scan_after_action_without_deep_scan(self):
+        """An action without a deep scan must not hide later deep scans"""
+
+        class _DeepStubAction:
+            """Minimal action provider yielding one deep scan entry."""
+
+            def get_deep_scan(self):
+                yield ('deep', 'entry')
+
+        cleaner = Cleaner()
+        cleaner.add_option('opt', 'name', 'description')
+        # The base class stands in for any action without a deep scan,
+        # such as winreg or process.
+        cleaner.add_action('opt', ActionProvider(None))
+        cleaner.add_action('opt', _DeepStubAction())
+
+        self.assertEqual(list(cleaner.get_deep_scan('opt')),
+                         [('deep', 'entry')])
+
+        # should fail, like get_commands()
+        self.assertRaises(
+            RuntimeError, cleaner.get_deep_scan('unknown').__next__)
+
+    def test_has_action_key(self):
+        """Unit test for Cleaner.has_action_key()"""
+
+        class _StubAction:
+            """Minimal action provider carrying only an action_key."""
+
+            def __init__(self, action_key):
+                self.action_key = action_key
+
+        cleaner = Cleaner()
+        cleaner.add_option('opt', 'name', 'description')
+        cleaner.add_action('opt', _StubAction('delete'))
+        self.assertFalse(cleaner.has_action_key('opt', 'cookie'))
+        # an option id that was never registered is not an error
+        self.assertFalse(cleaner.has_action_key('missing', 'cookie'))
+
+        # an action added after the index was built must be reflected
+        cleaner.add_action('opt', _StubAction('cookie'))
+        self.assertTrue(cleaner.has_action_key('opt', 'cookie'))
+
+        # the action must belong to the option that is asked about
+        cleaner.add_action('other', _StubAction('shred'))
+        self.assertTrue(cleaner.has_action_key('other', 'shred'))
+        self.assertFalse(cleaner.has_action_key('opt', 'shred'))
+
+    def test_auto_hide(self):
+        count = 0
+        for key in sorted(backends):
+            self.assertIsInstance(backends[key].auto_hide(), bool)
+            count += 1
+        self.assertGreater(count, 0)
+
+    def test_create_simple_cleaner(self):
+        """Unit test for method create_simple_cleaner"""
+        dirname = self.mkdtemp(prefix='bleachbit-test-create-simple-cleaner')
+        filename1 = os.path.join(dirname, '1')
+        common.touch_file(filename1)
+        # test Cyrillic for https://bugs.launchpad.net/bleachbit/+bug/1541808
+        filename2 = os.path.join(dirname, 'чистый')
+        common.touch_file(filename2)
+        targets = [filename1, filename2, dirname]
+        cleaner = create_simple_cleaner(targets)
+        for cmd in cleaner.get_commands('files'):
+            # preview
+            for result in cmd.execute(False):
+                common.validate_result(self, result)
+            # delete
+            list(cmd.execute(True))
+
+        for target in targets:
+            self.assertNotExists(target)
+
+    def test_create_simple_cleaner_recursive(self):
+        """Verify create_simple_cleaner deletes recursive directory trees"""
+        # Build:  root/
+        #           file.txt
+        #           sub1/
+        #             file.txt
+        #             sub2/
+        #               file.txt
+        root = self.mkdir('csc-recursive')  # relative to self.tempdir
+        sub1 = self.mkdir(os.path.join(root, 'sub1'))
+        sub2 = self.mkdir(os.path.join(sub1, 'sub2'))
+        dirnames = [root, sub1, sub2]
+        for dirname in dirnames:
+            common.touch_file(os.path.join(dirname, 'file.txt'))
+
+        cleaner = create_simple_cleaner([root])
+        for cmd in cleaner.get_commands('files'):
+            list(cmd.execute(True))
+
+        for dirname in dirnames:
+            self.assertNotExists(dirname)
+
+    def test_create_simple_cleaner_refuses_cwd(self):
+        """create_simple_cleaner must refuse to shred CWD or its parent."""
+        cwd = os.getcwd()
+        cwd_parent = os.path.dirname(cwd)
+        # Every spelling of "the working directory" or its parent.
+        bad_inputs = ('', ' ', '.', '..', './', './.', 'foo/..',
+                      cwd, cwd_parent,
+                      cwd + os.sep, os.path.join(cwd, '.'),
+                      cwd_parent + os.sep, os.path.join(cwd_parent, '.'))
+        for bad in bad_inputs:
+            cleaner = create_simple_cleaner([bad])
+            cmds = list(cleaner.get_commands('files'))
+            self.assertEqual(cmds, [], f'expected no commands for {bad!r}')
+
+    def test_simpler_cleaner_process_path(self):
+        """Unit test for simpler_cleaner_process_path()."""
+        cwd = os.getcwd()
+        cwd_parent = os.path.dirname(cwd)
+
+        # Refused inputs return None.
+        for bad in ('', ' ', '.', '..', './', './.', 'foo/..', cwd, cwd_parent):
+            self.assertIsNone(simpler_cleaner_process_path(bad),
+                              f'expected None for {bad!r}')
+
+        # Non-string raises.
+        for bad in (123, None, [], {}, set()):
+            with self.assertRaises(RuntimeError):
+                simpler_cleaner_process_path(bad)
+
+        # An absolute path is returned unchanged.
+        # It does not need to exist.
+        if IS_WINDOWS:
+            missing_abs_path = r'c:\nonexistent\path'
+        else:
+            missing_abs_path = '/nonexistent/path'
+        self.assertEqual(simpler_cleaner_process_path(
+            missing_abs_path), missing_abs_path)
+
+        # A relative path is returned as an absolute path.
+        # It does not need to exist.
+        # A genuinely relative path (a bare filename relative to CWD)
+        # is normalized to an absolute one and must not collapse to CWD.
+        # chdir into the tempdir so a bare filename resolves there; the
+        # context manager restores CWD even on assertion failure.
+        # macOS needs realpath because path uses symlink.
+        rel_target = os.path.join(os.path.realpath(self.tempdir), 'rel-target')
+        # After dropping support for Python 3.9, this can be simplified to:
+        # `with contextlib.chdir(self.tempdir):`
+        orig_cwd = os.getcwd()
+        try:
+            os.chdir(self.tempdir)
+            processed = simpler_cleaner_process_path('rel-target')
+        finally:
+            os.chdir(orig_cwd)
+        # On Windows, `processed` may be a 8.3 short name, so expand to
+        # long path before comparison.
+        self.assertEqual(os.path.realpath(processed), rel_target)
+        self.assertNotEqual(processed, self.tempdir)
+
+    def test_get_name(self):
+        count = 0
+        for key in sorted(backends):
+            self.assertIsString(backends[key].get_name())
+            count += 1
+        self.assertGreater(count, 10)
+
+    def test_get_description(self):
+        count = 0
+        for key in sorted(backends):
+            self.assertIsString(key)
+            self.assertIsInstance(backends[key], Cleaner)
+            desc = backends[key].get_description()
+            if desc is not None:
+                self.assertIsString(
+                    desc, msg="description for '%s' is '%s'" % (key, desc))
+            count += 1
+        self.assertGreater(count, 10)
+
+    def test_get_options(self):
+        count = 0
+        for key in sorted(backends):
+            for (test_id, name) in backends[key].get_options():
+                self.assertIsString(
+                    test_id, msg='%s.%s is not a string' % (key, test_id))
+                self.assertIsString(name)
+                count += 1
+        self.assertGreater(count, 10)
+
+    def test_get_commands(self):
+        validate_count = 0
+        # Directories shared across parallel pytest-xdist workers where
+        # files may appear/vanish between discovery and validation
+        # (TOCTOU).
+        # The system temporary directory covers Winapp2.ini
+        # `[Windows Temporary Files *]`, whose name and ID may change, so
+        # we check for it here by directory name.
+        volatile_dir = common.get_volatile_dir()
+
+        def is_volatile(path):
+            if not path:
+                return False
+            if IS_WINDOWS:
+                path = extended_path_undo(path)
+            return path_startswith(path, volatile_dir, case_sensitive=False)
+
+        for key in sorted(backends):
+            logger.debug("test_get_commands: key='%s'", key)
+            for (option_id, __name) in backends[key].get_options():
+                is_system_tmp = (key, option_id) == ('system', 'tmp')
+                for cmd in backends[key].get_commands(option_id):
+                    try:
+                        for result in cmd.execute(really_delete=False):
+                            allow_vanishing = is_system_tmp \
+                                or is_volatile(result.get('path'))
+                            common.validate_result(
+                                self, result, allow_vanishing=allow_vanishing)
+                            validate_count += 1
+                    except FileNotFoundError as e:
+                        if not (is_system_tmp or is_volatile(e.filename)):
+                            raise
+                        logger.debug('TOCTOU: file vanished: %s', e.filename)
+        self.assertGreater(validate_count, 10,
+                           "expected >10 file/results to validate")
+        # make sure trash and tmp don't return the same results
+        if IS_WINDOWS:
+            return
+
+        def get_files(option_id):
+            ret = []
+            for cmd in backends['system'].get_commands(option_id):
+                try:
+                    result = next(cmd.execute(False))
+                except FileNotFoundError as e:
+                    logger.debug('TOCTOU: file vanished: %s', e.filename)
+                    continue
+                ret.append(result['path'])
+            return ret
+        trash_paths = get_files('trash')
+        tmp_paths = get_files('tmp')
+        for tmp_path in tmp_paths:
+            self.assertNotIn(tmp_path, trash_paths)
+
+    def test_no_files_exist(self):
+        """Verify only existing files are returned
+
+        It monkeypatches file system functions to return no files.
+        Then, it tries every cleaning option.
+        """
+        _exists = os.path.exists
+        _iglob = glob.iglob
+        _isdir = os.path.isdir
+        _lexists = os.path.lexists
+        _listdir = os.listdir
+        _oswalk = os.walk
+        _scandir = os.scandir
+
+        class _EmptyScandir:
+            """Mimic os.scandir returning no entries (and a no-op context)."""
+
+            def __iter__(self):
+                return iter(())
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        try:
+            glob.iglob = lambda path, *args, **kwargs: []
+            os.path.exists = lambda path: False
+            os.path.isdir = lambda path: False
+            os.path.lexists = lambda path: False
+            os.listdir = lambda path: []
+            os.walk = lambda top, topdown=True, onerror=None, followlinks=False: []
+            os.scandir = lambda path='.', *args, **kwargs: _EmptyScandir()
+            for key in sorted(backends):
+                for (option_id, __name) in backends[key].get_options():
+                    for cmd in backends[key].get_commands(option_id):
+                        # Some cleaners can still return a command, so next run
+                        # a preview.
+                        for result in cmd.execute(really_delete=False):
+                            if not result:
+                                break
+                            msg = f"Expected no files to be deleted but got '{result}'"
+                            self.assertNotIsInstance(cmd, Command.Delete, msg)
+        finally:
+            glob.iglob = _iglob
+            os.path.exists = _exists
+            os.path.isdir = _isdir
+            os.path.lexists = _lexists
+            os.listdir = _listdir
+            os.walk = _oswalk
+            os.scandir = _scandir
+
+    def test_register_cleaners(self):
+        """Unit test for register_cleaners"""
+        # setUpClass already registered cleaners; clear to test cold start.
+        backends.clear()
+        register_all_cleaners()
+        register_all_cleaners()
+        backends.clear()
+        register_all_cleaners()
+
+    @common.skipIfWindows  # FIXME later: reevaluate
+    @common.skipUnlessDestructive
+    def test_system_recent_documents(self):
+        """Clean recent documents in GTK"""
+        from bleachbit.GtkShim import (
+            Gtk, Gio, GLib, suppress_pygobject_asyncio_warnings)
+        mgr = Gtk.RecentManager().get_default()
+        fn = self.mkstemp(suffix='.txt')
+        self.assertExists(fn)
+        uri = Gio.File.new_for_path(fn).get_uri()
+        self.assertTrue(mgr.add_item(uri))
+        GLib.idle_add(Gtk.main_quit)
+        # PyGObject 3.56.2 calls deprecated asyncio APIs in Gtk.main(),
+        # which breaks tests run with warnings as errors.
+        with suppress_pygobject_asyncio_warnings():
+            Gtk.main()  # process the addition
+        GLib.idle_add(Gtk.main_quit)
+        self.assertGreater(len(mgr.get_items()), 0)
+        self.assertTrue(mgr.has_item(uri))
+
+        for cmd in backends['system'].get_commands('recent_documents'):
+            for result in cmd.execute(really_delete=True):
+                common.validate_result(self, result, True)
+
+        self.assertEqual(len(mgr.get_items()), 0)
+
+    @common.skipIfWindows
+    def test_whitelist_home_with_regex_metacharacters(self):
+        """A home directory with regex metacharacters must still be kept"""
+        for home in ('/home/a*b', '/home/a+b', '/home/x)y(z'):
+            cleaner = System()
+            with mock.patch('os.path.expanduser',
+                            lambda path, home=home: path.replace('~', home, 1)):
+                cleaner.init_whitelist()
+            self.assertTrue(cleaner.whitelisted(home + '/.cache/mozilla/x'), home)
+            self.assertTrue(cleaner.whitelisted(home + '/.cache/kwin/y'), home)
+            self.assertFalse(cleaner.whitelisted(home + '/.cache/other/z'), home)
+            self.assertFalse(cleaner.whitelisted('/tmp/nope'), home)
+
+    @common.skipIfWindows
+    def test_whitelist(self):
+        """Unit test for method Cleaner.whitelisted"""
+        tests = [
+            ('/tmp/.truecrypt_aux_mnt1/control', True),
+            ('/tmp/.truecrypt_aux_mnt1/volume', True),
+            ('/tmp/.vbox-foo-ipc/lock', True),
+            ('/tmp/.wine-500/server-806-102400f/lock', True),
+            ('/tmp/gconfd-foo/lock/ior', True),
+            ('/tmp/ksocket-foo/Arts_SoundServerV2', True),
+            ('/tmp/ksocket-foo/secret-cookie', True),
+            ('/tmp/orbit-foo/bonobo-activation-register-a9cd6cc4973af098918b154c4957a93f.lock', True),
+            ('/tmp/orbit-foo/bonobo-activation-register.lock', True),
+            ('/tmp/orbit-foo/bonobo-activation-server-a9cd6cc4973af098918b154c4957a93f-ior', True),
+            ('/tmp/orbit-foo/bonobo-activation-server-ior', True),
+            ('/tmp/pulse-foo/pid', True),
+            ('/tmp/tmpsDOBFd', False),
+            ('~/.cache/obexd', True),
+            ('~/.cache/obexd/', True),
+            ('~/.cache/obexd/foo', True),
+            ('~/.cache/obex', False),
+            ('~/.cache/obexd-foo', False),
+            ('~/.cache/kwin', True),
+            ('~/.cache/kwi', False),
+            ('~/.cache/kwi/foo.txt', False),
+            ('~/.cache/kwin/test_file', True),
+            ('~/.cache/mesa_shader_cache', True),
+            ('~/.cache/mesa_shader_cache/test_file', True),
+            ('~/.cache/plasmashell', True),
+            ('~/.cache/plasmashell/test_file', True),
+            ('~/.cache/icon-cache.kcache', True),
+            ('~/.cache/plasma_theme_breeze-light_v5.103.0.kcache', True),
+            ('~/.cache/drkonqi', True),
+            ('~/.cache/drkonqi/test_file', True),
+            ('~/.cache/mesa_shader_cache_db', True),
+            ('~/.cache/mesa_shader_cache_db/test_file', True),
+            ('~/.cache/qtshadercache-x86_64-little_endian-lp64', True),
+            ('~/.cache/qtshadercache-x86_64-little_endian-lp64/test_file', True),
+            ('~/.cache/plasma_theme_default.kcache', True)
+        ]
+        for pathname, expected in tests:
+            path = os.path.expanduser(
+                pathname) if pathname.startswith('~') else pathname
+            self.assertEqual(
+                backends['system'].whitelisted(path), expected, pathname)
+        # Make sure directory ~/.cache/obexd is ignored
+        # https://github.com/bleachbit/bleachbit/issues/572
+        obexd_dir = os.path.expanduser('~/.cache/obexd')
+        if not os.path.exists(obexd_dir):
+            os.makedirs(obexd_dir)
+        obexd_fn = os.path.join(obexd_dir, 'bleachbit-test')
+        common.touch_file(obexd_fn)
+        for cmd in backends['system'].get_commands('cache'):
+            for _ in cmd.execute(really_delete=False):
+                self.assertNotEqual(cmd.path, obexd_fn)
+                self.assertNotIn('/.cache/obexd/', cmd.path)
+        from bleachbit.FileUtilities import delete
+        delete(obexd_fn, ignore_missing=True)
+
+    def test_custom(self):
+        """Test system.custom"""
+        from bleachbit.Options import options
+        original_custom_paths = options.get_custom_paths()
+
+        test_pathname = os.path.join(self.tempdir, 'foo')
+
+        # Check that custom cleaner doesn't iterate non-existent object
+        for obj_type in ('folder', 'file'):
+            options.set_custom_paths([(obj_type, test_pathname)])
+            for cmd in backends['system'].get_commands('custom'):
+                results = list(cmd.execute(really_delete=False))
+                self.assertEqual(len(results), 0)
+
+        # Create the file
+        common.touch_file(test_pathname)
+        self.assertExists(test_pathname)
+
+        # Check it returns the file now
+        for cmd in backends['system'].get_commands('custom'):
+            results = list(cmd.execute(really_delete=False))
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]['path'], test_pathname)
+
+        # Prepare an empty folder.
+        test_dirname = os.path.join(self.tempdir, 'subdir')
+        os.makedirs(test_dirname)
+        self.assertExists(test_dirname)
+        options.set_custom_paths([('folder', test_dirname)])
+
+        # Check it returns the folder now.
+        for cmd in backends['system'].get_commands('custom'):
+            results = list(cmd.execute(really_delete=False))
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]['path'], test_dirname)
+
+        # Restore the original settings.
+        options.set_custom_paths(original_custom_paths)

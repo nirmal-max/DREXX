@@ -1,0 +1,100 @@
+Name: libfsntfs
+Version: @VERSION@
+Release: 1
+Summary: Library to access the New Technology File System (NTFS) format
+Group: System Environment/Libraries
+License: LGPL-3.0-or-later
+Source: %{name}-%{version}.tar.gz
+URL: https://github.com/libyal/libfsntfs
+@libfsntfs_spec_requires@ @ax_libbfio_spec_requires@ @ax_libcdata_spec_requires@ @ax_libcerror_spec_requires@ @ax_libcfile_spec_requires@ @ax_libclocale_spec_requires@ @ax_libcnotify_spec_requires@ @ax_libcpath_spec_requires@ @ax_libcsplit_spec_requires@ @ax_libcthreads_spec_requires@ @ax_libfcache_spec_requires@ @ax_libfdata_spec_requires@ @ax_libfdatetime_spec_requires@ @ax_libfguid_spec_requires@ @ax_libfwnt_spec_requires@ @ax_libuna_spec_requires@
+BuildRequires: gcc @ax_libbfio_spec_build_requires@ @ax_libcdata_spec_build_requires@ @ax_libcerror_spec_build_requires@ @ax_libcfile_spec_build_requires@ @ax_libclocale_spec_build_requires@ @ax_libcnotify_spec_build_requires@ @ax_libcpath_spec_build_requires@ @ax_libcsplit_spec_build_requires@ @ax_libcthreads_spec_build_requires@ @ax_libfcache_spec_build_requires@ @ax_libfdata_spec_build_requires@ @ax_libfdatetime_spec_build_requires@ @ax_libfguid_spec_build_requires@ @ax_libfwnt_spec_build_requires@ @ax_libuna_spec_build_requires@
+
+%description -n libfsntfs
+Library to access the New Technology File System (NTFS) format
+
+%package -n libfsntfs-static
+Summary: Library to access the New Technology File System (NTFS) format
+Group: Development/Libraries
+Requires: libfsntfs = %{version}-%{release}
+
+%description -n libfsntfs-static
+Static library version of libfsntfs.
+
+%package -n libfsntfs-devel
+Summary: Header files and libraries for developing applications for libfsntfs
+Group: Development/Libraries
+Requires: libfsntfs = %{version}-%{release}
+
+%description -n libfsntfs-devel
+Header files and libraries for developing applications for libfsntfs.
+
+%package -n libfsntfs-python3
+Summary: Python 3 bindings for libfsntfs
+Group: System Environment/Libraries
+Requires: libfsntfs = %{version}-%{release} python3
+BuildRequires: python3-devel python3-setuptools
+
+%description -n libfsntfs-python3
+Python 3 bindings for libfsntfs
+
+%package -n libfsntfs-tools
+Summary: Several tools for reading New Technology File System (NTFS) volumes
+Group: Applications/System
+Requires: libfsntfs = %{version}-%{release} @ax_libcrypto_spec_requires@ @ax_libfuse_spec_requires@ @ax_libfusn_spec_requires@ @ax_libhmac_spec_requires@
+@libfsntfs_spec_tools_build_requires@ @ax_libcrypto_spec_build_requires@ @ax_libfuse_spec_build_requires@ @ax_libfusn_spec_build_requires@ @ax_libhmac_spec_build_requires@
+
+%description -n libfsntfs-tools
+Several tools for reading New Technology File System (NTFS) volumes
+
+%prep
+%setup -q
+
+%build
+%configure --prefix=/usr --libdir=%{_libdir} --mandir=%{_mandir} --enable-python
+make %{?_smp_mflags}
+
+%install
+rm -rf %{buildroot}
+%make_install
+
+%clean
+rm -rf %{buildroot}
+
+%post -p /sbin/ldconfig
+
+%postun -p /sbin/ldconfig
+
+%files -n libfsntfs
+%license COPYING COPYING.LESSER
+%doc AUTHORS README
+%{_libdir}/*.so.*
+
+%files -n libfsntfs-static
+%license COPYING COPYING.LESSER
+%doc AUTHORS README
+%{_libdir}/*.a
+
+%files -n libfsntfs-devel
+%license COPYING COPYING.LESSER
+%doc AUTHORS README
+%{_libdir}/*.so
+%{_libdir}/pkgconfig/libfsntfs.pc
+%{_includedir}/*
+%{_mandir}/man3/*
+
+%files -n libfsntfs-python3
+%license COPYING COPYING.LESSER
+%doc AUTHORS README
+%{_libdir}/python3*/site-packages/*.a
+%{_libdir}/python3*/site-packages/*.so
+
+%files -n libfsntfs-tools
+%license COPYING COPYING.LESSER
+%doc AUTHORS README
+%{_bindir}/*
+%{_mandir}/man1/*
+
+%changelog
+* @SPEC_DATE@ Joachim Metz <joachim.metz@gmail.com> @VERSION@-1
+- Auto-generated
+

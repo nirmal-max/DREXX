@@ -1,0 +1,50 @@
+[
+  {
+    "filename": "carved_000000004096.png",
+    "offset": 4096,
+    "size": 281,
+    "sha256": "11fbb38d6f425fd7086f333c50b5008bdd16658e033282e6213cb5287aa70fe1",
+    "type": "png",
+    "truncated": false,
+    "validated": true,
+    "confidence": "HIGH",
+    "reason": "chunk structure walked to IEND",
+    "extracted_to": "D:\\akhanda-demobuild\\recovered\\carved_000000004096.png"
+  },
+  {
+    "filename": "carved_000000008473.jpg",
+    "offset": 8473,
+    "size": 826,
+    "sha256": "06bb067faa42a3ceff95489f1bb50f1d12f28027a3f4d9aa5f87bcaf6e19e492",
+    "type": "jpg",
+    "truncated": false,
+    "validated": true,
+    "confidence": "HIGH",
+    "reason": "structure walked past SOS to EOI",
+    "extracted_to": "D:\\akhanda-demobuild\\recovered\\carved_000000008473.jpg"
+  },
+  {
+    "filename": "carved_000000013395.zip",
+    "offset": 13395,
+    "size": 271,
+    "sha256": "b843498272e9b4bfe492aaf79b146b8e1f9fefb4636a0bf6fddf0c6799a5c9fd",
+    "type": "zip",
+    "truncated": false,
+    "validated": true,
+    "confidence": "MEDIUM",
+    "reason": "valid ZIP local header; extent found by EOCD search",
+    "extracted_to": "D:\\akhanda-demobuild\\recovered\\carved_000000013395.zip"
+  },
+  {
+    "filename": "carved_000000017762.pdf",
+    "offset": 17762,
+    "size": 1427,
+    "sha256": "d0f6a58a134ccc32dc91addecc5973cef73c22ba29eb43162cf289504f6b9293",
+    "type": "pdf",
+    "truncated": false,
+    "validated": true,
+    "confidence": "MEDIUM",
+    "reason": "valid PDF header; extent found by %%EOF search",
+    "extracted_to": "D:\\akhanda-demobuild\\recovered\\carved_000000017762.pdf"
+  }
+]

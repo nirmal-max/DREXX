@@ -1,0 +1,33 @@
+# nvme-discoverd configuration
+# @SYSCONFDIR@/nvme/nvme-discoverd.conf
+#
+# The daemon's own knobs. The connections it manages come from the shared
+# NVMe-oF fabrics configuration (nvme-fabrics.conf(5)), not from here.
+# This file is entirely optional -- every knob below has the shown default,
+# so a missing file (or a missing key) is not an error.
+#
+# Boolean values: yes/no, true/false, 1/0, on/off (case-insensitive).
+
+[Global]
+
+# Adopt and connect controllers listed in the NBFT ACPI table.
+#nbft = true
+
+# Log verbosity for discoverd and the libnvme calls it makes: err, warn,
+# info, or debug (case-insensitive). A command-line --debug overrides this
+# and forces debug.
+#debug-level = info
+
+# FC kickstart interval in minutes.
+# 0 = kickstart only at startup and on every FC controller drop.
+# N (N >= 1) = additionally re-issue kickstart every N minutes, e.g. to
+# detect FC equipment replacement sooner.
+#fc-kickstart-interval-minutes = 0
+
+# How long a dynamically-discovered DC (found only via referral or FC
+# kickstart, not NBFT or the fabrics config) keeps retrying a failed
+# (re)connect before it's dropped from tracking. Takes a systemd time
+# span ("72hours", "3 days 5 hours") or a unit-less value in seconds.
+# "infinity" = never give up, same as a static/NBFT-sourced DC.
+# 0 = give up on the first failure.
+#dc-giveup-timeout = 72hours
