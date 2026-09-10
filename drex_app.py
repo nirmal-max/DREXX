@@ -21,6 +21,8 @@ from tkinter import filedialog, messagebox, ttk
 import tkinter as tk
 from typing import Any, Callable
 
+from recovery_adapter import QuickRecoveryAdapter, RecoveryError, RecoveryScan
+
 
 APP_NAME = "DREX"
 VERSION = "1.0.0"
@@ -159,7 +161,7 @@ def discover_drives() -> list[DriveInfo]:
             p = matching[0]
             model, serial, interface, device_id, status = (p.get(k) for k in ("Model", "SerialNumber", "InterfaceType", "DeviceID", "Status"))
         out.append(DriveInfo(
-            path=letter + "\\", device_path="\\\\." + "\\" + letter,
+            path=letter + "\\", device_path=str(device_id or ""),
             model=str(model).strip() if model else None,
             serial=str(serial).strip() if serial else None,
             capacity=size, interface=str(interface).strip() if interface else None,
@@ -172,10 +174,26 @@ def discover_drives() -> list[DriveInfo]:
     for letter in _drive_letters():
         try:
             usage = shutil.disk_usage(letter + "\\")
-            out.append(DriveInfo(letter + "\\", "\\\\." + "\\" + letter, None, None, usage.total, None, None, None, usage.free, None, None, None))
+            out.append(DriveInfo(letter + "\\", "", None, None, usage.total, None, None, None, usage.free, None, None, None))
         except OSError:
             continue
     return out
+
+
+def get_drive_for_path(folder_path: Path, drives: list[DriveInfo]) -> DriveInfo | None:
+    """Map a selected folder to a discovered logical drive with a physical path."""
+    try:
+        resolved = folder_path.resolve()
+    except OSError:
+        return None
+    for drive in drives:
+        try:
+            root = Path(drive.path).resolve()
+        except OSError:
+            continue
+        if resolved.drive.upper() == root.drive.upper() and drive.device_path.lower().startswith("\\\\.\\physicaldrive"):
+            return drive
+    return None
 
 
 def size_on_disk(path: Path) -> int | None:
@@ -617,6 +635,7 @@ class DrexApp(tk.Tk):
         self.cert_manager = CertificateManager(self.store)
         self.events: queue.Queue[tuple[str, Any]] = queue.Queue()
         self.drives: list[DriveInfo] = []
+        self.quick_recovery = QuickRecoveryAdapter(ROOT, Path(getattr(sys, "_MEIPASS", ROOT)))
         self.current_page = "Dashboard"
         self.page: tk.Frame | None = None
         self.method_var = tk.StringVar()
@@ -1099,16 +1118,11 @@ class DrexApp(tk.Tk):
             # Button row
             btn_frame = tk.Frame(left, bg="white")
             btn_frame.pack(anchor="w", fill="x", pady=(10, 0))
-            ttk.Button(
-                btn_frame, text="Add File",
-                style="DrexPrimary.TButton",
-                command=self.choose_file,
-            ).pack(side="left")
-            ttk.Button(
-                btn_frame, text="Add Folder",
-                style="Drex.TButton",
-                command=self.choose_folder,
-            ).pack(side="left", padx=(8, 0))
+            if kind == "recovery":
+                ttk.Button(btn_frame, text="Select Recovery Folder", style="DrexPrimary.TButton", command=self.choose_folder).pack(side="left")
+            else:
+                ttk.Button(btn_frame, text="Add File", style="DrexPrimary.TButton", command=self.choose_file).pack(side="left")
+                ttk.Button(btn_frame, text="Add Folder", style="Drex.TButton", command=self.choose_folder).pack(side="left", padx=(8, 0))
             # Target type badge updated by set_target()
             self.target_type_label = tk.Label(
                 btn_frame, text="",
@@ -1244,7 +1258,7 @@ class DrexApp(tk.Tk):
                 method_id, name, assurance = item["id"], item["name"], item["assurance"]
 
             # Get availability status for non-recovery methods
-            status_text, status_reason = self._method_status(method_id, kind) if kind != "recovery" else ("Available", "")
+            status_text, status_reason = self._method_status(method_id, kind)
             is_available = status_text == "Available"
 
             card = tk.Frame(grid, bg="white", highlightbackground=LINE, highlightthickness=1)
@@ -1276,6 +1290,9 @@ class DrexApp(tk.Tk):
             if kind == "drive" and status_text not in ("Available", ""):
                 tk.Label(text_frame, text="Needs Hardware", font=("Segoe UI", 7), fg="white",
                          bg=ORANGE, padx=4, pady=1).pack(anchor="w", pady=(3, 0))
+            if kind == "recovery" and not is_available:
+                tk.Label(text_frame, text="Not integrated", font=("Segoe UI", 7), fg="white",
+                         bg="#b0b0b0", padx=4, pady=1).pack(anchor="w", pady=(3, 0))
             # Checkbox
             cb = tk.Canvas(top_row, width=20, height=20, bg="white", highlightthickness=0)
             cb.pack(side="right", padx=(6, 0))
@@ -1306,7 +1323,7 @@ class DrexApp(tk.Tk):
         # Start button
         btn_frame = tk.Frame(box, bg="white")
         btn_frame.pack(fill="x", padx=18, pady=(4, 12))
-        self.start_button = ttk.Button(btn_frame, text="Start Operation", style="DrexPrimary.TButton", command=lambda k=kind: self.start_operation(k))
+        self.start_button = ttk.Button(btn_frame, text="Start Recovery" if kind == "recovery" else "Start Operation", style="DrexPrimary.TButton", command=lambda k=kind: self.start_operation(k))
         self.start_button.pack(side="right")
 
     def _draw_method_icon(self, canvas, method_id, kind):
@@ -1402,7 +1419,11 @@ class DrexApp(tk.Tk):
             return "Unavailable on this target", ""
         if kind == "drive":
             return drive_method_status(method_id, self.selected_drive)
-        return ("Native engine not built" if self.native_engine_count() == 0 else "Available", "")
+        if kind == "recovery":
+            if method_id == "quick":
+                return ("Available", "") if self.quick_recovery.available else ("Unavailable", "Quick Recovery engine is not built/installed.")
+            return "Unavailable", "This recovery method is not integrated in the current build."
+        return "Unavailable", "Unknown operation type."
 
     # ── Operation Area ──────────────────────────────────────────────
     def _operation_area(self, label: str):
@@ -1428,6 +1449,17 @@ class DrexApp(tk.Tk):
         tk.Label(result_inner, text="Select a target and method\nto begin an operation", font=("Segoe UI", 9), fg=MUTED, bg="white", justify="center").pack(pady=(4, 0))
         self.view_cert_button = ttk.Button(result_inner, text="📋 View Certificate", style="Drex.TButton", state="disabled")
         self.view_cert_button.pack(pady=(10, 0))
+        self.recovery_tree = None
+        if label == "Recovery Log":
+            results = self._card(self.page)
+            results.pack(fill="x", padx=28, pady=(8, 0))
+            tk.Label(results, text="Recoverable Candidates", font=("Segoe UI", 11, "bold"), fg=INK, bg="white").pack(anchor="w", padx=12, pady=(10, 4))
+            tk.Label(results, text="Candidates are reported by the scanned backing device; they are not assumed to belong to the selected folder.", font=("Segoe UI", 8), fg=MUTED, bg="white", wraplength=900, justify="left").pack(anchor="w", padx=12, pady=(0, 6))
+            self.recovery_tree = ttk.Treeview(results, columns=("id", "name", "filesystem", "size", "deleted", "confidence"), show="headings", height=4, style="Drex.Treeview")
+            for col, heading in (("id", "Candidate ID"), ("name", "Name"), ("filesystem", "Filesystem"), ("size", "Size"), ("deleted", "Deleted"), ("confidence", "Confidence")):
+                self.recovery_tree.heading(col, text=heading)
+                self.recovery_tree.column(col, width=120, anchor="w")
+            self.recovery_tree.pack(fill="x", padx=12, pady=(0, 12))
         # Progress bar
         self.progress = ttk.Progressbar(self.page, variable=self.progress_value, maximum=100, style="Drex.Horizontal.TProgressbar")
         self.progress.pack(fill="x", padx=28, pady=(8, 4))
@@ -1892,6 +1924,29 @@ class DrexApp(tk.Tk):
         if not self.target:
             messagebox.showwarning("Select a target", "Choose a file, folder, or recovery image before starting.")
             return
+        if kind == "recovery":
+            if not self.target.is_dir():
+                messagebox.showerror("Invalid recovery folder", "Select a folder. Recovery uses the folder to identify its backing storage device.")
+                return
+            availability, reason = self._method_status(method_id, kind)
+            if availability != "Available":
+                messagebox.showerror("Recovery engine unavailable", reason)
+                return
+            drive = get_drive_for_path(self.target, self.drives)
+            if drive is None:
+                messagebox.showerror("Physical source unavailable", "DREX could not map the selected folder to a PhysicalDrive source. No scan was started.")
+                return
+            self.progress_value.set(0)
+            self.cancel_event.clear()
+            self.status_label.configure(text="SCANNING", fg=BLUE)
+            self.append_log(f"Recovery folder selected: {self.target}")
+            self.append_log(f"Mapped logical drive to read-only source: {drive.device_path}")
+            self.append_log("Quick Recovery scan starting; no data will be written to the source.")
+            self.start_button.configure(state="disabled")
+            self.cancel_button.configure(state="normal")
+            thread = threading.Thread(target=self._run_recovery_scan, args=(method_id, self.target, drive.device_path), daemon=True)
+            thread.start()
+            return
         if kind == "file":
             availability, reason = self._method_status(method_id, kind)
             if availability != "Available":
@@ -1901,9 +1956,6 @@ class DrexApp(tk.Tk):
             if issue:
                 messagebox.showerror("Unsafe target", issue)
                 return
-        if kind == "recovery":
-            messagebox.showerror("Recovery engine unavailable", "The selected native recovery engine is not built in this environment. DREX will not claim a recovery result.")
-            return
         label = next((m["name"] for m in FILE_METHODS if m["id"] == method_id), method_id)
         if not messagebox.askyesno("Confirm destructive operation", f"This action may permanently change:\n\n{self.target}\n\nMethod: {label}\n\nContinue only if the target and method are correct."):
             return
@@ -1917,6 +1969,27 @@ class DrexApp(tk.Tk):
             self.cancel_button.configure(state="normal")
         thread = threading.Thread(target=self._run_file_operation, args=(method_id, self.target, label), daemon=True)
         thread.start()
+
+    def _run_recovery_scan(self, method_id: str, target: Path, source: str):
+        started = utc_now()
+        label = next((name for mid, name, _ in RECOVERY_METHODS if mid == method_id), method_id)
+        record = {"type": "recovery", "method": label, "target": str(target), "source": source, "started": started}
+        try:
+            scan = self.quick_recovery.scan(source, cancel=self.cancel_event.is_set)
+            if self.cancel_event.is_set():
+                raise RecoveryError("Recovery scan cancelled by the user.")
+            self.events.put(("recovery_scan", scan))
+            completed = utc_now()
+            record.update({"completed": completed, "duration": self._duration(started, completed), "status": "SUCCESS", "verification": "SCAN VERIFIED", "candidate_count": len(scan.candidates), "recovered_count": 0, "warnings": list(scan.warnings)})
+            self.events.put(("result", ("SCAN COMPLETE", f"Quick Recovery completed against {source}. Candidates discovered: {len(scan.candidates)}. Select a candidate and destination for recovery.")))
+        except Exception as exc:
+            completed = utc_now()
+            cancelled = self.cancel_event.is_set() or "cancelled" in str(exc).lower()
+            record.update({"completed": completed, "duration": self._duration(started, completed), "status": "CANCELLED" if cancelled else "FAILED", "verification": "Not completed", "error": str(exc), "candidate_count": 0, "recovered_count": 0})
+            status = "OPERATION CANCELLED" if cancelled else "OPERATION FAILED"
+            self.events.put(("result", (status, f"{'Operation Cancelled' if cancelled else 'Operation Failed'}\nMethod: {label}\nTarget: {target}\nStage: native recovery scan\nActual reason: {type(exc).__name__}: {exc}")))
+        self.store.add_history(record)
+        self.events.put(("finished", None))
 
     def cancel_operation(self):
         if self.status_label and self.status_label.cget("text") == "RUNNING":
@@ -1989,6 +2062,16 @@ class DrexApp(tk.Tk):
                     done, total = value
                     if total > 0:
                         self.progress_value.set(min(99.0, done * 100 / total))
+                elif kind == "recovery_scan":
+                    scan: RecoveryScan = value
+                    if self.recovery_tree and self.recovery_tree.winfo_exists():
+                        for item in self.recovery_tree.get_children():
+                            self.recovery_tree.delete(item)
+                        for candidate in scan.candidates:
+                            size = fmt_bytes(candidate.size) if candidate.size is not None else "Unknown"
+                            deleted = "Yes" if candidate.deleted is True else "No" if candidate.deleted is False else "Unknown"
+                            confidence = f"{candidate.confidence:.0%}" if candidate.confidence is not None and candidate.confidence <= 1 else f"{candidate.confidence:.0f}%" if candidate.confidence is not None else "Unknown"
+                            self.recovery_tree.insert("", "end", values=(candidate.candidate_id, candidate.name, candidate.filesystem, size, deleted, confidence))
                 elif kind == "result":
                     status, detail = value
                     color = GREEN_DARK if status == "SUCCESS" else (MUTED if "CANCELLED" in status else RED)
