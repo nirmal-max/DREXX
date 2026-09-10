@@ -1385,6 +1385,7 @@
   ('queue', 'C:\\Users\\NIRMAL KUMAR\\Lib\\queue.py', 'PYMODULE'),
   ('quopri', 'C:\\Users\\NIRMAL KUMAR\\Lib\\quopri.py', 'PYMODULE'),
   ('random', 'C:\\Users\\NIRMAL KUMAR\\Lib\\random.py', 'PYMODULE'),
+  ('recovery_adapter', 'D:\\DREX\\recovery_adapter.py', 'PYMODULE'),
   ('reportlab',
    'C:\\Users\\NIRMAL '
    'KUMAR\\AppData\\Roaming\\Python\\Python314\\site-packages\\reportlab\\__init__.py',
