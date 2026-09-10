@@ -10,9 +10,12 @@ New-Item -ItemType Directory -Path $BuildRoot -Force | Out-Null
 
 py -m py_compile (Join-Path $ProjectRoot "drex_app.py")
 $MethodsData = (Join-Path $ProjectRoot "methods") + ";methods"
+$NativeBin = Join-Path $ProjectRoot "native_bin"
+$DataArgs = @("--add-data", $MethodsData)
+if (Test-Path $NativeBin) { $DataArgs += @("--add-data", ($NativeBin + ";native_bin")) }
 py -m PyInstaller --noconfirm --clean --windowed --onefile `
   --name DREX `
-  --add-data $MethodsData `
+  @DataArgs `
   --distpath $DistRoot `
   --workpath $PyInstallerRoot `
   --specpath $BuildRoot `

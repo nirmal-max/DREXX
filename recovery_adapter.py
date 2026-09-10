@@ -1,8 +1,10 @@
-"""Adapters for DREX native recovery engines.
+"""Adapters and dispatch for the local DREX recovery engines.
 
-Only Quick Recovery is wired in this release.  The adapter deliberately fails
-closed when the native executable is absent or when the source is not a raw
-image/physical-device path.
+The C++ modules under ``methods/Recovery`` are the source of truth.  This
+layer only discovers packaged/build outputs, validates raw read-only sources,
+and normalizes engine results.  Missing native binaries fail closed with an
+actionable reason; a card is never considered available merely because its
+module directory exists.
 """
 
 from __future__ import annotations
@@ -41,18 +43,46 @@ class RecoveryScan:
     raw: dict[str, Any]
 
 
-def find_quickscan(root: Path, meipass: Path | None = None) -> Path | None:
+@dataclass(frozen=True)
+class RecoveryMethodSpec:
+    method_id: str
+    display_name: str
+    module_dir: str
+    executable_names: tuple[str, ...]
+    native_contract: str
+
+
+def _search_native(root: Path, meipass: Path | None, module_dir: str, names: tuple[str, ...]) -> Path | None:
     roots = [
-        root / "native_bin" / "quickscan.exe",
-        root / "methods" / "Recovery" / "Module1_Quick_Recovery_Production_Baseline_v0.1.0" / "module1_quick_recovery" / "build" / "Release" / "quickscan.exe",
-        root / "methods" / "Recovery" / "Module1_Quick_Recovery_Production_Baseline_v0.1.0" / "module1_quick_recovery" / "build" / "quickscan.exe",
+        root / "native_bin",
+        root / "methods" / "Recovery" / module_dir / "build" / "Release",
+        root / "methods" / "Recovery" / module_dir / "build",
     ]
     if meipass:
-        roots.insert(0, meipass / "native_bin" / "quickscan.exe")
-    for candidate in roots:
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            return candidate
+        roots.insert(0, meipass / "native_bin")
+    for directory in roots:
+        for name in names:
+            candidate = directory / name
+            if candidate.is_file():
+                return candidate
     return None
+
+
+def find_quickscan(root: Path, meipass: Path | None = None) -> Path | None:
+    return _search_native(root, meipass, "Module1_Quick_Recovery_Production_Baseline_v0.1.0", ("quickscan.exe",))
+
+
+RECOVERY_METHOD_SPECS: tuple[RecoveryMethodSpec, ...] = (
+    RecoveryMethodSpec("quick", "Quick Recovery", "Module1_Quick_Recovery_Production_Baseline_v0.1.0", ("quickscan.exe",), "--source <image|\\\\.\\PhysicalDriveN> [--output result.json] [--recover-candidate N --destination DIR]"),
+    RecoveryMethodSpec("smart", "Smart Recovery", "Module2_Smart_Recovery_Production_Baseline_v0.1.0", ("smartscan.exe",), "--source <image|PhysicalDrive> [--output result.json]"),
+    RecoveryMethodSpec("targeted", "Targeted Recovery", "Module3_Targeted_Recovery_Production_Baseline_v0.1.0", ("targetedscan.exe",), "--source <image|PhysicalDrive> [--types ...] [--output result.json]"),
+    RecoveryMethodSpec("filesystem", "Filesystem Recovery", "Module4_Filesystem_Recovery_Production_Baseline_v0.1.0", ("fsrecover.exe",), "--source <image|PhysicalDrive> [--output result.json]"),
+    RecoveryMethodSpec("deep", "Deep Recovery", "Module5_Deep_Recovery_Production_Baseline_v0.1.0", ("deepscan.exe",), "--source <image> [--output result.json]"),
+    RecoveryMethodSpec("fragment", "Fragment Recovery", "Module6_Fragment_Recovery_Production_Baseline_v0.1.0", ("fragmentscan.exe",), "--source <image> --type pdf|jpeg|png|zip [--output result.json]"),
+    RecoveryMethodSpec("raid", "Storage / RAID Recovery", "Module7_Storage_RAID_Recovery_Production_Baseline_v0.1.0", ("raidscan.exe",), "--level ... --members ... [--output result.json]"),
+    RecoveryMethodSpec("damaged", "Damaged Media Recovery", "Module8_Damaged_Media_Recovery_Production_Baseline_v0.1.0", ("mediaimager.exe",), "--source input --output image --map map [--report json]"),
+    RecoveryMethodSpec("forensic", "Forensic Recovery", "Module9_Forensic_Recovery_Production_Baseline_v0.1.0", ("forensicctl.exe",), "forensic case/evidence command contract; no scan adapter is claimed without the native binary"),
+)
 
 
 def parse_scan_result(payload: dict[str, Any]) -> RecoveryScan:
@@ -144,4 +174,51 @@ class QuickRecoveryAdapter:
         outputs = [p for p in destination.rglob("*") if p.is_file()]
         if not outputs:
             raise RecoveryError("Recovery engine reported success but produced no readable output.")
-        return outputs[0]
+            return outputs[0]
+
+
+class NativeRecoveryAdapter:
+    """Availability record for a module whose native contract is not Quick's.
+
+    We intentionally do not invent a command line or result schema.  Such a
+    module becomes runnable only when its native binary and a matching adapter
+    are present; otherwise the UI reports the exact local binary requirement.
+    """
+
+    def __init__(self, spec: RecoveryMethodSpec, root: Path, meipass: Path | None = None):
+        self.spec = spec
+        self.executable = _search_native(root, meipass, spec.module_dir, spec.executable_names)
+
+    @property
+    def available(self) -> bool:
+        return self.executable is not None
+
+    @property
+    def unavailable_reason(self) -> str:
+        if self.executable is not None:
+            return "Native executable is present, but this module requires its dedicated result adapter before it can be exposed as runnable."
+        return f"{self.spec.display_name} engine is not built/installed. Expected one of: {', '.join(self.spec.executable_names)}."
+
+
+class RecoveryDispatcher:
+    """Central method-id → local module adapter registry."""
+
+    def __init__(self, root: Path, meipass: Path | None = None):
+        self.adapters: dict[str, Any] = {}
+        for spec in RECOVERY_METHOD_SPECS:
+            if spec.method_id == "quick":
+                self.adapters[spec.method_id] = QuickRecoveryAdapter(root, meipass)
+            else:
+                self.adapters[spec.method_id] = NativeRecoveryAdapter(spec, root, meipass)
+
+    def get(self, method_id: str) -> Any:
+        try:
+            return self.adapters[method_id]
+        except KeyError as exc:
+            raise RecoveryError(f"Unknown recovery method: {method_id}") from exc
+
+    def status(self, method_id: str) -> tuple[str, str]:
+        adapter = self.get(method_id)
+        if isinstance(adapter, QuickRecoveryAdapter):
+            return ("Available", "") if adapter.available else ("Unavailable", "Quick Recovery engine is not built/installed. Expected quickscan.exe.")
+        return ("Unavailable", adapter.unavailable_reason)
