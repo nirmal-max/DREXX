@@ -44,7 +44,7 @@ def test_method_specific_json_shapes_are_normalized():
     assert targeted.candidates[0].candidate_id == "7"
     assert targeted.candidates[0].filesystem == "PDF"
     deep = parse_scan_result({"status": "complete", "candidates": [{"filesystem": "NTFS", "declared_size": 42, "score": 80}]}, "Deep Recovery")
-    assert deep.candidates[0].candidate_id == "1"
+    assert len(deep.candidates) == 0
 
 
 def test_official_backend_status_fails_closed_without_installed_binaries(tmp_path: Path):

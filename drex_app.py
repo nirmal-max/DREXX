@@ -1539,11 +1539,14 @@ class DrexApp(tk.Tk):
             if self.cancel_event.is_set():
                 break
             try:
-                output = adapter.recover(self._recovery_source, candidate.candidate_id, destination)
-                if not Path(output).is_file():
-                    raise RecoveryError("Adapter returned a non-file output.")
+                outputs = adapter.recover(self._recovery_source, candidate.candidate_id, destination)
+                if not outputs:
+                    raise RecoveryError("Adapter returned no outputs.")
+                for output in outputs:
+                    if not Path(output).is_file():
+                        raise RecoveryError("Adapter returned a non-file output.")
+                    self.events.put(("log", f"Recovered candidate {candidate.candidate_id}: {output}"))
                 recovered += 1
-                self.events.put(("log", f"Recovered candidate {candidate.candidate_id}: {output}"))
             except Exception as exc:
                 failures.append(f"{candidate.candidate_id}: {type(exc).__name__}: {exc}")
         completed = utc_now()

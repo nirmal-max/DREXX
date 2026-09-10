@@ -104,14 +104,19 @@ def parse_scan_result(payload: dict[str, Any], module: str = "Quick Recovery") -
     if not isinstance(raw_candidates, list):
         raise RecoveryError(f"{module} returned an invalid candidate/result field.")
     candidates: list[RecoveryCandidate] = []
+    seen_ids: set[str] = set()
     for index, item in enumerate(raw_candidates, start=1):
         if not isinstance(item, dict):
             continue
         candidate_id = item.get("id")
-        if candidate_id is None and module == "Deep Recovery":
-            candidate_id = index
         if candidate_id is None:
             continue
+        
+        cid_str = str(candidate_id)
+        if cid_str in seen_ids:
+            continue
+        seen_ids.add(cid_str)
+        
         candidates.append(RecoveryCandidate(
             candidate_id=str(candidate_id),
             name=str(item.get("name") or item.get("type") or "Unknown"),
@@ -122,8 +127,10 @@ def parse_scan_result(payload: dict[str, Any], module: str = "Quick Recovery") -
             raw=item,
             original_path=item.get("path") or item.get("original_path"),
             file_type=item.get("file_type") or item.get("type"),
-            source_offset=int(item["offset"]) if isinstance(item.get("offset"), (int, float)) else None,
-            recoverable=item.get("recoverable") if isinstance(item.get("recoverable"), bool) else True,
+            source_offset=int(item["offset"]) if "offset" in item and isinstance(item.get("offset"), (int, float)) else None,
+            source_device=str(item["source_device"]) if "source_device" in item else None,
+            source_partition=str(item["source_partition"]) if "source_partition" in item else None,
+            recoverable=item.get("recoverable") if isinstance(item.get("recoverable"), bool) else None,
             backend=module,
         ))
     return RecoveryScan(
@@ -165,7 +172,7 @@ def _run_native(command: list[str], cancel: Callable[[], bool] | None, timeout: 
     return stdout, stderr
 
 
-def _recover_native_candidate(adapter: Any, source: str, candidate_id: str, destination: Path, recover_switch: list[str], timeout: int) -> Path:
+def _recover_native_candidate(adapter: Any, source: str, candidate_id: str, destination: Path, recover_switch: list[str], timeout: int) -> list[Path]:
     if adapter.executable is None:
         raise RecoveryError(adapter.unavailable_reason)
     if not candidate_id.isdigit():
@@ -177,7 +184,7 @@ def _recover_native_candidate(adapter: Any, source: str, candidate_id: str, dest
     outputs = [path for path in destination.rglob("*") if path.is_file()]
     if not outputs:
         raise RecoveryError(f"{adapter.spec.display_name} reported success but produced no output file.")
-    return outputs[0]
+    return outputs
 
 
 class QuickRecoveryAdapter:
@@ -205,10 +212,7 @@ class QuickRecoveryAdapter:
         self.validate_source(source)
         with tempfile.TemporaryDirectory(prefix="drex-quickscan-") as temp:
             result_path = Path(temp) / "result.json"
-            stdout, stderr = _run_native([str(exe), "--source", source, "--output", str(result_path)], cancel, timeout, "Quick Recovery")
-            if proc.returncode != 0:
-                detail = (stderr or stdout).strip() or f"native exit code {proc.returncode}"
-                raise RecoveryError(f"Quick Recovery engine failed: {detail}")
+            _run_native([str(exe), "--source", source, "--output", str(result_path)], cancel, timeout, "Quick Recovery")
             if not result_path.is_file():
                 raise RecoveryError("Quick Recovery completed without producing a JSON result.")
             try:
@@ -217,7 +221,7 @@ class QuickRecoveryAdapter:
                 raise RecoveryError(f"Quick Recovery returned invalid JSON: {exc}") from exc
             return parse_scan_result(payload, "Quick Recovery")
 
-    def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> Path:
+    def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> list[Path]:
         exe = self.require_executable()
         self.validate_source(source)
         if not candidate_id or not candidate_id.isdigit():
@@ -227,7 +231,7 @@ class QuickRecoveryAdapter:
         outputs = [p for p in destination.rglob("*") if p.is_file()]
         if not outputs:
             raise RecoveryError("Recovery engine reported success but produced no readable output.")
-        return outputs[0]
+        return outputs
 
 
 class NativeRecoveryAdapter:
@@ -279,7 +283,7 @@ class JsonScanAdapter(NativeRecoveryAdapter):
 
 
 class SmartRecoveryAdapter(JsonScanAdapter):
-    def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> Path:
+    def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> list[Path]:
         return _recover_native_candidate(self, source, candidate_id, destination, ["--recover-candidate"] , timeout)
 
 
@@ -287,7 +291,7 @@ class TargetedRecoveryAdapter(JsonScanAdapter):
     def scan_command(self, source: str, result_path: Path) -> list[str]:
         return [str(self.executable), "--source", source, "--output", str(result_path)]
 
-    def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> Path:
+    def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> list[Path]:
         return _recover_native_candidate(self, source, candidate_id, destination, ["--recover"], timeout)
 
 
@@ -303,7 +307,7 @@ class FragmentRecoveryAdapter(JsonScanAdapter):
     def scan_command(self, source: str, result_path: Path) -> list[str]:
         raise RecoveryError("Fragment Recovery requires an explicit file type (pdf, jpeg, png, or zip) before scanning.")
 
-    def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> Path:
+    def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> list[Path]:
         return _recover_native_candidate(self, source, candidate_id, destination, ["--recover"], timeout)
 
 

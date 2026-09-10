@@ -24,8 +24,8 @@ class BackendSpec:
 
 BACKENDS = {
     "testdisk": BackendSpec("testdisk", "https://github.com/cgsecurity/testdisk", ("testdisk.exe", "testdisk_win.exe"), "GNU GPL v2"),
-    "photorec": BackendSpec("photorec", "https://github.com/cgsecurity/testdisk", ("photorec.exe", "photorec_win.exe"), "GNU GPL v2"),
-    "tsk": BackendSpec("tsk", "https://github.com/sleuthkit/sleuthkit", ("fls.exe", "fsstat.exe", "icat.exe"), "Mixed upstream licenses; see TSK licenses directory"),
+    "photorec": BackendSpec("photorec", "https://github.com/cgsecurity/testdisk", ("photorec.exe", "photorec_win.exe", "fidentify.exe"), "GNU GPL v2"),
+    "tsk": BackendSpec("tsk", "https://github.com/sleuthkit/sleuthkit", ("fls.exe", "fsstat.exe", "icat.exe", "tsk_recover.exe", "mmls.exe"), "Mixed upstream licenses; see TSK licenses directory"),
     "ddrescue": BackendSpec("ddrescue", "https://savannah.gnu.org/git/?group=ddrescue", ("ddrescue.exe", "ddrescue"), "GNU GPL"),
     "autopsy": BackendSpec("autopsy", "https://github.com/sleuthkit/autopsy", ("autopsy.exe",), "Apache License 2.0 / bundled component licenses"),
 }
