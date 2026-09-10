@@ -36,3 +36,11 @@ def test_all_recovery_methods_are_registered_to_distinct_local_modules(tmp_path:
         status, reason = dispatcher.status(spec.method_id)
         assert status == "Unavailable"
         assert spec.display_name in reason or spec.method_id == "quick"
+
+
+def test_method_specific_json_shapes_are_normalized():
+    targeted = parse_scan_result({"status": "success", "candidates": [{"id": 7, "type": "PDF", "size": 12, "confidence": 88}]}, "Targeted Recovery")
+    assert targeted.candidates[0].candidate_id == "7"
+    assert targeted.candidates[0].filesystem == "PDF"
+    deep = parse_scan_result({"status": "complete", "candidates": [{"filesystem": "NTFS", "declared_size": 42, "score": 80}]}, "Deep Recovery")
+    assert deep.candidates[0].candidate_id == "1"

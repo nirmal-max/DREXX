@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -85,20 +86,25 @@ RECOVERY_METHOD_SPECS: tuple[RecoveryMethodSpec, ...] = (
 )
 
 
-def parse_scan_result(payload: dict[str, Any]) -> RecoveryScan:
+def parse_scan_result(payload: dict[str, Any], module: str = "Quick Recovery") -> RecoveryScan:
     if not isinstance(payload, dict):
-        raise RecoveryError("Quick Recovery returned a non-object JSON result.")
-    raw_candidates = payload.get("candidates", [])
+        raise RecoveryError(f"{module} returned a non-object JSON result.")
+    raw_candidates = payload.get("candidates", payload.get("objects", payload.get("chains", [])))
     if not isinstance(raw_candidates, list):
-        raise RecoveryError("Quick Recovery returned an invalid candidates field.")
+        raise RecoveryError(f"{module} returned an invalid candidate/result field.")
     candidates: list[RecoveryCandidate] = []
-    for item in raw_candidates:
-        if not isinstance(item, dict) or "id" not in item:
+    for index, item in enumerate(raw_candidates, start=1):
+        if not isinstance(item, dict):
+            continue
+        candidate_id = item.get("id")
+        if candidate_id is None and module == "Deep Recovery":
+            candidate_id = index
+        if candidate_id is None:
             continue
         candidates.append(RecoveryCandidate(
-            candidate_id=str(item["id"]),
-            name=str(item.get("name") or "Unknown"),
-            filesystem=str(item.get("filesystem") or "Unknown"),
+            candidate_id=str(candidate_id),
+            name=str(item.get("name") or item.get("type") or "Unknown"),
+            filesystem=str(item.get("filesystem") or item.get("type") or "Unknown"),
             size=int(item["size"]) if isinstance(item.get("size"), (int, float)) else None,
             deleted=item.get("deleted") if isinstance(item.get("deleted"), bool) else None,
             confidence=float(item["confidence"]) if isinstance(item.get("confidence"), (int, float)) else None,
@@ -112,6 +118,49 @@ def parse_scan_result(payload: dict[str, Any]) -> RecoveryScan:
         warnings=tuple(str(x) for x in payload.get("warnings", []) if x is not None),
         raw=payload,
     )
+
+
+def _run_native(command: list[str], cancel: Callable[[], bool] | None, timeout: int, module: str) -> tuple[str, str]:
+    """Run one native command while polling cancellation and enforcing timeout."""
+    try:
+        proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    except OSError as exc:
+        raise RecoveryError(f"{module} could not start: {exc}") from exc
+    started = time.monotonic()
+    while proc.poll() is None:
+        if cancel and cancel():
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            raise RecoveryError(f"{module} scan cancelled by the user.")
+        if time.monotonic() - started >= timeout:
+            proc.kill()
+            proc.wait()
+            raise RecoveryError(f"{module} timed out after {timeout} seconds.")
+        time.sleep(0.05)
+    stdout, stderr = proc.communicate()
+    if proc.returncode != 0:
+        detail = (stderr or stdout).strip() or f"native exit code {proc.returncode}"
+        raise RecoveryError(f"{module} failed: {detail}")
+    return stdout, stderr
+
+
+def _recover_native_candidate(adapter: Any, source: str, candidate_id: str, destination: Path, recover_switch: list[str], timeout: int) -> Path:
+    if adapter.executable is None:
+        raise RecoveryError(adapter.unavailable_reason)
+    if not candidate_id.isdigit():
+        raise RecoveryError("Candidate ID is invalid.")
+    if not (source.startswith("\\\\.\\PhysicalDrive") or Path(source).is_file()):
+        raise RecoveryError(f"{adapter.spec.display_name} requires a raw image or PhysicalDrive source.")
+    destination.mkdir(parents=True, exist_ok=True)
+    _run_native([str(adapter.executable), "--source", source, *recover_switch, candidate_id, "--destination", str(destination)], None, timeout, f"{adapter.spec.display_name} candidate recovery")
+    outputs = [path for path in destination.rglob("*") if path.is_file()]
+    if not outputs:
+        raise RecoveryError(f"{adapter.spec.display_name} reported success but produced no output file.")
+    return outputs[0]
 
 
 class QuickRecoveryAdapter:
@@ -139,17 +188,7 @@ class QuickRecoveryAdapter:
         self.validate_source(source)
         with tempfile.TemporaryDirectory(prefix="drex-quickscan-") as temp:
             result_path = Path(temp) / "result.json"
-            proc = subprocess.Popen([str(exe), "--source", source, "--output", str(result_path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            try:
-                stdout, stderr = proc.communicate(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.communicate()
-                raise RecoveryError("Quick Recovery scan timed out.")
-            if cancel and cancel():
-                if proc.poll() is None:
-                    proc.terminate()
-                raise RecoveryError("Recovery scan cancelled by the user.")
+            stdout, stderr = _run_native([str(exe), "--source", source, "--output", str(result_path)], cancel, timeout, "Quick Recovery")
             if proc.returncode != 0:
                 detail = (stderr or stdout).strip() or f"native exit code {proc.returncode}"
                 raise RecoveryError(f"Quick Recovery engine failed: {detail}")
@@ -159,7 +198,7 @@ class QuickRecoveryAdapter:
                 payload = json.loads(result_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError) as exc:
                 raise RecoveryError(f"Quick Recovery returned invalid JSON: {exc}") from exc
-            return parse_scan_result(payload)
+            return parse_scan_result(payload, "Quick Recovery")
 
     def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> Path:
         exe = self.require_executable()
@@ -167,23 +206,15 @@ class QuickRecoveryAdapter:
         if not candidate_id or not candidate_id.isdigit():
             raise RecoveryError("Candidate ID is invalid.")
         destination.mkdir(parents=True, exist_ok=True)
-        proc = subprocess.run([str(exe), "--source", source, "--recover-candidate", candidate_id, "--destination", str(destination)], capture_output=True, text=True, timeout=timeout, check=False)
-        if proc.returncode != 0:
-            detail = (proc.stderr or proc.stdout).strip() or f"native exit code {proc.returncode}"
-            raise RecoveryError(f"Candidate recovery failed: {detail}")
+        _run_native([str(exe), "--source", source, "--recover-candidate", candidate_id, "--destination", str(destination)], None, timeout, "Quick Recovery candidate recovery")
         outputs = [p for p in destination.rglob("*") if p.is_file()]
         if not outputs:
             raise RecoveryError("Recovery engine reported success but produced no readable output.")
-            return outputs[0]
+        return outputs[0]
 
 
 class NativeRecoveryAdapter:
-    """Availability record for a module whose native contract is not Quick's.
-
-    We intentionally do not invent a command line or result schema.  Such a
-    module becomes runnable only when its native binary and a matching adapter
-    are present; otherwise the UI reports the exact local binary requirement.
-    """
+    """Base for method-specific native adapters."""
 
     def __init__(self, spec: RecoveryMethodSpec, root: Path, meipass: Path | None = None):
         self.spec = spec
@@ -196,8 +227,79 @@ class NativeRecoveryAdapter:
     @property
     def unavailable_reason(self) -> str:
         if self.executable is not None:
-            return "Native executable is present, but this module requires its dedicated result adapter before it can be exposed as runnable."
+            return "Native executable is present, but this method requires configuration not available in the folder workflow."
         return f"{self.spec.display_name} engine is not built/installed. Expected one of: {', '.join(self.spec.executable_names)}."
+
+    def status(self) -> tuple[str, str]:
+        return ("Unavailable", self.unavailable_reason)
+
+
+class JsonScanAdapter(NativeRecoveryAdapter):
+    """Adapter for engines that accept a source and emit a JSON report."""
+
+    def scan(self, source: str, cancel: Callable[[], bool] | None = None, timeout: int = 86400) -> RecoveryScan:
+        if self.executable is None:
+            raise RecoveryError(self.unavailable_reason)
+        if not (source.startswith("\\\\.\\PhysicalDrive") or Path(source).is_file()):
+            raise RecoveryError(f"{self.spec.display_name} requires a raw image or PhysicalDrive source.")
+        with tempfile.TemporaryDirectory(prefix=f"drex-{self.spec.method_id}-") as temp:
+            result_path = Path(temp) / "result.json"
+            command = self.scan_command(source, result_path)
+            _run_native(command, cancel, timeout, self.spec.display_name)
+            if not result_path.is_file():
+                raise RecoveryError(f"{self.spec.display_name} completed without producing a JSON result.")
+            try:
+                payload = json.loads(result_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise RecoveryError(f"{self.spec.display_name} returned invalid JSON: {exc}") from exc
+            return parse_scan_result(payload, self.spec.display_name)
+
+    def scan_command(self, source: str, result_path: Path) -> list[str]:
+        return [str(self.executable), "--source", source, "--output", str(result_path)]
+
+    def status(self) -> tuple[str, str]:
+        return ("Available", "") if self.executable is not None else ("Unavailable", self.unavailable_reason)
+
+
+class SmartRecoveryAdapter(JsonScanAdapter):
+    def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> Path:
+        return _recover_native_candidate(self, source, candidate_id, destination, ["--recover-candidate"] , timeout)
+
+
+class TargetedRecoveryAdapter(JsonScanAdapter):
+    def scan_command(self, source: str, result_path: Path) -> list[str]:
+        return [str(self.executable), "--source", source, "--output", str(result_path)]
+
+    def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> Path:
+        return _recover_native_candidate(self, source, candidate_id, destination, ["--recover"], timeout)
+
+
+class FilesystemRecoveryAdapter(JsonScanAdapter):
+    pass
+
+
+class DeepRecoveryAdapter(JsonScanAdapter):
+    pass
+
+
+class FragmentRecoveryAdapter(JsonScanAdapter):
+    def scan_command(self, source: str, result_path: Path) -> list[str]:
+        raise RecoveryError("Fragment Recovery requires an explicit file type (pdf, jpeg, png, or zip) before scanning.")
+
+    def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> Path:
+        return _recover_native_candidate(self, source, candidate_id, destination, ["--recover"], timeout)
+
+
+class RaidRecoveryAdapter(NativeRecoveryAdapter):
+    pass
+
+
+class DamagedMediaRecoveryAdapter(NativeRecoveryAdapter):
+    pass
+
+
+class ForensicRecoveryAdapter(NativeRecoveryAdapter):
+    pass
 
 
 class RecoveryDispatcher:
@@ -208,6 +310,22 @@ class RecoveryDispatcher:
         for spec in RECOVERY_METHOD_SPECS:
             if spec.method_id == "quick":
                 self.adapters[spec.method_id] = QuickRecoveryAdapter(root, meipass)
+            elif spec.method_id == "smart":
+                self.adapters[spec.method_id] = SmartRecoveryAdapter(spec, root, meipass)
+            elif spec.method_id == "targeted":
+                self.adapters[spec.method_id] = TargetedRecoveryAdapter(spec, root, meipass)
+            elif spec.method_id == "filesystem":
+                self.adapters[spec.method_id] = FilesystemRecoveryAdapter(spec, root, meipass)
+            elif spec.method_id == "deep":
+                self.adapters[spec.method_id] = DeepRecoveryAdapter(spec, root, meipass)
+            elif spec.method_id == "fragment":
+                self.adapters[spec.method_id] = FragmentRecoveryAdapter(spec, root, meipass)
+            elif spec.method_id == "raid":
+                self.adapters[spec.method_id] = RaidRecoveryAdapter(spec, root, meipass)
+            elif spec.method_id == "damaged":
+                self.adapters[spec.method_id] = DamagedMediaRecoveryAdapter(spec, root, meipass)
+            elif spec.method_id == "forensic":
+                self.adapters[spec.method_id] = ForensicRecoveryAdapter(spec, root, meipass)
             else:
                 self.adapters[spec.method_id] = NativeRecoveryAdapter(spec, root, meipass)
 
@@ -221,4 +339,4 @@ class RecoveryDispatcher:
         adapter = self.get(method_id)
         if isinstance(adapter, QuickRecoveryAdapter):
             return ("Available", "") if adapter.available else ("Unavailable", "Quick Recovery engine is not built/installed. Expected quickscan.exe.")
-        return ("Unavailable", adapter.unavailable_reason)
+        return adapter.status()
