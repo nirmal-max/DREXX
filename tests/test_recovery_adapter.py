@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from recovery_adapter import RECOVERY_METHOD_SPECS, QuickRecoveryAdapter, RecoveryDispatcher, RecoveryError, parse_scan_result
+from recovery_backends import METHOD_BACKENDS, backend_status
 
 
 def test_quick_scan_result_is_parsed_defensively():
@@ -44,3 +45,10 @@ def test_method_specific_json_shapes_are_normalized():
     assert targeted.candidates[0].filesystem == "PDF"
     deep = parse_scan_result({"status": "complete", "candidates": [{"filesystem": "NTFS", "declared_size": 42, "score": 80}]}, "Deep Recovery")
     assert deep.candidates[0].candidate_id == "1"
+
+
+def test_official_backend_status_fails_closed_without_installed_binaries(tmp_path: Path):
+    assert set(METHOD_BACKENDS) == {spec.method_id for spec in RECOVERY_METHOD_SPECS}
+    status, reason = backend_status("quick", tmp_path, tmp_path)
+    assert status == "BACKEND MISSING"
+    assert "official backend executable" in reason

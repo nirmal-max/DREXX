@@ -25,6 +25,7 @@ Uninstallable=yes
 
 [Files]
 Source: "..\build\dist\DREX.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\DREX"; Filename: "{app}\DREX.exe"

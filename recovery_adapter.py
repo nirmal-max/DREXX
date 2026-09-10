@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from recovery_backends import METHOD_BACKENDS, backend_status
+
 
 class RecoveryError(RuntimeError):
     pass
@@ -32,6 +34,14 @@ class RecoveryCandidate:
     deleted: bool | None
     confidence: float | None
     raw: dict[str, Any]
+    original_path: str | None = None
+    file_type: str | None = None
+    source_offset: int | None = None
+    source_device: str | None = None
+    source_partition: str | None = None
+    recoverable: bool | None = None
+    backend: str | None = None
+    verification_state: str = "UNKNOWN"
 
 
 @dataclass(frozen=True)
@@ -42,6 +52,7 @@ class RecoveryScan:
     candidates: tuple[RecoveryCandidate, ...]
     warnings: tuple[str, ...]
     raw: dict[str, Any]
+    backend: str | None = None
 
 
 @dataclass(frozen=True)
@@ -109,6 +120,11 @@ def parse_scan_result(payload: dict[str, Any], module: str = "Quick Recovery") -
             deleted=item.get("deleted") if isinstance(item.get("deleted"), bool) else None,
             confidence=float(item["confidence"]) if isinstance(item.get("confidence"), (int, float)) else None,
             raw=item,
+            original_path=item.get("path") or item.get("original_path"),
+            file_type=item.get("file_type") or item.get("type"),
+            source_offset=int(item["offset"]) if isinstance(item.get("offset"), (int, float)) else None,
+            recoverable=item.get("recoverable") if isinstance(item.get("recoverable"), bool) else True,
+            backend=module,
         ))
     return RecoveryScan(
         status=str(payload.get("status") or "UNKNOWN"),
@@ -117,6 +133,7 @@ def parse_scan_result(payload: dict[str, Any], module: str = "Quick Recovery") -
         candidates=tuple(candidates),
         warnings=tuple(str(x) for x in payload.get("warnings", []) if x is not None),
         raw=payload,
+        backend=module,
     )
 
 
@@ -306,6 +323,8 @@ class RecoveryDispatcher:
     """Central method-id → local module adapter registry."""
 
     def __init__(self, root: Path, meipass: Path | None = None):
+        self.root = root
+        self.meipass = meipass
         self.adapters: dict[str, Any] = {}
         for spec in RECOVERY_METHOD_SPECS:
             if spec.method_id == "quick":
@@ -337,6 +356,14 @@ class RecoveryDispatcher:
 
     def status(self, method_id: str) -> tuple[str, str]:
         adapter = self.get(method_id)
+        backend_state, backend_reason = backend_status(method_id, self.root, self.meipass)
+        if backend_state == "BACKEND MISSING":
+            return "Unavailable", f"{getattr(adapter, 'spec', None).display_name if hasattr(adapter, 'spec') else 'Quick Recovery'}: {backend_reason}"
         if isinstance(adapter, QuickRecoveryAdapter):
-            return ("Available", "") if adapter.available else ("Unavailable", "Quick Recovery engine is not built/installed. Expected quickscan.exe.")
-        return adapter.status()
+            if not adapter.available:
+                return "Unavailable", "Quick Recovery requires an official TestDisk/PhotoRec backend and no executable was found."
+            return "Unavailable", "The legacy local Quick engine is present, but the official TestDisk/PhotoRec adapter is not packaged yet."
+        native_status, native_reason = adapter.status()
+        if native_status != "Available":
+            return native_status, native_reason
+        return "Unavailable", f"Official backend detected ({backend_reason}), but its method-specific adapter is not packaged in this build."
