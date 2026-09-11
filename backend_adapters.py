@@ -468,6 +468,21 @@ class ProcessResult:
         return self.exit_code == 0 and not self.timed_out and not self.cancelled
 
 
+@dataclass(frozen=True)
+class BinaryProcessResult:
+    command: tuple[str, ...]
+    exit_code: int
+    stdout_bytes: bytes
+    stderr_bytes: bytes
+    duration_seconds: float
+    timed_out: bool = False
+    cancelled: bool = False
+
+    @property
+    def success(self) -> bool:
+        return self.exit_code == 0 and not self.timed_out and not self.cancelled
+
+
 class CentralProcessRunner:
     """Centralized process execution with safe argument arrays, timeout, and cancellation."""
 
@@ -538,4 +553,72 @@ class CentralProcessRunner:
             timed_out=timed_out,
             cancelled=cancelled,
         )
+
+    @staticmethod
+    def binary_run(
+        command: list[str],
+        *,
+        timeout: int = 86400,
+        cancel_check: Callable[[], bool] | None = None,
+        cwd: str | Path | None = None,
+        env: dict[str, str] | None = None,
+    ) -> BinaryProcessResult:
+        """Execute a process preserving stdout and stderr byte-for-byte without decoding."""
+        if not command:
+            raise ValueError("Command array must not be empty.")
+
+        start_time = time.monotonic()
+        try:
+            proc = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=False,
+                cwd=str(cwd) if cwd else None,
+                env=env,
+            )
+        except OSError as exc:
+            return BinaryProcessResult(
+                command=tuple(command),
+                exit_code=-1,
+                stdout_bytes=b"",
+                stderr_bytes=str(exc).encode("utf-8", errors="replace"),
+                duration_seconds=time.monotonic() - start_time,
+            )
+
+        timed_out = False
+        cancelled = False
+
+        while proc.poll() is None:
+            if cancel_check and cancel_check():
+                cancelled = True
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                break
+
+            if (time.monotonic() - start_time) >= timeout:
+                timed_out = True
+                proc.kill()
+                proc.wait()
+                break
+
+            time.sleep(0.05)
+
+        stdout_bytes, stderr_bytes = proc.communicate()
+        duration = time.monotonic() - start_time
+
+        return BinaryProcessResult(
+            command=tuple(command),
+            exit_code=proc.returncode if proc.returncode is not None else -1,
+            stdout_bytes=stdout_bytes or b"",
+            stderr_bytes=stderr_bytes or b"",
+            duration_seconds=duration,
+            timed_out=timed_out,
+            cancelled=cancelled,
+        )
+
 

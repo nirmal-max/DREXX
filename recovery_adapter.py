@@ -303,15 +303,17 @@ class QuickRecoveryAdapter(BaseRecoveryAdapter):
         destination.mkdir(parents=True, exist_ok=True)
         dest_file = destination / f"recovered_{candidate_id}.bin"
         cmd = build_icat_command(icat_binary, source, str(candidate_id), recover_deleted=True)
-        res = CentralProcessRunner.run(cmd, timeout=timeout)
-        if res.exit_code == 0 and res.stdout:
-            dest_file.write_bytes(res.stdout.encode("utf-8", errors="replace"))
+        res = CentralProcessRunner.binary_run(cmd, timeout=timeout)
+        if res.exit_code == 0 and res.stdout_bytes:
+            dest_file.write_bytes(res.stdout_bytes)
             return [dest_file]
         proc = subprocess.run(cmd, capture_output=True, timeout=timeout)
         if proc.returncode == 0 and proc.stdout:
             dest_file.write_bytes(proc.stdout)
             return [dest_file]
-        raise RecoveryError(f"Quick Recovery failed to extract candidate {candidate_id}: {res.stderr or proc.stderr.decode(errors='replace')}")
+        err_msg = res.stderr_bytes.decode(errors="replace") or proc.stderr.decode(errors="replace")
+        raise RecoveryError(f"Quick Recovery failed to extract candidate {candidate_id}: {err_msg}")
+
 
 
 class SmartRecoveryAdapter(BaseRecoveryAdapter):

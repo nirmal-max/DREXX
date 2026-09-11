@@ -1268,6 +1268,7 @@ class DrexApp(tk.Tk):
             mustexist=True,
         )
         if chosen:
+            self._recovery_source_is_image = False
             self.set_target(Path(chosen))
 
     def choose_recovery_image(self):
@@ -1280,14 +1281,17 @@ class DrexApp(tk.Tk):
             ],
         )
         if chosen:
-            self.set_target(Path(chosen))
             self._recovery_source_is_image = True
+            self.set_target(Path(chosen))
 
     def set_target(self, target: Path):
         self.target = target
+        if not (target.is_file() and target.suffix.lower() in {".img", ".dd", ".raw", ".iso", ".bin", ".e01", ".dmg"}):
+            self._recovery_source_is_image = False
         # Update the path display entry
         if hasattr(self, "target_path_var"):
             self.target_path_var.set(str(target))
+
         # Update file info labels with fresh data
         if hasattr(self, "file_info_labels"):
             props = target_properties(target)
@@ -1548,8 +1552,8 @@ class DrexApp(tk.Tk):
         self.progress_mode.set("")
 
     def choose_recovery_destination(self):
-        if not self.target or not self.target.is_dir():
-            messagebox.showerror("Select recovery folder", "Select a recovery folder and complete a scan first.")
+        if not self.target or (not self.target.is_dir() and not self.target.is_file()):
+            messagebox.showerror("Select recovery source", "Select a recovery folder or disk image and complete a scan first.")
             return
         chosen = filedialog.askdirectory(title="Choose a Separate Recovery Destination", mustexist=False)
         if not chosen:
@@ -1560,13 +1564,14 @@ class DrexApp(tk.Tk):
         except OSError as exc:
             messagebox.showerror("Invalid destination", f"DREX could not create the destination:\n{exc}")
             return
-        if destination == self.target.resolve() or self.target.resolve() in destination.parents:
+        if destination == self.target.resolve() or (self.target.is_dir() and self.target.resolve() in destination.parents):
             messagebox.showerror("Unsafe destination", "Choose a destination outside the selected source folder.")
             return
         self.recovery_destination = destination
         if hasattr(self, "recovery_destination_label"):
             self.recovery_destination_label.configure(text=f"Destination: {destination}", fg=INK)
         self._update_recovery_action_state()
+
 
     def _update_recovery_action_state(self):
         if not hasattr(self, "recover_selected_button"):

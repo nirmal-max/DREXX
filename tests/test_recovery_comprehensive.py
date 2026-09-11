@@ -225,3 +225,37 @@ class TestCentralProcessRunner:
         )
         assert res.cancelled is True
         assert res.success is False
+
+    def test_binary_run_arbitrary_bytes(self):
+        """Prove that binary_run preserves arbitrary bytes (nulls, high-ASCII, binary sequences)."""
+        import sys
+        # Generate arbitrary binary sequence containing 0x00, 0xFF, values > 0x7F
+        test_payload = bytes(range(256)) * 4 + b"\x00\xff\xfe\x80\x7f\x00\x01\x02\x88\x99\xaa\xbb\xcc\xdd\xee\xff"
+        res = CentralProcessRunner.binary_run(
+            [sys.executable, "-c", "import sys; sys.stdout.buffer.write(bytes(range(256)) * 4 + b'\\x00\\xff\\xfe\\x80\\x7f\\x00\\x01\\x02\\x88\\x99\\xaa\\xbb\\xcc\\xdd\\xee\\xff')"],
+            timeout=10,
+        )
+        assert res.success is True
+        assert res.exit_code == 0
+        assert res.stdout_bytes == test_payload
+        assert len(res.stdout_bytes) == len(test_payload)
+
+    def test_binary_run_vs_run_utf8_corruption(self):
+        """Demonstrate that text-mode run() corrupts binary streams while binary_run() preserves them byte-for-byte."""
+        import sys
+        # Sequence with invalid UTF-8 bytes that cannot be decoded losslessly
+        raw_binary = b"\x80\x81\x82\x83\xff\xfe\x00\x01\x02\x90\x91\xc0\xc1"
+        res_bin = CentralProcessRunner.binary_run(
+            [sys.executable, "-c", f"import sys; sys.stdout.buffer.write({raw_binary!r})"],
+            timeout=10,
+        )
+        assert res_bin.success is True
+        assert res_bin.stdout_bytes == raw_binary
+
+        # Text mode run() will replace invalid UTF-8 with U+FFFD (corrupting the byte sequence)
+        res_text = CentralProcessRunner.run(
+            [sys.executable, "-c", f"import sys; sys.stdout.buffer.write({raw_binary!r})"],
+            timeout=10,
+        )
+        re_encoded = res_text.stdout.encode("utf-8", errors="replace")
+        assert re_encoded != raw_binary  # Proves text mode indeed corrupts arbitrary binary

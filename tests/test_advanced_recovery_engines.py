@@ -76,6 +76,31 @@ class TestFragmentReconstruction:
         assert len(candidates) >= 1
         assert any(c["valid"] for c in candidates)
 
+    def test_fragment_adapter_is_independent_from_deep_recovery(self, tmp_path: Path):
+        """Prove Method 22 is an independent permutation-based fragment engine and not an alias of Method 21 (PhotoRec)."""
+        from recovery_adapter import FragmentRecoveryAdapter, DeepRecoveryAdapter, RecoveryDispatcher
+        spec_frag = next(s for s in RECOVERY_METHOD_SPECS if s.method_id == "fragment")
+        spec_deep = next(s for s in RECOVERY_METHOD_SPECS if s.method_id == "deep")
+
+        adapter_frag = FragmentRecoveryAdapter(spec_frag, tmp_path)
+        adapter_deep = DeepRecoveryAdapter(spec_deep, tmp_path)
+
+        # 1. Must be distinct class types
+        assert not isinstance(adapter_frag, DeepRecoveryAdapter)
+        assert type(adapter_frag) is not type(adapter_deep)
+
+        # 2. Method specifications must differ
+        assert spec_frag.native_contract != spec_deep.native_contract
+        assert spec_frag.method_id == "fragment"
+        assert spec_deep.method_id == "deep"
+
+        # 3. Scan report backends must be distinct
+        dummy_img = tmp_path / "dummy.raw"
+        dummy_img.write_bytes(b"\x00" * 4096)
+        scan = adapter_frag.scan(str(dummy_img), file_type="jpeg")
+        assert "FragmentReconstructor" in scan.backend
+        assert "PhotoRec" not in scan.backend
+
 
 class TestVirtualRaidReconstruction:
     def test_raid0_deterministic_fixture(self):
