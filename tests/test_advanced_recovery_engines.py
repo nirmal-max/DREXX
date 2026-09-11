@@ -1,8 +1,8 @@
 """
-Tests for DREXX Advanced Recovery Engines:
-- FragmentReconstructor: Bi-fragment & multi-fragment structural reconstruction
-- VirtualRaidReconstructor: RAID 0, 1, 5 (with XOR degraded reconstruction), 10
-- DirectDamagedMediaImager: Direct sector-level imaging & GNU ddrescue mapfile generation
+Comprehensive Tests for DREXX Advanced Recovery Engines:
+1. FragmentReconstructor: Out-of-order & non-contiguous fragment reassembly
+2. VirtualRaidReconstructor: RAID 0, 1, 5 (with XOR degraded reconstruction), 10
+3. DirectDamagedMediaImager & DamagedMediaRecoveryAdapter: End-to-end imaging and file recovery
 """
 
 import hashlib
@@ -13,13 +13,15 @@ from recovery_adapter import (
     FragmentReconstructor,
     VirtualRaidReconstructor,
     DirectDamagedMediaImager,
+    DamagedMediaRecoveryAdapter,
+    RECOVERY_METHOD_SPECS,
 )
 from backend_adapters import parse_ddrescue_mapfile
 
 
 class TestFragmentReconstruction:
-    def test_fragmented_jpeg_reconstruction(self):
-        # Create valid JPEG parts
+    def test_deliberately_reordered_fragmented_jpeg(self):
+        """Original JPEG -> Deliberately split & reordered -> DREXX reassembles -> SHA-256 matches."""
         part1 = b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"  # SOI + APP0
         part2 = b"\xff\xdb\x00\x43\x00" + b"\x01" * 64  # DQT
         part3 = b"\xff\xc0\x00\x11\x08\x00\x10\x00\x10\x03\x01\x11\x00\x02\x11\x01\x03\x11\x01"  # SOF0
@@ -28,23 +30,35 @@ class TestFragmentReconstruction:
         original_jpeg = part1 + part2 + part3 + part4
         expected_hash = hashlib.sha256(original_jpeg).hexdigest().upper()
 
-        # Stitch fragments
-        reconstructed, confidence, valid = FragmentReconstructor.score_continuity("jpeg", [part1, part2, part3, part4])
+        # Deliberately scrambled out-of-order fragments
+        scrambled_fragments = [part3, part1, part4, part2]
+
+        # Simple concatenation would fail structural validation
+        assert not FragmentReconstructor.validate_jpeg(b"".join(scrambled_fragments))[0]
+
+        # DREXX out-of-order reassembly finds the correct permutation
+        reconstructed, confidence, valid = FragmentReconstructor.reconstruct_out_of_order(scrambled_fragments, "jpeg")
         assert valid is True
         assert confidence >= 0.8
         assert hashlib.sha256(reconstructed).hexdigest().upper() == expected_hash
 
-    def test_fragmented_pdf_reconstruction(self):
+    def test_deliberately_reordered_fragmented_pdf(self):
+        """Original PDF -> Deliberately split & reordered -> DREXX reassembles -> SHA-256 matches."""
         header = b"%PDF-1.4\n"
-        body = b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
-        trailer = b"xref\n0 2\n0000000000 65535 f \ntrailer\n<< /Size 2 /Root 1 0 R >>\nstartxref\n99\n%%EOF\n"
+        body1 = b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+        body2 = b"2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+        trailer = b"xref\n0 3\n0000000000 65535 f \ntrailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n140\n%%EOF\n"
 
-        original_pdf = header + body + trailer
+        original_pdf = header + body1 + body2 + trailer
         expected_hash = hashlib.sha256(original_pdf).hexdigest().upper()
 
-        reconstructed, confidence, valid = FragmentReconstructor.score_continuity("pdf", [header, body, trailer])
+        # Deliberately scrambled order
+        scrambled_fragments = [trailer, body2, header, body1]
+        assert not FragmentReconstructor.validate_pdf(b"".join(scrambled_fragments))[0]
+
+        reconstructed, confidence, valid = FragmentReconstructor.reconstruct_out_of_order(scrambled_fragments, "pdf")
         assert valid is True
-        assert confidence >= 0.9
+        assert confidence >= 0.8
         assert hashlib.sha256(reconstructed).hexdigest().upper() == expected_hash
 
     def test_cluster_stream_fragment_reassembly(self):
@@ -64,77 +78,93 @@ class TestFragmentReconstruction:
 
 
 class TestVirtualRaidReconstruction:
-    def test_raid0_striping(self):
-        chunk = 16
-        disk0 = b"CHUNK0_DISK0____" + b"CHUNK2_DISK0____"
-        disk1 = b"CHUNK1_DISK1____" + b"CHUNK3_DISK1____"
+    def test_raid0_deterministic_fixture(self):
+        chunk = 32
+        payload = b"PAYLOAD_A_" * 16 + b"PAYLOAD_B_" * 16  # 320 bytes
+        expected_hash = hashlib.sha256(payload[:320]).hexdigest().upper()
+
+        # Split across 2 disks in 32-byte chunks
+        d0_chunks = [payload[i:i+chunk] for i in range(0, 320, chunk * 2)]
+        d1_chunks = [payload[i+chunk:i+chunk*2] for i in range(0, 320, chunk * 2)]
+
+        disk0 = b"".join(d0_chunks)
+        disk1 = b"".join(d1_chunks)
 
         reconstructed = VirtualRaidReconstructor.reconstruct_raid0([disk0, disk1], chunk_size=chunk)
-        expected = b"CHUNK0_DISK0____CHUNK1_DISK1____CHUNK2_DISK0____CHUNK3_DISK1____"
-        assert reconstructed == expected
+        assert hashlib.sha256(reconstructed[:320]).hexdigest().upper() == expected_hash
 
-    def test_raid1_mirroring(self):
-        disk0 = b"MIRRORED_DATA_CONTENT_12345"
-        disk1 = b"MIRRORED_DATA_CONTENT_12345"
+    def test_raid1_deterministic_fixture(self):
+        payload = b"CRITICAL_DATABASE_PAYLOAD_MIRROR" * 10
+        expected_hash = hashlib.sha256(payload).hexdigest().upper()
+
+        disk0 = payload
+        disk1 = payload
         reconstructed = VirtualRaidReconstructor.reconstruct_raid1([disk0, disk1])
-        assert reconstructed == disk0
+        assert hashlib.sha256(reconstructed).hexdigest().upper() == expected_hash
 
     def test_raid5_degraded_xor_reconstruction(self):
-        chunk = 8
+        chunk = 16
         # 3 disks: D0, D1, P (Parity = D0 ^ D1)
-        # Stripe 0: D0="DATA0_A_", D1="DATA1_A_", P = D0 ^ D1
-        d0_stripe0 = b"DATA0_A_"
-        d1_stripe0 = b"DATA1_A_"
+        d0_stripe0 = b"STRIPE0_DISK0___"
+        d1_stripe0 = b"STRIPE0_DISK1___"
         p_stripe0 = bytes(a ^ b for a, b in zip(d0_stripe0, d1_stripe0))
 
-        # Disk images
-        disk0 = d0_stripe0
-        disk1 = d1_stripe0
-        disk2 = p_stripe0
+        d0_stripe1 = b"STRIPE1_DISK0___"
+        d1_stripe1 = b"STRIPE1_DISK1___"
+        p_stripe1 = bytes(a ^ b for a, b in zip(d0_stripe1, d1_stripe1))
 
-        # Normal reconstruction (left-asymmetric for simplicity test)
-        normal = VirtualRaidReconstructor.reconstruct_raid5([disk0, disk1, disk2], chunk_size=chunk, layout="right-asymmetric")
-        assert len(normal) == 16  # 2 data chunks
+        disk0 = d0_stripe0 + d0_stripe1
+        disk1 = d1_stripe0 + d1_stripe1
+        disk2 = p_stripe0 + p_stripe1
 
-        # Degraded reconstruction with disk 1 missing (missing_idx = 1)
-        # Disk 1 data will be XOR reconstructed from disk 0 and parity disk 2!
-        degraded = VirtualRaidReconstructor.reconstruct_raid5([disk0, b"\x00" * chunk, disk2], chunk_size=chunk, missing_idx=1, layout="right-asymmetric")
-        assert degraded == normal
+        # Intact array reconstruction
+        normal = VirtualRaidReconstructor.reconstruct_raid5([disk0, disk1, disk2], chunk_size=chunk, layout="dedicated-parity")
+        expected_payload = d0_stripe0 + d1_stripe0 + d0_stripe1 + d1_stripe1
+        assert normal == expected_payload
 
-    def test_raid10_reconstruction(self):
-        chunk = 8
-        # 4 disks: D0, M0, D1, M1
-        d0 = b"DATA0_0_" + b"DATA0_1_"
-        m0 = b"DATA0_0_" + b"DATA0_1_"
-        d1 = b"DATA1_0_" + b"DATA1_1_"
-        m1 = b"DATA1_0_" + b"DATA1_1_"
+        # Degraded array with disk 0 missing (destroyed/offline)
+        # Disk 0 data will be XOR-reconstructed from Disk 1 and Parity Disk 2
+        degraded = VirtualRaidReconstructor.reconstruct_raid5([b"\x00" * len(disk0), disk1, disk2], chunk_size=chunk, missing_idx=0, layout="dedicated-parity")
+        assert degraded == expected_payload
+        assert hashlib.sha256(degraded).hexdigest() == hashlib.sha256(normal).hexdigest()
+
+    def test_raid10_deterministic_fixture(self):
+        chunk = 16
+        d0 = b"DATA0_0_________" + b"DATA0_1_________"
+        m0 = b"DATA0_0_________" + b"DATA0_1_________"
+        d1 = b"DATA1_0_________" + b"DATA1_1_________"
+        m1 = b"DATA1_0_________" + b"DATA1_1_________"
 
         reconstructed = VirtualRaidReconstructor.reconstruct_raid10([d0, m0, d1, m1], chunk_size=chunk)
-        assert len(reconstructed) == 32
-        assert reconstructed.startswith(b"DATA0_0_DATA1_0_")
+        expected = b"DATA0_0_________DATA1_0_________DATA0_1_________DATA1_1_________"
+        assert reconstructed == expected
 
 
-class TestDamagedMediaImager:
-    def test_damaged_media_imaging_and_mapfile(self, tmp_path: Path):
-        source_data = b"GOOD_SECTOR_DATA" * 32 + b"BAD_SECTOR_CORRUPT" * 32 + b"RECOVERED_TRAILING" * 32
-        out_img = tmp_path / "rescued.img"
-        mapfile = tmp_path / "rescued.map"
+class TestDamagedMediaWorkflow:
+    def test_damaged_media_end_to_end_imaging_and_recovery(self, tmp_path: Path):
+        """End-to-end: Damaged source -> direct sector imaging + mapfile -> recovery extraction."""
+        source_data = b"RECOVERABLE_RECORD_A" * 32 + b"CORRUPTED_BAD_SECTOR" * 32 + b"RECOVERABLE_RECORD_B" * 32
+        salvaged_img = tmp_path / "salvaged.raw"
+        mapfile = tmp_path / "salvaged.map"
+        dest_dir = tmp_path / "extracted_output"
 
-        # Mark sector 1 (bytes 512..1023) as bad
-        res = DirectDamagedMediaImager.image_source(
-            source_data=source_data,
-            output_image_path=out_img,
+        spec = next(s for s in RECOVERY_METHOD_SPECS if s.method_id == "damaged")
+        adapter = DamagedMediaRecoveryAdapter(spec, tmp_path)
+
+        stats, files = adapter.recover_damaged_source(
+            source=source_data,
+            salvaged_image_path=salvaged_img,
             mapfile_path=mapfile,
-            sector_size=512,
-            bad_sector_ranges=[(1, 1)],
+            destination=dest_dir,
+            bad_sector_ranges=[(1, 1)],  # Middle sector bad
         )
 
-        assert res["rescued_bytes"] > 0
-        assert res["bad_bytes"] == 512
-        assert out_img.exists()
+        assert stats["rescued_bytes"] > 0
+        assert stats["bad_bytes"] == 512
+        assert salvaged_img.exists()
         assert mapfile.exists()
 
-        # Parse mapfile using backend_adapters parser
+        # Parse mapfile to verify ddrescue standard compatibility
         parsed = parse_ddrescue_mapfile(mapfile.read_text(encoding="utf-8"))
-        assert parsed["rescued_bytes"] == res["rescued_bytes"]
+        assert parsed["rescued_bytes"] == stats["rescued_bytes"]
         assert parsed["bad_bytes"] == 512

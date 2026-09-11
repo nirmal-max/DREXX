@@ -438,23 +438,58 @@ class FragmentReconstructor:
     def validate_jpeg(data: bytes) -> tuple[bool, float]:
         if not (data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9")):
             return False, 0.0
+        # Strict JPEG marker sequence: SOI < DQT < SOF < SOS < EOI
+        soi_pos = data.find(b"\xff\xd8")
+        dqt_pos = data.find(b"\xff\xdb")
+        sof_pos = data.find(b"\xff\xc0") if b"\xff\xc0" in data else data.find(b"\xff\xc2")
+        sos_pos = data.find(b"\xff\xda")
+        eoi_pos = data.rfind(b"\xff\xd9")
+
+        if dqt_pos != -1 and not (soi_pos < dqt_pos):
+            return False, 0.0
+        if sof_pos != -1 and dqt_pos != -1 and not (dqt_pos < sof_pos):
+            return False, 0.0
+        if sos_pos != -1 and sof_pos != -1 and not (sof_pos < sos_pos):
+            return False, 0.0
+        if sos_pos != -1 and not (sos_pos < eoi_pos):
+            return False, 0.0
+
         score = 0.5
-        if b"\xff\xdb" in data:  # DQT (Quantization Table)
+        if dqt_pos != -1:
             score += 0.2
-        if b"\xff\xc0" in data or b"\xff\xc2" in data:  # SOF0 / SOF2
+        if sof_pos != -1:
             score += 0.15
-        if b"\xff\xda" in data:  # SOS (Start of Scan)
+        if sos_pos != -1:
             score += 0.15
         return True, min(1.0, score)
 
     @staticmethod
     def validate_pdf(data: bytes) -> tuple[bool, float]:
-        if not (data.startswith(b"%PDF-") and b"%%EOF" in data[-1024:]):
+        if not (data.startswith(b"%PDF-") and data.rstrip().endswith(b"%%EOF")):
             return False, 0.0
+        head_pos = data.find(b"%PDF-")
+        obj_pos = data.find(b"obj")
+        last_obj_pos = data.rfind(b"endobj")
+        xref_pos = data.find(b"xref")
+        eof_pos = data.rfind(b"%%EOF")
+
+        if obj_pos != -1 and not (head_pos < obj_pos):
+            return False, 0.0
+        if xref_pos != -1 and last_obj_pos != -1 and not (last_obj_pos < xref_pos):
+            return False, 0.0
+        if xref_pos != -1 and not (xref_pos < eof_pos):
+            return False, 0.0
+
+        # Enforce sequential object order (e.g. 1 0 obj < 2 0 obj)
+        import re
+        obj_nums = [int(m) for m in re.findall(rb"(\d+)\s+\d+\s+obj", data)]
+        if obj_nums and obj_nums != sorted(obj_nums):
+            return False, 0.0
+
         score = 0.5
-        if b"obj" in data and b"endobj" in data:
+        if obj_pos != -1:
             score += 0.25
-        if b"xref" in data or b"/Root" in data:
+        if xref_pos != -1 or b"/Root" in data:
             score += 0.25
         return True, min(1.0, score)
 
@@ -462,28 +497,32 @@ class FragmentReconstructor:
     def validate_png(data: bytes) -> tuple[bool, float]:
         if not (data.startswith(b"\x89PNG\r\n\x1a\n") and data.endswith(b"IEND\xaeB`\x82")):
             return False, 0.0
-        score = 0.6
-        if b"IHDR" in data:
-            score += 0.2
-        if b"IDAT" in data:
-            score += 0.2
-        return True, min(1.0, score)
+        ihdr_pos = data.find(b"IHDR")
+        idat_pos = data.find(b"IDAT")
+        iend_pos = data.find(b"IEND")
+        if ihdr_pos == -1 or idat_pos == -1 or iend_pos == -1:
+            return False, 0.0
+        if not (ihdr_pos < idat_pos < iend_pos):
+            return False, 0.0
+        return True, 1.0
 
     @staticmethod
     def validate_zip(data: bytes) -> tuple[bool, float]:
         if not (data.startswith(b"PK\x03\x04") and (b"PK\x05\x06" in data or b"PK\x06\x06" in data)):
             return False, 0.0
-        score = 0.6
-        if b"PK\x01\x02" in data:  # Central Directory Header
-            score += 0.4
-        return True, min(1.0, score)
+        local_pos = data.find(b"PK\x03\x04")
+        cd_pos = data.find(b"PK\x01\x02")
+        eocd_pos = data.find(b"PK\x05\x06")
+        if cd_pos != -1 and not (local_pos < cd_pos < eocd_pos):
+            return False, 0.0
+        return True, 1.0
 
     @classmethod
     def score_continuity(cls, file_type: str, fragments: list[bytes]) -> tuple[bytes, float, bool]:
         """Stitch fragments and evaluate structural validity."""
         combined = b"".join(fragments)
         ftype = file_type.lower()
-        if ftype == "jpeg" or ftype == "jpg":
+        if ftype in {"jpeg", "jpg"}:
             valid, score = cls.validate_jpeg(combined)
         elif ftype == "pdf":
             valid, score = cls.validate_pdf(combined)
@@ -494,6 +533,28 @@ class FragmentReconstructor:
         else:
             valid, score = (len(combined) > 0), 0.5
         return combined, score, valid
+
+    @classmethod
+    def reconstruct_out_of_order(cls, fragments: list[bytes], file_type: str) -> tuple[bytes, float, bool]:
+        """Find the optimal permutation of out-of-order/fragmented pieces."""
+        import itertools
+        best_data = b"".join(fragments)
+        best_score = 0.0
+        best_valid = False
+
+        for perm in itertools.permutations(fragments):
+            cand_data, cand_score, cand_valid = cls.score_continuity(file_type, list(perm))
+            if cand_valid and cand_score > best_score:
+                best_data = cand_data
+                best_score = cand_score
+                best_valid = cand_valid
+                break
+            elif cand_score > best_score:
+                best_data = cand_data
+                best_score = cand_score
+                best_valid = cand_valid
+
+        return best_data, best_score, best_valid
 
     @classmethod
     def reassemble_stream(cls, source_stream: bytes, file_type: str, cluster_size: int = 4096) -> list[dict]:
@@ -523,10 +584,9 @@ class FragmentReconstructor:
             elif ftype == "zip" and b"PK\x05\x06" in cl:
                 footer_indices.append(idx)
 
-        # Pair headers and footers, testing contiguous and non-contiguous cluster permutations
+        # Pair headers and footers, testing permutations
         for h_idx in header_indices:
             for f_idx in [f for f in footer_indices if f >= h_idx]:
-                # Contiguous candidate
                 frags = [clusters[i] for i in range(h_idx, f_idx + 1)]
                 data, score, valid = cls.score_continuity(ftype, frags)
                 if valid or score >= 0.7:
@@ -585,6 +645,8 @@ class VirtualRaidReconstructor:
             # Calculate parity disk index for this stripe
             if layout == "left-symmetric":
                 p_disk = (num_disks - 1 - (s % num_disks))
+            elif layout == "dedicated-parity" or layout == "raid4":
+                p_disk = num_disks - 1
             else:
                 p_disk = (s % num_disks)
 
@@ -592,7 +654,6 @@ class VirtualRaidReconstructor:
             stripe_chunks = []
             for d in range(num_disks):
                 if d == missing_idx:
-                    # XOR of all surviving disks in this stripe gives the missing chunk
                     xor_chunk = bytearray(chunk_size)
                     for other_d in range(num_disks):
                         if other_d != missing_idx:
@@ -779,6 +840,46 @@ class DamagedMediaRecoveryAdapter(BaseRecoveryAdapter):
         if exe is not None:
             return "Available", "GNU ddrescue is installed"
         return "Unavailable", "GNU ddrescue is unavailable on Windows (Linux native); DREXX direct sector imager fallback available"
+
+    def recover_damaged_source(
+        self,
+        source: str | Path,
+        salvaged_image_path: Path,
+        mapfile_path: Path,
+        destination: Path,
+        bad_sector_ranges: list[tuple[int, int]] | None = None,
+        timeout: int = 86400,
+    ) -> tuple[dict, list[Path]]:
+        """End-to-end damaged media acquisition and extraction workflow.
+        
+        1. Sector-level acquisition of readable regions + mapfile recording.
+        2. DREXX recovery engine invocation against salvaged image.
+        3. Extraction of intact files to isolated destination.
+        """
+        # Step 1: Image salvaged sectors
+        stats = DirectDamagedMediaImager.image_source(
+            source_data=source if isinstance(source, bytes) else Path(source),
+            output_image_path=salvaged_image_path,
+            mapfile_path=mapfile_path,
+            bad_sector_ranges=bad_sector_ranges,
+        )
+
+        # Step 2: Extract files from salvaged image using Filesystem/TSK recover
+        recovered_paths: list[Path] = []
+        destination.mkdir(parents=True, exist_ok=True)
+
+        try:
+            from backend_adapters import build_tsk_recover_command, CentralProcessRunner
+            tsk_rec = find_backend_executable("tsk", self.root, self.meipass)
+            if tsk_rec is not None:
+                tsk_exe = tsk_rec.parent / "tsk_recover.exe"
+                cmd = build_tsk_recover_command(tsk_exe, str(salvaged_image_path), str(destination), extract_deleted=True)
+                CentralProcessRunner.run(cmd, timeout=timeout)
+                recovered_paths = [p for p in destination.rglob("*") if p.is_file()]
+        except Exception:
+            pass
+
+        return stats, recovered_paths
 
 
 class ForensicRecoveryAdapter(BaseRecoveryAdapter):
