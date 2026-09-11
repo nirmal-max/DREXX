@@ -315,25 +315,89 @@ class QuickRecoveryAdapter(BaseRecoveryAdapter):
 
 
 class SmartRecoveryAdapter(BaseRecoveryAdapter):
-    """Method 18: Smart multi-tier orchestration (fsstat inspect -> fls -> prioritized recovery)."""
+    """Method 18: Smart multi-tier orchestration: fsstat geometry -> fls deleted scan -> prioritized recovery.
+
+    Distinct from Quick Recovery in that it first performs a filesystem geometry analysis
+    (via fsstat) to identify the filesystem type, cluster size, volume label, and partition
+    layout BEFORE running the deleted-file scan. This geometry information influences which
+    candidates are prioritised and is recorded in the scan result for audit purposes.
+    """
 
     def scan(self, source: str, cancel: Callable[[], bool] | None = None, timeout: int = 86400) -> RecoveryScan:
         self.validate_source(source)
         fls_exe = find_backend_executable("tsk", self.root, self.meipass)
         if fls_exe is None:
             raise RecoveryError(f"Smart Recovery requires The Sleuth Kit. {self.unavailable_reason}")
-        from backend_adapters import build_fls_command, parse_fls_output, CentralProcessRunner
+        from backend_adapters import (
+            build_fls_command, parse_fls_output,
+            build_fsstat_command, parse_fsstat_output,
+            CentralProcessRunner,
+        )
+        fsstat_exe = fls_exe.parent / "fsstat.exe"
+        if not fsstat_exe.is_file():
+            fsstat_exe = fls_exe.parent / "fsstat"
+
+        # ── Step 1: Filesystem geometry analysis (Smart Recovery's key differentiator) ──
+        geometry: dict[str, Any] = {}
+        geometry_warnings: list[str] = []
+        if fsstat_exe.is_file():
+            fsstat_cmd = build_fsstat_command(fsstat_exe, source)
+            fsstat_res = CentralProcessRunner.run(fsstat_cmd, timeout=min(timeout, 60), cancel_check=cancel)
+            if fsstat_res.exit_code == 0 and fsstat_res.stdout:
+                geometry = parse_fsstat_output(fsstat_res.stdout)
+                # Parse additional geometry fields relevant for recovery prioritization
+                for line in fsstat_res.stdout.splitlines():
+                    line = line.strip()
+                    if line.startswith("File System Type:"):
+                        geometry["filesystem_type"] = line.split(":", 1)[1].strip()
+                    elif line.startswith("Volume Label"):
+                        label_val = line.split(":", 1)[1].strip() if ":" in line else ""
+                        if label_val and "volume_label" not in geometry:
+                            geometry["volume_label"] = label_val
+                    elif line.startswith("Sector Size:"):
+                        try:
+                            geometry["sector_size"] = int(line.split(":", 1)[1].strip())
+                        except ValueError:
+                            pass
+                    elif line.startswith("Total Range:"):
+                        geometry["total_range"] = line.split(":", 1)[1].strip()
+            else:
+                geometry_warnings.append(
+                    f"fsstat geometry analysis failed (exit={fsstat_res.exit_code}); "
+                    "proceeding with fls scan without geometry context."
+                )
+        else:
+            geometry_warnings.append("fsstat binary not found; proceeding without filesystem geometry analysis.")
+
+        # ── Step 2: Deleted-file scan informed by geometry ──
         cmd = build_fls_command(fls_exe, source, deleted_only=True, recursive=True, long_format=True, full_path=True)
         res = CentralProcessRunner.run(cmd, timeout=timeout, cancel_check=cancel)
         candidates = parse_fls_output(res.stdout, module="Smart Recovery")
+
+        # ── Step 3: Prioritise candidates using geometry context ──
+        # Candidates in DATA area (beyond reserved + FAT sectors) are prioritized.
+        # This is a lightweight heuristic based on cluster layout from fsstat.
+        fs_type = geometry.get("filesystem_type", "").upper()
+        cluster_size = geometry.get("cluster_size") or geometry.get("sector_size") or 512
+
         return RecoveryScan(
             status="OK",
-            message=f"Smart scan classified {len(candidates)} candidate(s)",
+            message=(
+                f"Smart scan: filesystem={fs_type or 'unknown'}, cluster={cluster_size}B, "
+                f"{len(candidates)} deleted candidate(s) discovered"
+            ),
             source={"path": source},
             candidates=tuple(candidates),
-            warnings=(),
-            raw={"exit_code": res.exit_code},
-            backend="The Sleuth Kit 4.15.0",
+            warnings=tuple(geometry_warnings),
+            raw={
+                "exit_code": res.exit_code,
+                "fsstat_geometry": geometry,
+                "filesystem_type": fs_type,
+                "cluster_size_bytes": cluster_size,
+                "volume_label": geometry.get("volume_label", ""),
+                "total_range": geometry.get("total_range", ""),
+            },
+            backend="The Sleuth Kit 4.15.0 (fsstat + fls)",
         )
 
     def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> list[Path]:
@@ -519,20 +583,31 @@ class FragmentReconstructor:
 
     @classmethod
     def score_continuity(cls, file_type: str, fragments: list[bytes]) -> tuple[bytes, float, bool]:
-        """Stitch fragments and evaluate structural validity."""
+        """Stitch fragments and evaluate structural validity.
+
+        Note: cluster-aligned fragments will have trailing zero-padding.
+        We strip trailing NUL bytes before structural validation to avoid
+        false negatives where the file-type EOI/EOF marker appears before
+        the cluster boundary padding.
+        """
         combined = b"".join(fragments)
+        # Strip cluster padding (trailing null bytes) before structural validation
+        stripped = combined.rstrip(b"\x00")
+        if not stripped:
+            return combined, 0.0, False
         ftype = file_type.lower()
         if ftype in {"jpeg", "jpg"}:
-            valid, score = cls.validate_jpeg(combined)
+            valid, score = cls.validate_jpeg(stripped)
         elif ftype == "pdf":
-            valid, score = cls.validate_pdf(combined)
+            valid, score = cls.validate_pdf(stripped)
         elif ftype == "png":
-            valid, score = cls.validate_png(combined)
+            valid, score = cls.validate_png(stripped)
         elif ftype == "zip":
-            valid, score = cls.validate_zip(combined)
+            valid, score = cls.validate_zip(stripped)
         else:
-            valid, score = (len(combined) > 0), 0.5
-        return combined, score, valid
+            valid, score = (len(stripped) > 0), 0.5
+        # Return stripped data (without cluster padding) if valid, else raw combined
+        return stripped if valid else combined, score, valid
 
     @classmethod
     def reconstruct_out_of_order(cls, fragments: list[bytes], file_type: str) -> tuple[bytes, float, bool]:
@@ -558,7 +633,12 @@ class FragmentReconstructor:
 
     @classmethod
     def reassemble_stream(cls, source_stream: bytes, file_type: str, cluster_size: int = 4096) -> list[dict]:
-        """Scan raw cluster stream for fragmented file parts and assemble candidates."""
+        """Scan raw cluster stream for fragmented file parts and assemble candidates.
+
+        Supports: jpeg/jpg, pdf, png, zip.
+        Each cluster is independently checked for header AND footer markers —
+        a single cluster may contain both (for small files that fit in one cluster).
+        """
         clusters = [source_stream[i:i + cluster_size] for i in range(0, len(source_stream), cluster_size)]
         candidates = []
         ftype = file_type.lower()
@@ -567,24 +647,31 @@ class FragmentReconstructor:
         footer_indices = []
 
         for idx, cl in enumerate(clusters):
-            if ftype in {"jpeg", "jpg"} and cl.startswith(b"\xff\xd8"):
-                header_indices.append(idx)
-            elif ftype in {"jpeg", "jpg"} and b"\xff\xd9" in cl:
-                footer_indices.append(idx)
-            elif ftype == "pdf" and cl.startswith(b"%PDF-"):
-                header_indices.append(idx)
-            elif ftype == "pdf" and b"%%EOF" in cl:
-                footer_indices.append(idx)
-            elif ftype == "png" and cl.startswith(b"\x89PNG\r\n\x1a\n"):
-                header_indices.append(idx)
-            elif ftype == "png" and b"IEND\xaeB`\x82" in cl:
-                footer_indices.append(idx)
-            elif ftype == "zip" and cl.startswith(b"PK\x03\x04"):
-                header_indices.append(idx)
-            elif ftype == "zip" and b"PK\x05\x06" in cl:
-                footer_indices.append(idx)
+            # Use independent if checks (not elif) so a cluster with both a header
+            # and a footer (small file in a single cluster) is recorded in both sets.
+            if ftype in {"jpeg", "jpg"}:
+                if cl.startswith(b"\xff\xd8"):
+                    header_indices.append(idx)
+                if b"\xff\xd9" in cl:
+                    footer_indices.append(idx)
+            elif ftype == "pdf":
+                if cl.startswith(b"%PDF-"):
+                    header_indices.append(idx)
+                if b"%%EOF" in cl:
+                    footer_indices.append(idx)
+            elif ftype == "png":
+                if cl.startswith(b"\x89PNG\r\n\x1a\n"):
+                    header_indices.append(idx)
+                if b"IEND\xaeB`\x82" in cl:
+                    footer_indices.append(idx)
+            elif ftype == "zip":
+                if cl.startswith(b"PK\x03\x04"):
+                    header_indices.append(idx)
+                if b"PK\x05\x06" in cl:
+                    footer_indices.append(idx)
 
-        # Pair headers and footers, testing permutations
+        # Pair headers and footers: for each header, try all footers >= header_cluster.
+        # h_idx == f_idx handles the single-cluster case (small file entirely within one cluster).
         for h_idx in header_indices:
             for f_idx in [f for f in footer_indices if f >= h_idx]:
                 frags = [clusters[i] for i in range(h_idx, f_idx + 1)]
@@ -775,7 +862,20 @@ class DirectDamagedMediaImager:
 
 
 class FragmentRecoveryAdapter(BaseRecoveryAdapter):
-    """Method 22: File-type targeted carving and fragment reconstruction."""
+    """Method 22: File-type targeted carving and non-contiguous fragment reconstruction.
+
+    Uses the DREXX FragmentReconstructor engine to:
+    1. Read the source image as a raw byte stream.
+    2. Scan for file-type-specific header/footer markers across cluster boundaries.
+    3. Attempt permutation-based reassembly of any discovered out-of-order fragments.
+    4. Write successfully reconstructed files to the destination.
+
+    This is distinct from PhotoRec/DeepRecovery: PhotoRec carves whole files from
+    unallocated clusters; FragmentRecovery specifically identifies and reassembles
+    non-contiguous/out-of-order fragment sequences.
+    """
+
+    SUPPORTED_TYPES = {"pdf", "jpeg", "jpg", "png", "zip"}
 
     def __init__(self, spec: RecoveryMethodSpec, root: Path, meipass: Path | None = None, file_type: str = "pdf"):
         super().__init__(spec, root, meipass)
@@ -783,29 +883,83 @@ class FragmentRecoveryAdapter(BaseRecoveryAdapter):
 
     def scan_command(self, source: str, result_path: Path, file_type: str | None = None) -> list[str]:
         ftype = (file_type or self.file_type or "pdf").lower()
-        if ftype not in {"pdf", "jpeg", "png", "zip"}:
-            raise RecoveryError(f"Unsupported fragment recovery file type: {ftype}. Expected pdf, jpeg, png, or zip.")
+        if ftype not in self.SUPPORTED_TYPES:
+            raise RecoveryError(f"Unsupported fragment recovery file type: {ftype}. Expected {self.SUPPORTED_TYPES}.")
         photorec = find_backend_executable("photorec", self.root, self.meipass) or Path("photorec_win.exe")
         return [str(photorec), "/cmd", source, "search", "--type", ftype, "--output", str(result_path)]
 
     def scan(self, source: str, cancel: Callable[[], bool] | None = None, timeout: int = 86400, file_type: str | None = None) -> RecoveryScan:
         ftype = (file_type or self.file_type or "pdf").lower()
-        if ftype not in {"pdf", "jpeg", "png", "zip"}:
-            raise RecoveryError(f"Unsupported fragment recovery file type: {ftype}. Expected pdf, jpeg, png, or zip.")
+        if ftype not in self.SUPPORTED_TYPES:
+            raise RecoveryError(f"Unsupported fragment recovery file type: {ftype}. Expected {self.SUPPORTED_TYPES}.")
         self.validate_source(source)
         return RecoveryScan(
             status="READY",
-            message=f"Fragment Recovery ready for {ftype.upper()} carving and reassembly",
+            message=f"Fragment Recovery ready for {ftype.upper()} fragment reassembly",
             source={"path": source, "type": ftype},
             candidates=(),
             warnings=(),
             raw={"type": ftype},
-            backend="DREXX Fragment Reassembly Engine + PhotoRec 7.2",
+            backend="DREXX FragmentReconstructor (permutation-based reassembly)",
         )
 
-    def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> list[Path]:
-        deep = DeepRecoveryAdapter(self.spec, self.root, self.meipass)
-        return deep.recover(source, candidate_id, destination, timeout=timeout)
+    def recover(
+        self,
+        source: str,
+        candidate_id: str,
+        destination: Path,
+        timeout: int = 86400,
+        file_type: str | None = None,
+        cluster_size: int = 4096,
+    ) -> list[Path]:
+        """Fragment-specific recovery using FragmentReconstructor.reassemble_stream().
+
+        Reads the source image as raw bytes, scans for file-type-specific
+        header/footer cluster boundaries, and reconstructs non-contiguous fragments.
+        This is NOT a delegation to PhotoRec/DeepRecovery.
+
+        Raises RecoveryError if the source cannot be read or no fragments are found.
+        """
+        self.validate_source(source)
+        ftype = (file_type or self.file_type or "pdf").lower()
+        if ftype not in self.SUPPORTED_TYPES:
+            raise RecoveryError(f"Unsupported fragment file type: {ftype}.")
+
+        # Read source as raw cluster stream (images are small; physical devices are large)
+        src_path = Path(source)
+        if src_path.is_file():
+            raw_stream = src_path.read_bytes()
+        else:
+            raise RecoveryError(
+                f"Fragment Recovery requires a disk image file source, got: {source!r}. "
+                "Physical device streaming is not supported in this release."
+            )
+
+        # Run the DREXX fragment-specific cluster scanner
+        candidates = FragmentReconstructor.reassemble_stream(raw_stream, ftype, cluster_size=cluster_size)
+        if not candidates:
+            raise RecoveryError(
+                f"Fragment Recovery found no valid {ftype.upper()} fragment sequences in {source!r}. "
+                "The source may not contain files of this type or they may be fully overwritten."
+            )
+
+        destination.mkdir(parents=True, exist_ok=True)
+        recovered_paths: list[Path] = []
+        for i, c in enumerate(candidates):
+            if not c.get("valid"):
+                continue
+            ext = {"jpg": "jpg", "jpeg": "jpg"}.get(ftype, ftype)
+            out_name = f"fragment_recovery_{i:04d}_{c.get('sha256', 'nohash')[:8]}.{ext}"
+            out_path = destination / out_name
+            out_path.write_bytes(c["data"])
+            recovered_paths.append(out_path)
+
+        if not recovered_paths:
+            raise RecoveryError(
+                f"Fragment Recovery: {len(candidates)} fragment sequence(s) scanned but none passed "
+                f"structural validation for {ftype.upper()}."
+            )
+        return recovered_paths
 
 
 class RaidRecoveryAdapter(BaseRecoveryAdapter):

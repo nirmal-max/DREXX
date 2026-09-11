@@ -1175,6 +1175,7 @@ class DrexApp(tk.Tk):
             btn_frame.pack(anchor="w", fill="x", pady=(10, 0))
             if kind == "recovery":
                 ttk.Button(btn_frame, text="Select Recovery Folder", style="DrexPrimary.TButton", command=lambda: self.choose_folder("recovery")).pack(side="left")
+                ttk.Button(btn_frame, text="Select Disk Image", style="Drex.TButton", command=self.choose_recovery_image).pack(side="left", padx=(8, 0))
             else:
                 ttk.Button(btn_frame, text="Add File", style="DrexPrimary.TButton", command=self.choose_file).pack(side="left")
                 ttk.Button(btn_frame, text="Add Folder", style="Drex.TButton", command=self.choose_folder).pack(side="left", padx=(8, 0))
@@ -1268,6 +1269,19 @@ class DrexApp(tk.Tk):
         )
         if chosen:
             self.set_target(Path(chosen))
+
+    def choose_recovery_image(self):
+        """Allow selecting a disk image file (.img, .dd, .raw, .iso) directly as recovery source."""
+        chosen = filedialog.askopenfilename(
+            title="Select a Disk Image for Recovery (read-only source)",
+            filetypes=[
+                ("Disk images", "*.img *.dd *.raw *.iso *.bin *.e01 *.dmg"),
+                ("All files", "*.*"),
+            ],
+        )
+        if chosen:
+            self.set_target(Path(chosen))
+            self._recovery_source_is_image = True
 
     def set_target(self, target: Path):
         self.target = target
@@ -2065,12 +2079,34 @@ class DrexApp(tk.Tk):
             messagebox.showwarning("Select a target", "Choose a file, folder, or recovery image before starting.")
             return
         if kind == "recovery":
-            if not self.target.is_dir():
-                messagebox.showerror("Invalid recovery folder", "Select a folder. Recovery uses the folder to identify its backing storage device.")
+            # Recovery source can be a folder (backing physical device) OR a disk image file
+            is_image_file = (
+                self.target.is_file()
+                and self.target.suffix.lower() in {".img", ".dd", ".raw", ".iso", ".bin", ".e01", ".dmg"}
+            ) or getattr(self, "_recovery_source_is_image", False)
+            if not self.target.is_dir() and not is_image_file:
+                messagebox.showerror(
+                    "Invalid recovery source",
+                    "Select a folder (to scan its backing device) or a disk image file (.img, .dd, .raw)."
+                )
                 return
             availability, reason = self._method_status(method_id, kind)
             if availability != "Available":
                 messagebox.showerror("Recovery engine unavailable", reason)
+                return
+            if is_image_file:
+                # Use image file directly as the recovery source — no physical device lookup
+                adapter = self.recovery_dispatcher.get(method_id)
+                self._recovery_source = str(self.target)
+                self.progress_value.set(0)
+                self.cancel_event.clear()
+                self.status_label.configure(text="SCANNING", fg=BLUE)
+                self.append_log(f"Recovery source (disk image): {self.target}")
+                self.append_log(f"{label_for_recovery(method_id)} scan starting; image is read-only.")
+                self.start_button.configure(state="disabled")
+                self.cancel_button.configure(state="normal")
+                thread = threading.Thread(target=self._run_recovery_scan, args=(method_id, adapter, self.target, str(self.target)), daemon=True)
+                thread.start()
                 return
             drive = get_drive_for_path(self.target, self.drives)
             if drive is None:
