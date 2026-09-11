@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['D:/DREXX/drex_app.py'],
+    ['../drex_app.py'],
     pathex=[],
     binaries=[],
     datas=[('D:/DREXX/methods', 'methods'), ('D:/DREXX/native_bin', 'native_bin')],
