@@ -496,7 +496,7 @@ class DeepRecoveryAdapter(BaseRecoveryAdapter):
         if res.exit_code == -1 and "740" in (res.stderr or ""):
             raise RecoveryError(
                 "PhotoRec requires Administrator privileges on Windows. "
-                "Please run DREXX as Administrator (right-click → Run as administrator) "
+                "Please run DREXX as Administrator (right-click -> Run as administrator) "
                 "and retry Deep Recovery. [WinError 740: The requested operation requires elevation]"
             )
         if res.exit_code not in (0, -1) and res.exit_code is not None:
