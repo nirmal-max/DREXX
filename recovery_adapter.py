@@ -489,6 +489,22 @@ class DeepRecoveryAdapter(BaseRecoveryAdapter):
         destination.mkdir(parents=True, exist_ok=True)
         cmd = build_photorec_command(photorec, source, str(destination))
         res = CentralProcessRunner.run(cmd, timeout=timeout)
+
+        # photorec_win.exe embeds requestedExecutionLevel=highestAvailable.
+        # On a non-elevated shell Windows returns WinError 740 and exit_code -1.
+        # Do NOT silently return 0 files — raise a clear, actionable error.
+        if res.exit_code == -1 and "740" in (res.stderr or ""):
+            raise RecoveryError(
+                "PhotoRec requires Administrator privileges on Windows. "
+                "Please run DREXX as Administrator (right-click → Run as administrator) "
+                "and retry Deep Recovery. [WinError 740: The requested operation requires elevation]"
+            )
+        if res.exit_code not in (0, -1) and res.exit_code is not None:
+            raise RecoveryError(
+                f"PhotoRec exited with non-zero status {res.exit_code}. "
+                f"stderr: {(res.stderr or '')[:400]}"
+            )
+
         recovered = [p for p in destination.rglob("*") if p.is_file()]
         return recovered
 

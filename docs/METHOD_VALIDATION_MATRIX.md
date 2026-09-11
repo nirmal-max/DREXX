@@ -28,7 +28,7 @@ This matrix documents the verification state, backend integration, test target, 
 | **18** | Smart Recovery | Data Recovery | TSK (`fsstat.exe` + `fls.exe` + `icat.exe`) | `native_bin/drex_test.img` (64MB FAT32) | Geometry analysis parsed FAT32, 512B sectors, DREXTEST label; prioritized & extracted Inodes with 100% SHA-256 match | `HASH_MATCH` | **PASS — REAL DISK IMAGE** | Filesystem geometry analysis informs candidate ranking. |
 | **19** | Targeted Inode Recovery | Data Recovery | TSK (`fls.exe` + `icat.exe`) | `native_bin/drex_test.img` (64MB FAT32) | Targeted exact Inode extraction of Inode 22 (`file1.txt`) via `CentralProcessRunner.binary_run()` | `HASH_MATCH` | **PASS — REAL DISK IMAGE** | Exact inode mapping recovery. |
 | **20** | Filesystem Recovery | Data Recovery | TSK (`tsk_recover.exe`) | `native_bin/drex_test.img` (64MB FAT32) | Extracted complete nested directory tree (`DREX_TEST/DATA/database.db`, `PROJECT/main.cpp`, `README.txt`) with exact SHA-256 hashes | `HASH_MATCH` | **PASS — REAL DISK IMAGE** | Preserves directory hierarchy. |
-| **21** | Deep Recovery | Data Recovery | PhotoRec 7.2 (`photorec_win.exe`) | `native_bin/drex_test.img` (64MB FAT32) | PhotoRec 7.2 binary present; executable batch command builder invoked via CentralProcessRunner | `VERIFIED` | **PASS — REAL DISK IMAGE** | On Windows, PhotoRec binary embeds UAC `requireAdministrator` manifest. |
+| **21** | Deep Recovery | Data Recovery | PhotoRec 7.2 (`photorec_win.exe`) | `native_bin/drex_test.img` (64MB FAT32) | PhotoRec 7.2.0.0 confirmed via PE FileVersionInfo; all subprocess invocation attempts (direct, CentralProcessRunner) returned `[WinError 740]`; carved files = 0; source SHA-256 unchanged (`CED107EC…`). DREXX command builder and routing confirmed correct. Execution gated at OS loader. | `UAC_BLOCKED` | **EXECUTION_BLOCKED — UAC_ELEVATION_REQUIRED** | `photorec_win.exe` embeds Windows manifest `requestedExecutionLevel=highestAvailable`; all invocations from non-elevated shell return WinError 740. Run DREXX elevated (Run as Administrator) for actual carving. |
 | **22** | Fragment Recovery | Data Recovery | DREXX `FragmentReconstructor` | Scrambled Out-of-Order JPEG/PDF Streams | Correctly reassembled `[p3, p1, p4, p2]` permutation with 100% SHA-256 match; naive concat differs | `HASH_MATCH` | **PASS — REAL FIXTURE** | Permutation reassembly algorithm for JPEG, PDF, PNG, ZIP. |
 | **23** | Storage / RAID Recovery | Data Recovery | DREXX `VirtualRaidReconstructor` | Synthetic RAID 0, 1, 5, 10 Buffers | Recovered degraded RAID 5 array with missing disk via XOR parity reconstruction; 100% SHA-256 match | `HASH_MATCH` | **SIMULATION_ONLY** | In-memory synthetic RAID array reconstruction (Linux mdadm unavailable on Windows). |
 | **24** | Damaged Media Recovery | Data Recovery | `DirectDamagedMediaImager` | Synthetic Bad Sector Buffer (3 sectors) | Rescued intact sectors, skipped bad blocks, wrote GNU ddrescue-compatible `.map` file | `VERIFIED` | **PASS — REAL FIXTURE** | Native fallback imager (GNU ddrescue physical executable unavailable on Windows). |
@@ -39,9 +39,10 @@ This matrix documents the verification state, backend integration, test target, 
 ## Exact Method Classification Summary (25 Methods Total)
 
 - **PASS — REAL PHYSICAL FILE (4 methods):** #8, #11, #14, #16
-- **PASS — REAL DISK IMAGE (6 methods):** #17, #18, #19, #20, #21, #25
+- **PASS — REAL DISK IMAGE (5 methods):** #17, #18, #19, #20, #25
 - **PASS — REAL FIXTURE / ENGINE (3 methods):** #15, #22, #24
 - **PASS — POLICY ENGINE (1 method):** #12
 - **SIMULATION_ONLY (3 methods):** #9, #10, #23
 - **UNSUPPORTED_HARDWARE (4 methods):** #3, #4, #5, #6
 - **NOT_PHYSICALLY_VALIDATED / PHYSICAL_EXECUTION_UNAVAILABLE (4 methods):** #1, #2, #7, #13
+- **EXECUTION_BLOCKED — UAC_ELEVATION_REQUIRED (1 method):** #21 — PhotoRec 7.2.0.0 binary verified; execution requires elevated shell (Run as Administrator). WinError 740 in all non-elevated attempts.
