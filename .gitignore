@@ -1,2 +1,18 @@
 repo/autopsy-develop.zip.crdownload
 *.crdownload
+
+# Downloaded archive files — not committed to repo (too large, fetchable)
+native_bin/*.zip
+native_bin/tsk_extract/
+native_bin/testdisk_extract/
+
+# Test artifacts — reproducible, not committed
+native_bin/drex_test.img
+native_bin/drex_recovery_out/
+
+# Build artifacts
+build/pyinstaller/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
