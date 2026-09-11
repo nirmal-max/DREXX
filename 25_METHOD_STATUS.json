@@ -1,0 +1,182 @@
+{
+  "last_updated": "2026-09-11",
+  "validation_run": "FINAL_ALL_METHOD_VALIDATION",
+  "summary_counts": {
+    "real_execution_pass": 11,
+    "decision_engine_pass": 5,
+    "synthetic_pass": 2,
+    "partial": 2,
+    "unsupported": 4,
+    "backend_unavailable": 1,
+    "not_tested": 0,
+    "failed": 0,
+    "total": 25
+  },
+  "methods": {
+    "1": {
+      "name": "NIST SP 800-88 Rev.2",
+      "category": "Drive Erasure",
+      "status": "PASS — DECISION ENGINE VERIFIED",
+      "backend": "NIST SP 800-88r2 Policy Engine"
+    },
+    "2": {
+      "name": "Smart Sanitization",
+      "category": "Drive Erasure",
+      "status": "PASS — DECISION ENGINE VERIFIED",
+      "backend": "Smart Sanitization Multi-Tier Evaluator"
+    },
+    "3": {
+      "name": "Device-Native Sanitize",
+      "category": "Drive Erasure",
+      "status": "UNSUPPORTED",
+      "reason": "USB bridge does not passthrough controller-level Sanitize CDBs"
+    },
+    "4": {
+      "name": "ATA Secure Erase",
+      "category": "Drive Erasure",
+      "status": "UNSUPPORTED",
+      "reason": "Requires direct ATA/AHCI hardware port"
+    },
+    "5": {
+      "name": "NVMe Secure Erase",
+      "category": "Drive Erasure",
+      "status": "UNSUPPORTED",
+      "reason": "Requires native NVMe PCIe controller"
+    },
+    "6": {
+      "name": "IEEE 2883 Purge",
+      "category": "Drive Erasure",
+      "status": "PASS — DECISION ENGINE VERIFIED",
+      "backend": "IEEE 2883 Policy Engine"
+    },
+    "7": {
+      "name": "Verified Overwrite",
+      "category": "Drive Erasure",
+      "status": "PASS — REAL EXECUTION VERIFIED",
+      "backend": "Multi-pass Overwrite Engine with Readback Verification"
+    },
+    "8": {
+      "name": "CSPRNG Random Overwrite",
+      "category": "File/Folder Erasure",
+      "status": "PASS — REAL EXECUTION VERIFIED",
+      "backend": "os.urandom Cryptographic Overwrite Engine"
+    },
+    "9": {
+      "name": "Cryptographic Erasure",
+      "category": "File/Folder Erasure",
+      "status": "PASS — SYNTHETIC BACKEND VERIFIED",
+      "backend": "AES-256 Envelope Key Purge Engine"
+    },
+    "10": {
+      "name": "File Slack / Cluster-Tip",
+      "category": "File/Folder Erasure",
+      "status": "PASS — SYNTHETIC BACKEND VERIFIED",
+      "backend": "Cluster-Tip Zeroing Engine"
+    },
+    "11": {
+      "name": "Filesystem Metadata Sanitization",
+      "category": "File/Folder Erasure",
+      "status": "PASS — REAL EXECUTION VERIFIED",
+      "backend": "OS Metadata Scrub & Neutralizer"
+    },
+    "12": {
+      "name": "NIST SP 800-88 Policy Engine",
+      "category": "File/Folder Erasure",
+      "status": "PASS — DECISION ENGINE VERIFIED",
+      "backend": "NIST SP 800-88 Decision Matrix"
+    },
+    "13": {
+      "name": "Secure Free-Space Wiping",
+      "category": "File/Folder Erasure",
+      "status": "PASS — REAL EXECUTION VERIFIED",
+      "backend": "Unallocated Space Zero-Fill Engine"
+    },
+    "14": {
+      "name": "Single-Pass Zero Overwrite",
+      "category": "File/Folder Erasure",
+      "status": "PASS — REAL EXECUTION VERIFIED",
+      "backend": "Single-Pass Zero Engine"
+    },
+    "15": {
+      "name": "Storage-Aware Sanitization Fallback",
+      "category": "File/Folder Erasure",
+      "status": "PASS — DECISION ENGINE VERIFIED",
+      "backend": "Storage Controller Fallback Matrix"
+    },
+    "16": {
+      "name": "Temporary / Cache Sanitization",
+      "category": "File/Folder Erasure",
+      "status": "PASS — REAL EXECUTION VERIFIED",
+      "backend": "Temp Cache Scanner & Secure Overwrite"
+    },
+    "17": {
+      "name": "Quick Recovery",
+      "category": "Recovery",
+      "status": "PASS — REAL EXECUTION VERIFIED",
+      "backend": "TSK 4.15.0 fls.exe + icat.exe",
+      "files_recovered": 19
+    },
+    "18": {
+      "name": "Smart Recovery",
+      "category": "Recovery",
+      "status": "PASS — REAL EXECUTION VERIFIED",
+      "backend": "TSK 4.15.0 fsstat + fls + tsk_recover",
+      "files_recovered": 19
+    },
+    "19": {
+      "name": "Targeted Recovery",
+      "category": "Recovery",
+      "status": "PASS — REAL EXECUTION VERIFIED",
+      "backend": "TSK 4.15.0 icat.exe",
+      "target": "Inode 8470 WhatsApp JPEG",
+      "files_recovered": 1
+    },
+    "20": {
+      "name": "Filesystem Recovery",
+      "category": "Recovery",
+      "status": "PASS — REAL EXECUTION VERIFIED",
+      "backend": "TSK 4.15.0 tsk_recover.exe",
+      "files_recovered": 19
+    },
+    "21": {
+      "name": "Deep Recovery",
+      "category": "Recovery",
+      "status": "PARTIAL",
+      "backend": "PhotoRec 7.2",
+      "reason": "Batch non-interactive mode requires elevated raw disk lock on Windows"
+    },
+    "22": {
+      "name": "Fragment Recovery",
+      "category": "Recovery",
+      "status": "PARTIAL",
+      "backend": "PhotoRec 7.2",
+      "reason": "File carving requires elevated raw disk lock on Windows"
+    },
+    "23": {
+      "name": "RAID / Storage Recovery",
+      "category": "Recovery",
+      "status": "UNSUPPORTED",
+      "reason": "Source is a single USB device, not a RAID array"
+    },
+    "24": {
+      "name": "Damaged Media Recovery",
+      "category": "Recovery",
+      "status": "BACKEND UNAVAILABLE",
+      "reason": "GNU ddrescue is not available natively on Windows"
+    },
+    "25": {
+      "name": "Forensic Recovery",
+      "category": "Recovery",
+      "status": "PASS — REAL EXECUTION VERIFIED",
+      "backend": "TSK 4.15.0 fls + icat + Evidence Ledger",
+      "files_recovered": 19,
+      "valid_jpegs_verified": 12
+    }
+  },
+  "regression_tests": {
+    "total": 81,
+    "passed": 81,
+    "failed": 0,
+    "skipped": 0
+  }
+}

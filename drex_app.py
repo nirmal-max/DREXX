@@ -2193,10 +2193,60 @@ def verify_certificate_record(path: str) -> bool:
     return CertificateManager(store).verify(record)
 
 
+def run_doctor() -> dict[str, Any]:
+    from recovery_backends import BACKENDS, find_backend_executable
+    is_admin = False
+    if os.name == "nt":
+        try:
+            is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
+        except Exception:
+            pass
+    backend_report = {}
+    for bid, spec in BACKENDS.items():
+        exe = find_backend_executable(bid, ROOT)
+        backend_report[bid] = {
+            "name": bid,
+            "installed": exe is not None,
+            "executable_path": str(exe) if exe else None,
+            "project_url": spec.project_url,
+            "license": spec.license_name,
+        }
+    drives = discover_drives()
+    report = {
+        "app": APP_NAME,
+        "version": VERSION,
+        "python_version": sys.version,
+        "platform": sys.platform,
+        "is_admin": is_admin,
+        "methods_count": {
+            "drive": len(DRIVE_METHODS),
+            "file": len(FILE_METHODS),
+            "recovery": len(RECOVERY_METHODS),
+            "total": len(DRIVE_METHODS) + len(FILE_METHODS) + len(RECOVERY_METHODS),
+        },
+        "backends": backend_report,
+        "detected_drives": [
+            {
+                "path": d.path,
+                "model": d.model,
+                "serial": d.serial,
+                "capacity": d.capacity,
+                "drive_type": d.drive_type,
+                "health": d.health,
+            }
+            for d in drives
+        ],
+    }
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = argv or sys.argv[1:]
     if "--version" in argv:
         print(f"{APP_NAME} {VERSION}")
+        return 0
+    if "--doctor" in argv:
+        print(json.dumps(run_doctor(), indent=2))
         return 0
     if "--self-test" in argv:
         with tempfile.TemporaryDirectory(prefix="drex-self-test-") as temp:

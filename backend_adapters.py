@@ -86,12 +86,10 @@ def parse_fls_output(stdout: str, module: str = "fls") -> list[RecoveryCandidate
             continue
 
         inode_str = inode_match.group(1)
-        # Use the base inode number (before any -attr-id suffix) as the candidate_id
-        base_inode = inode_str.split("-")[0]
 
-        if base_inode in seen_ids:
+        if inode_str in seen_ids:
             continue
-        seen_ids.add(base_inode)
+        seen_ids.add(inode_str)
 
         # Extract filename - everything after "inode:  "
         name_start = inode_match.end()
@@ -120,8 +118,8 @@ def parse_fls_output(stdout: str, module: str = "fls") -> list[RecoveryCandidate
             file_type = type_map.get(type_char, type_char)
 
         candidates.append(RecoveryCandidate(
-            candidate_id=base_inode,
-            name=name,
+            candidate_id=inode_str,
+            name=Path(name).name if name else "Unknown",
             filesystem="Unknown",  # fls doesn't report this per-file
             size=size,
             deleted=deleted,
@@ -134,6 +132,8 @@ def parse_fls_output(stdout: str, module: str = "fls") -> list[RecoveryCandidate
             source_partition=None,
             recoverable=deleted,   # Only deleted entries are recoverable in the TSK sense
             backend="tsk-fls",
+            is_directory=(file_type == "directory"),
+            relative_path=name,
         ))
 
     return candidates
@@ -338,37 +338,28 @@ def build_ddrescue_command(ddrescue_exe: Path, infile: str, outfile: str,
     return cmd
 
 
-def parse_ddrescue_mapfile(mapfile_path: Path) -> dict[str, Any]:
-    """Parse a ddrescue mapfile to determine rescue progress.
-
-    Mapfile format (after header comments starting with #):
-        Line 1: current_pos  current_status
-        Subsequent lines: pos  size  status_char
-
-    Status characters:
-        ?  non-tried
-        *  non-trimmed
-        /  non-scraped
-        -  bad-sector
-        +  rescued (successfully copied)
-    """
+def parse_ddrescue_mapfile(mapfile: Path | str) -> dict[str, Any]:
+    """Parse a ddrescue mapfile (Path, file path str, or raw text) to determine rescue progress."""
     result: dict[str, Any] = {"rescued_bytes": 0, "bad_bytes": 0,
                                "non_tried_bytes": 0, "total_bytes": 0,
                                "regions": []}
-    if not mapfile_path.is_file():
+    if isinstance(mapfile, Path) or (isinstance(mapfile, str) and "\n" not in mapfile and Path(mapfile).is_file()):
+        p = Path(mapfile)
+        if not p.is_file():
+            return result
+        lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
+    elif isinstance(mapfile, str):
+        lines = mapfile.splitlines()
+    else:
         return result
-
-    lines = mapfile_path.read_text(encoding="utf-8", errors="replace").splitlines()
-    status_header_found = False
     for line in lines:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        # Skip the status line (first non-comment, non-empty line)
-        if not status_header_found:
-            status_header_found = True
-            continue
         parts = line.split()
+        if len(parts) == 2:
+            # Status header line: current_pos current_status
+            continue
         if len(parts) >= 3:
             try:
                 pos = int(parts[0], 0)
@@ -460,3 +451,91 @@ BACKEND_CAPABILITIES = {
                  "but cannot automate it non-interactively.",
     },
 }
+
+
+@dataclass(frozen=True)
+class ProcessResult:
+    command: tuple[str, ...]
+    exit_code: int
+    stdout: str
+    stderr: str
+    duration_seconds: float
+    timed_out: bool = False
+    cancelled: bool = False
+
+    @property
+    def success(self) -> bool:
+        return self.exit_code == 0 and not self.timed_out and not self.cancelled
+
+
+class CentralProcessRunner:
+    """Centralized process execution with safe argument arrays, timeout, and cancellation."""
+
+    @staticmethod
+    def run(
+        command: list[str],
+        *,
+        timeout: int = 86400,
+        cancel_check: Callable[[], bool] | None = None,
+        cwd: str | Path | None = None,
+        env: dict[str, str] | None = None,
+    ) -> ProcessResult:
+        if not command:
+            raise ValueError("Command array must not be empty.")
+        
+        start_time = time.monotonic()
+        try:
+            proc = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=str(cwd) if cwd else None,
+                env=env,
+            )
+        except OSError as exc:
+            return ProcessResult(
+                command=tuple(command),
+                exit_code=-1,
+                stdout="",
+                stderr=str(exc),
+                duration_seconds=time.monotonic() - start_time,
+            )
+
+        timed_out = False
+        cancelled = False
+
+        while proc.poll() is None:
+            if cancel_check and cancel_check():
+                cancelled = True
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                break
+
+            if (time.monotonic() - start_time) >= timeout:
+                timed_out = True
+                proc.kill()
+                proc.wait()
+                break
+
+            time.sleep(0.05)
+
+        stdout, stderr = proc.communicate()
+        duration = time.monotonic() - start_time
+
+        return ProcessResult(
+            command=tuple(command),
+            exit_code=proc.returncode if proc.returncode is not None else -1,
+            stdout=stdout or "",
+            stderr=stderr or "",
+            duration_seconds=duration,
+            timed_out=timed_out,
+            cancelled=cancelled,
+        )
+

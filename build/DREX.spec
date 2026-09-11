@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['D:/DREX/drex_app.py'],
+    ['D:/DREXX/drex_app.py'],
     pathex=[],
     binaries=[],
-    datas=[('D:/DREX/methods', 'methods')],
+    datas=[('D:/DREXX/methods', 'methods')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

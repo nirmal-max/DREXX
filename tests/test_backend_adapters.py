@@ -94,7 +94,7 @@ class TestFlsParsing:
         )
         candidates = parse_fls_output(output)
         assert len(candidates) == 1
-        assert candidates[0].candidate_id == "14"
+        assert candidates[0].candidate_id == "14-128-4"
         assert candidates[0].size == 0  # last numeric field is gid=0
 
     def test_empty_output(self):

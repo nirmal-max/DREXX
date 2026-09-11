@@ -12,6 +12,8 @@ native_bin/drex_recovery_out/
 
 # Build artifacts
 build/pyinstaller/
+build/dist/
+build/native/
 __pycache__/
 *.pyc
 *.pyo

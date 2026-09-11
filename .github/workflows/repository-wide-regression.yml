@@ -1,0 +1,121 @@
+name: Repository-wide 100x Regression
+
+on:
+  push:
+    branches: [main, repair/production-ready-cli-fix]
+  workflow_dispatch:
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python test runner
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Define the 27 functional modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/python-modules.txt <<'EOF'
+          methods/Drive Erasure/ata_secure_erase_v2.1.0
+          methods/Drive Erasure/device_native_sanitize_v2.1.0
+          methods/Drive Erasure/ieee_2883_purge_v2.1.0
+          methods/Drive Erasure/nist_sp_800_88r2_v2.1.0
+          methods/Drive Erasure/nvme_secure_erase_v2.1.0
+          methods/Drive Erasure/smart_sanitization_v2.1.0
+          methods/Drive Erasure/verified_overwrite_v2.1.0
+          methods/File-Folder Erasure/CSPRNG_Random_Overwrite_Production_Component_v0.1.0/csprng_random_overwrite
+          methods/File-Folder Erasure/Cryptographic_Erasure_Sanitization_Production_Component_v0.1.0/cryptographic_erasure_sanitization
+          methods/File-Folder Erasure/File_Slack_Cluster_Tip_Sanitization_Production_Component_v0.1.0/file_slack_cluster_tip_sanitization
+          methods/File-Folder Erasure/Filesystem_Metadata_Sanitization_Production_Component_v0.1.0/filesystem_metadata_sanitization
+          methods/File-Folder Erasure/NIST_SP_800_88_Sanitization_Policy_Engine_v0.1.0/nist_sanitization_policy
+          methods/File-Folder Erasure/Secure_Free_Space_Wiping_Production_Component_v0.1.0/secure_free_space_wiping
+          methods/File-Folder Erasure/Single-Pass_Zero_Overwrite_Production_Component_v0.1.0/single_pass_zero_overwrite
+          methods/File-Folder Erasure/Storage_Aware_Sanitization_Fallback_Production_Component_v0.1.0/storage_aware_sanitization
+          methods/File-Folder Erasure/Temporary_Cache_Residual_Trace_Sanitization_Production_Component_v0.1.0/temporary_cache_residual_trace_sanitization
+          methods/File-Folder Erasure/Filesystem Metadata Sanitization Standalone
+          methods/Drive Erasure/Media Destruction/media_destruction_v2.1.0
+          EOF
+          cat > /tmp/recovery-modules.txt <<'EOF'
+          methods/Recovery/Module1_Quick_Recovery_Production_Baseline_v0.1.0/module1_quick_recovery
+          methods/Recovery/Module2_Smart_Recovery_Production_Baseline_v0.1.0/module2_smart_recovery
+          methods/Recovery/Module3_Targeted_Recovery_Production_Baseline_v0.1.0/module3_targeted_recovery
+          methods/Recovery/Module4_Filesystem_Recovery_Production_Baseline_v0.1.0/module4_filesystem_recovery
+          methods/Recovery/Module5_Deep_Recovery_Production_Baseline_v0.1.0/module5_deep_recovery
+          methods/Recovery/Module6_Fragment_Recovery_Production_Baseline_v0.1.0/module6_fragment_recovery
+          methods/Recovery/Module7_Storage_RAID_Recovery_Production_Baseline_v0.1.0/module7_storage_raid_recovery
+          methods/Recovery/Module8_Damaged_Media_Recovery_Production_Baseline_v0.1.0/module8_damaged_media
+          methods/Recovery/Module9_Forensic_Recovery_Production_Baseline_v0.1.0/module9_forensic_recovery
+          EOF
+          test "$(wc -l < /tmp/python-modules.txt)" -eq 18
+          test "$(wc -l < /tmp/recovery-modules.txt)" -eq 9
+          echo '18 Python modules + 9 recovery modules = 27 functional modules.'
+
+      - name: Compile all Python sources
+        shell: bash
+        run: python -m compileall -q .
+
+      - name: Install and smoke-test every Python module
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r module; do
+            echo "=== PYTHON MODULE: $module ==="
+            test -f "$module/pyproject.toml"
+            python -m pip install -e "$module"
+            python -m pytest -q "$module/tests"
+          done < /tmp/python-modules.txt
+
+      - name: Run every Python module 100 times
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r module; do
+            echo "=== 100X PYTHON: $module ==="
+            for i in $(seq 1 100); do
+              echo "--- $module iteration $i/100 ---"
+              python -m pytest -q "$module/tests"
+            done
+          done < /tmp/python-modules.txt
+
+      - name: Build every recovery module
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/drex-build
+          mkdir -p /tmp/drex-build
+          n=0
+          while IFS= read -r module; do
+            n=$((n+1))
+            echo "=== BUILD RECOVERY $n/9: $module ==="
+            test -f "$module/CMakeLists.txt"
+            cmake -S "$module" -B "/tmp/drex-build/$n" -DCMAKE_BUILD_TYPE=Release
+            cmake --build "/tmp/drex-build/$n" --config Release --parallel
+          done < /tmp/recovery-modules.txt
+
+      - name: Run every recovery module 100 times
+        shell: bash
+        run: |
+          set -euo pipefail
+          n=0
+          while IFS= read -r module; do
+            n=$((n+1))
+            echo "=== 100X RECOVERY $n/9: $module ==="
+            for i in $(seq 1 100); do
+              echo "--- $module iteration $i/100 ---"
+              ctest --test-dir "/tmp/drex-build/$n" --output-on-failure -C Release
+            done
+          done < /tmp/recovery-modules.txt
+
+      - name: Final 27-module gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'PASS: 27 functional modules completed their smoke test and 100 regression iterations.'

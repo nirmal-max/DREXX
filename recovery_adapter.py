@@ -21,8 +21,60 @@ from typing import Any, Callable
 from recovery_backends import METHOD_BACKENDS, backend_status
 
 
+from enum import Enum
+
+
+class TargetKind(str, Enum):
+    FILE = "file"
+    FOLDER = "folder"
+    NESTED_FOLDER = "nested_folder"
+    DISK_IMAGE = "disk_image"
+    PARTITION = "partition"
+    PHYSICAL_DEVICE = "physical_device"
+
+
+class RecoveryState(str, Enum):
+    IDLE = "IDLE"
+    DISCOVERING = "DISCOVERING"
+    SCANNING = "SCANNING"
+    CANDIDATES_FOUND = "CANDIDATES_FOUND"
+    READY_TO_RECOVER = "READY_TO_RECOVER"
+    RECOVERING = "RECOVERING"
+    VERIFYING = "VERIFYING"
+    RECOVERED = "RECOVERED"
+    PARTIAL = "PARTIAL"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    TIMEOUT = "TIMEOUT"
+
+
 class RecoveryError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class RecoveryTarget:
+    path: str
+    kind: TargetKind
+    read_only: bool = True
+    size_bytes: int | None = None
+    sector_size: int = 512
+    backing_device: str | None = None
+
+    def validate_destination(self, destination: Path) -> None:
+        """Enforce strict read-only isolation between source target and recovery destination."""
+        dest_resolved = destination.resolve()
+        if not self.path.startswith("\\\\.\\"):
+            try:
+                src_resolved = Path(self.path).resolve()
+                if dest_resolved == src_resolved:
+                    raise RecoveryError("Destination directory cannot be identical to the recovery source.")
+                if src_resolved in dest_resolved.parents:
+                    raise RecoveryError("Destination directory cannot reside inside the recovery source tree.")
+                if dest_resolved in src_resolved.parents:
+                    raise RecoveryError("Source tree cannot reside inside the recovery destination directory.")
+            except OSError as exc:
+                raise RecoveryError(f"Could not validate path safety: {exc}") from exc
 
 
 @dataclass(frozen=True)
@@ -42,6 +94,43 @@ class RecoveryCandidate:
     recoverable: bool | None = None
     backend: str | None = None
     verification_state: str = "UNKNOWN"
+    parent_candidate: str | None = None
+    is_directory: bool = False
+    relative_path: str | None = None
+
+
+def sector_to_byte_offset(sector: int, sector_size: int = 512) -> int:
+    if sector < 0 or sector_size <= 0:
+        raise ValueError("sector and sector_size must be non-negative positive values")
+    return sector * sector_size
+
+
+def byte_to_sector_offset(bytes_val: int, sector_size: int = 512) -> int:
+    if bytes_val < 0 or sector_size <= 0:
+        raise ValueError("bytes_val and sector_size must be non-negative positive values")
+    return bytes_val // sector_size
+
+
+def reconstruct_folder_tree(candidates: list[RecoveryCandidate], destination: Path) -> dict[str, int]:
+    """Ensure parent directory hierarchies exist in the recovery destination.
+
+    Maintains directory tree hierarchy according to relative_path or original_path.
+    """
+    destination.mkdir(parents=True, exist_ok=True)
+    created_dirs: set[Path] = set()
+    for cand in candidates:
+        rel = cand.relative_path or cand.original_path
+        if rel:
+            rel_p = Path(rel.lstrip("/\\"))
+            target_dirs = [rel_p] if cand.is_directory else [rel_p.parent]
+            for d in target_dirs:
+                curr = destination
+                for part in d.parts:
+                    curr = curr / part
+                    if not curr.exists():
+                        curr.mkdir(parents=True, exist_ok=True)
+                        created_dirs.add(curr.relative_to(destination))
+    return {"created_directories": len(created_dirs)}
 
 
 @dataclass(frozen=True)
@@ -304,8 +393,32 @@ class DeepRecoveryAdapter(JsonScanAdapter):
 
 
 class FragmentRecoveryAdapter(JsonScanAdapter):
-    def scan_command(self, source: str, result_path: Path) -> list[str]:
-        raise RecoveryError("Fragment Recovery requires an explicit file type (pdf, jpeg, png, or zip) before scanning.")
+    def __init__(self, spec: RecoveryMethodSpec, root: Path, meipass: Path | None = None, file_type: str = "pdf"):
+        super().__init__(spec, root, meipass)
+        self.file_type = file_type.lower()
+
+    def scan_command(self, source: str, result_path: Path, file_type: str | None = None) -> list[str]:
+        ftype = (file_type or self.file_type or "pdf").lower()
+        if ftype not in {"pdf", "jpeg", "png", "zip"}:
+            raise RecoveryError(f"Unsupported fragment recovery file type: {ftype}. Expected pdf, jpeg, png, or zip.")
+        return [str(self.executable), "--source", source, "--type", ftype, "--output", str(result_path)]
+
+    def scan(self, source: str, cancel: Callable[[], bool] | None = None, timeout: int = 86400, file_type: str | None = None) -> RecoveryScan:
+        if self.executable is None:
+            raise RecoveryError(self.unavailable_reason)
+        if not (source.startswith("\\\\.\\PhysicalDrive") or Path(source).is_file()):
+            raise RecoveryError(f"{self.spec.display_name} requires a raw image or PhysicalDrive source.")
+        with tempfile.TemporaryDirectory(prefix=f"drex-{self.spec.method_id}-") as temp:
+            result_path = Path(temp) / "result.json"
+            command = self.scan_command(source, result_path, file_type=file_type)
+            _run_native(command, cancel, timeout, self.spec.display_name)
+            if not result_path.is_file():
+                raise RecoveryError(f"{self.spec.display_name} completed without producing a JSON result.")
+            try:
+                payload = json.loads(result_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise RecoveryError(f"{self.spec.display_name} returned invalid JSON: {exc}") from exc
+            return parse_scan_result(payload, self.spec.display_name)
 
     def recover(self, source: str, candidate_id: str, destination: Path, timeout: int = 86400) -> list[Path]:
         return _recover_native_candidate(self, source, candidate_id, destination, ["--recover"], timeout)
