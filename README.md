@@ -51,28 +51,33 @@ Run `python drex_app.py --doctor` to inspect local backend tools, detected stora
 
 ## Testing & Quality Assurance
 
-Run the comprehensive test suite with `pytest`:
-
 ```powershell
+# Run backend doctor diagnostic
+python drex_app.py --doctor
+
+# Run internal self-test suite
+python drex_app.py --self-test
+
+# Run full automated test suite (106 tests)
 pytest -q
 ```
 
-All 81 unit, integration, and security tests execute against verified adapters, safety guards, and decision engines.
+### Running Standalone Executable
+```powershell
+# Build standalone binary
+powershell -ExecutionPolicy Bypass -File build.ps1
+
+# Execute standalone binary
+build\dist\DREX.exe
+```
 
 ---
 
-## Official Upstream Recovery Backends
+## Documentation
 
-DREXX is designed to interface with authoritative upstream digital forensic tools:
-- **The Sleuth Kit (TSK)**: `fls`, `icat`, `fsstat`, `tsk_recover`, `mmls` ([sleuthkit.org](https://www.sleuthkit.org/))
-- **TestDisk & PhotoRec**: Non-interactive file carving and partition analysis ([cgsecurity.org](https://www.cgsecurity.org/))
-- **GNU ddrescue**: Damaged media imaging with mapfile resume ([gnu.org/software/ddrescue](https://www.gnu.org/software/ddrescue/))
-- **Autopsy**: GUI forensic integration ([sleuthkit.org/autopsy](https://www.sleuthkit.org/autopsy/))
-
-When external binaries are placed in `native_bin/` or added to system PATH, DREXX automatically detects their presence and enables their corresponding execution workflows.
-
----
-
-## License & Notice
-
-Licensed under the project repository terms. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party component licenses.
+* [Authoritative 25-Method Validation Matrix](file:///D:/DREXX/FINAL_VALIDATION_MATRIX.md)
+* [User Manual & Operations Guide](file:///D:/DREXX/USER_MANUAL.md)
+* [Technical Architecture Documentation](file:///D:/DREXX/TECHNICAL_DOCUMENTATION.md)
+* [Comprehensive Validation Report](file:///D:/DREXX/VALIDATION_REPORT.md)
+* [Performance Evaluation Report](file:///D:/DREXX/PERFORMANCE_EVALUATION.md)
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party component licenses.
