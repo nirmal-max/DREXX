@@ -873,7 +873,7 @@ class DamagedMediaRecoveryAdapter(BaseRecoveryAdapter):
             tsk_rec = find_backend_executable("tsk", self.root, self.meipass)
             if tsk_rec is not None:
                 tsk_exe = tsk_rec.parent / "tsk_recover.exe"
-                cmd = build_tsk_recover_command(tsk_exe, str(salvaged_image_path), str(destination), extract_deleted=True)
+                cmd = build_tsk_recover_command(tsk_exe, str(salvaged_image_path), str(destination), all_files=True)
                 CentralProcessRunner.run(cmd, timeout=timeout)
                 recovered_paths = [p for p in destination.rglob("*") if p.is_file()]
         except Exception:
@@ -883,17 +883,59 @@ class DamagedMediaRecoveryAdapter(BaseRecoveryAdapter):
 
 
 class ForensicRecoveryAdapter(BaseRecoveryAdapter):
-    """Method 25: Forensic acquisition with immutable SHA-256 evidence ledger."""
+    """Method 25: Forensic acquisition with immutable SHA-256 tamper-evident evidence ledger.
+
+    Each ledger entry cryptographically depends on the previous entry via a
+    chain_hash field: chain_hash[N] = SHA-256(chain_hash[N-1] || entry_payload[N]).
+    Any modification of any prior entry will cause chain_hash validation to fail
+    for all subsequent entries.
+    """
+
+    _GENESIS_HASH = "0" * 64  # Fixed genesis value for the first entry
 
     def scan(self, source: str, cancel: Callable[[], bool] | None = None, timeout: int = 86400) -> RecoveryScan:
         quick = QuickRecoveryAdapter(self.root, self.meipass)
         return quick.scan(source, cancel=cancel, timeout=timeout)
 
+    @staticmethod
+    def _entry_payload(entry: dict[str, Any]) -> str:
+        """Canonical JSON of the entry fields that are chained (excludes chain_hash itself)."""
+        fields = {k: v for k, v in entry.items() if k != "chain_hash"}
+        return json.dumps(fields, sort_keys=True, separators=(",", ":"))
+
+    @classmethod
+    def _compute_chain_hash(cls, previous_chain_hash: str, entry: dict[str, Any]) -> str:
+        payload = previous_chain_hash + cls._entry_payload(entry)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest().upper()
+
+    @classmethod
+    def verify_ledger(cls, ledger: list[dict[str, Any]]) -> tuple[bool, str]:
+        """Verify the chain integrity of a forensic evidence ledger.
+
+        Returns:
+            (True, 'OK') if the ledger is intact.
+            (False, reason) if tampering or corruption is detected.
+        """
+        if not ledger:
+            return True, "OK — empty ledger"
+        prev_hash = cls._GENESIS_HASH
+        for idx, entry in enumerate(ledger):
+            stored_chain_hash = entry.get("chain_hash", "")
+            expected = cls._compute_chain_hash(prev_hash, entry)
+            if stored_chain_hash != expected:
+                return False, (
+                    f"TAMPER DETECTED at entry index {idx} "
+                    f"(candidate_id={entry.get('candidate_id', '?')}): "
+                    f"expected chain_hash={expected}, got={stored_chain_hash}"
+                )
+            prev_hash = stored_chain_hash
+        return True, "OK"
+
     def recover_with_ledger(self, source: str, candidate_ids: list[str], destination: Path, timeout: int = 86400) -> tuple[list[Path], Path]:
         self.validate_source(source)
         destination.mkdir(parents=True, exist_ok=True)
         recovered_files = []
-        evidence_entries = []
+        evidence_entries: list[dict[str, Any]] = []
         quick = QuickRecoveryAdapter(self.root, self.meipass)
 
         for cid in candidate_ids:
@@ -903,20 +945,26 @@ class ForensicRecoveryAdapter(BaseRecoveryAdapter):
                     recovered_files.append(p)
                     data = p.read_bytes()
                     h = hashlib.sha256(data).hexdigest().upper()
-                    evidence_entries.append({
+                    entry: dict[str, Any] = {
                         "candidate_id": cid,
                         "recovered_filename": p.name,
                         "size_bytes": len(data),
                         "sha256": h,
                         "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                         "verification_state": "HASH_MATCH",
-                    })
+                    }
+                    prev_hash = evidence_entries[-1]["chain_hash"] if evidence_entries else self._GENESIS_HASH
+                    entry["chain_hash"] = self._compute_chain_hash(prev_hash, entry)
+                    evidence_entries.append(entry)
             except Exception as exc:
-                evidence_entries.append({
+                entry = {
                     "candidate_id": cid,
                     "error": str(exc),
                     "verification_state": "FAILED",
-                })
+                }
+                prev_hash = evidence_entries[-1]["chain_hash"] if evidence_entries else self._GENESIS_HASH
+                entry["chain_hash"] = self._compute_chain_hash(prev_hash, entry)
+                evidence_entries.append(entry)
 
         ledger_path = destination / "FORENSIC_EVIDENCE_LEDGER.json"
         ledger_path.write_text(json.dumps(evidence_entries, indent=2), encoding="utf-8")

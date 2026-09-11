@@ -351,15 +351,47 @@ class CertificateManager:
             raise ValueError("Certificates can only be created for verified successful operations.")
         if not operation.get("started") or not operation.get("completed"):
             raise ValueError("A verified certificate requires operation start and completion timestamps.")
+        
+        target_path = str(operation.get("target", ""))
+        exec_type = operation.get("execution_type")
+        
+        # Strict validation: Physical certificates cannot be issued for fixtures or regular files
+        if exec_type == "PHYSICAL":
+            is_physical = target_path.startswith(r"\\.") or target_path.startswith("/dev/")
+            if not is_physical:
+                raise ValueError("Refusing to issue PHYSICAL sanitization certificate for fixture or non-physical target.")
+            if operation.get("target_match") is False:
+                raise ValueError("Target mismatch: actual target does not match claimed target.")
+        elif exec_type is None:
+            if target_path.startswith(r"\\.") or target_path.startswith("/dev/"):
+                exec_type = "PHYSICAL"
+            elif target_path.endswith(".img") or target_path.endswith(".raw"):
+                exec_type = "DISK_IMAGE"
+            elif operation.get("type") == "file":
+                exec_type = "FILE"
+            else:
+                exec_type = "FIXTURE"
+
         from cryptography.hazmat.primitives import hashes, serialization
         from cryptography.hazmat.primitives.asymmetric import ec
         key = self._keypair()
-        cert_id = f"CERT-{('REC' if operation['type'] == 'recovery' else 'ERASE')}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8].upper()}"
+
+        if exec_type == "FIXTURE":
+            prefix = "CERT-FIXTURE"
+        elif exec_type == "DISK_IMAGE":
+            prefix = "CERT-IMAGE"
+        elif operation.get("type") == "recovery":
+            prefix = "CERT-REC"
+        else:
+            prefix = "CERT-ERASE"
+
+        cert_id = f"{prefix}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8].upper()}"
         payload = {
             "certificate_id": cert_id,
             "operation_type": operation["type"],
+            "execution_type": exec_type,
             "device_path": operation.get("target", "Unavailable"),
-            "device_type": operation.get("device_type", "File/Folder"),
+            "device_type": operation.get("device_type", "Test Fixture" if exec_type == "FIXTURE" else "File/Folder"),
             "device_model": operation.get("device_model", "Unavailable"),
             "serial_number": operation.get("serial_number", "Unavailable"),
             "drive_size": operation.get("target_size", "Unavailable"),
@@ -404,8 +436,11 @@ class CertificateManager:
         try:
             from cryptography.hazmat.primitives import hashes, serialization
             from cryptography.hazmat.primitives.asymmetric import ec
-            payload_keys = ["certificate_id", "operation_type", "device_path", "device_type", "device_model", "serial_number", "drive_size", "method", "passes", "started", "completed", "duration", "status", "sha256_before", "sha256_after", "verification"]
-            payload = {key: record[key] for key in payload_keys}
+            payload_keys = ["certificate_id", "operation_type", "execution_type", "device_path", "device_type", "device_model", "serial_number", "drive_size", "method", "passes", "started", "completed", "duration", "status", "sha256_before", "sha256_after", "verification"]
+            payload = {}
+            for key in payload_keys:
+                if key in record:
+                    payload[key] = record[key]
             canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
             if hashlib.sha256(canonical).hexdigest() != record.get("canonical_sha256"):
                 return False
@@ -433,18 +468,33 @@ class CertificateManager:
         styles.add(ParagraphStyle(name="Section", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=9, textColor=colors.HexColor(GREEN_DARK), spaceBefore=10, spaceAfter=4))
         styles.add(ParagraphStyle(name="Small", parent=styles["BodyText"], fontSize=7.5, leading=10, textColor=colors.HexColor("#39465c")))
         doc = SimpleDocTemplate(str(path), pagesize=A4, rightMargin=16 * mm, leftMargin=16 * mm, topMargin=14 * mm, bottomMargin=14 * mm)
-        story = [Paragraph("DREX CERTIFICATE OF DATA DESTRUCTION" if record["operation_type"] != "recovery" else "DREX CERTIFICATE OF DATA RECOVERY", styles["DrexTitle"]), Paragraph("Tamper-evident Digital Certificate", styles["Small"]), Paragraph(f"Certificate ID: {record['certificate_id']}<br/>Issued: {record['created_utc']}", styles["Small"])]
+        
+        exec_type = record.get("execution_type", "FIXTURE")
+        if exec_type == "FIXTURE":
+            doc_title = "DREX FIXTURE TEST CERTIFICATE"
+            sub_title = "Test Fixture Execution Record · Not Physical Drive Sanitization"
+        elif exec_type == "DISK_IMAGE":
+            doc_title = "DREX DISK IMAGE RECOVERY CERTIFICATE"
+            sub_title = "Forensic Disk Image Analysis Record"
+        elif record["operation_type"] != "recovery":
+            doc_title = "DREX CERTIFICATE OF DATA DESTRUCTION"
+            sub_title = "Physical Device Sanitization Attestation"
+        else:
+            doc_title = "DREX CERTIFICATE OF DATA RECOVERY"
+            sub_title = "Physical Device Recovery Attestation"
+
+        story = [Paragraph(doc_title, styles["DrexTitle"]), Paragraph(sub_title, styles["Small"]), Paragraph(f"Certificate ID: {record['certificate_id']}<br/>Issued: {record['created_utc']}", styles["Small"])]
         def section(title: str, rows: list[tuple[str, str]]):
             story.append(Paragraph(title, styles["Section"]))
             table = Table([[Paragraph(k, styles["Small"]), Paragraph(str(v), styles["Small"])] for k, v in rows], colWidths=[43 * mm, 133 * mm])
             table.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#ccd5d0")), ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f7faf8")), ("VALIGN", (0, 0), (-1, -1), "TOP"), ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5)]))
             story.append(table)
-        section("DEVICE INFORMATION", [("Device Path", record["device_path"]), ("Device Type", record["device_type"]), ("Device Model", record["device_model"]), ("Serial Number", record["serial_number"]), ("Drive Size", record["drive_size"])])
+        section("TARGET INFORMATION", [("Target Path", record["device_path"]), ("Target / Device Type", record["device_type"]), ("Execution Scope", exec_type), ("Device Model", record["device_model"]), ("Serial Number", record["serial_number"]), ("Target Size", record["drive_size"])])
         section("OPERATION DETAILS", [("Method", record["method"]), ("Passes", record["passes"]), ("Started", record["started"]), ("Completed", record["completed"]), ("Duration", record["duration"]), ("Status", record["status"])])
         section("VERIFICATION DATA", [("SHA-256 Before", record["sha256_before"]), ("SHA-256 After", record["sha256_after"]), ("Verification", record["verification"])])
         story += [Paragraph("SCAN TO VERIFY", styles["Section"]), Paragraph("QR encodes the certificate ID and offline validation data.", styles["Small"]), Image(qr_stream, width=31 * mm, height=31 * mm), Spacer(1, 2 * mm)]
         section("DIGITAL SIGNATURE", [("Signature Hash", record["signature_hash"]), ("Public Key Fingerprint", record["public_key_fingerprint"]), ("Algorithm", record["signature_algorithm"])])
-        story += [Paragraph("LEGAL / ASSURANCE NOTICE", styles["Section"]), Paragraph("This certificate records the operation and verification data produced by DREX. Software sanitization is not physical destruction. The certificate is tamper-evident through local ECDSA signing and must be independently validated before reliance.", styles["Small"]), Spacer(1, 8 * mm), Paragraph("Generated by DREX · Secure. Recover. Trust.", styles["Small"])]
+        story += [Paragraph("ASSURANCE & INTEGRITY NOTICE", styles["Section"]), Paragraph("This certificate records the operation, execution scope, and verification data produced by DREX. Software sanitization is not physical destruction. The certificate is tamper-evident through local ECDSA signing and must be independently validated before reliance.", styles["Small"]), Spacer(1, 8 * mm), Paragraph("Generated by DREX · Secure. Recover. Trust.", styles["Small"])]
         doc.build(story)
 
 
@@ -618,9 +668,9 @@ def execute_file_method(method_id: str, target: Path, emit: Callable[[str], None
 def drive_method_status(method_id: str, drive: DriveInfo | None) -> tuple[str, str]:
     if drive is None:
         return "Unavailable", "Select a detected device first."
-    if method_id == "overwrite" and drive.path.lower().startswith("\\\\.\\"):
-        return "Requires Hardware Qualification", "Raw-device overwrite is disabled until this exact hardware path is independently qualified."
-    return "Requires Hardware Qualification", "Native drive execution is not enabled without a qualified device adapter and required privilege."
+    if method_id in ("ata", "nvme", "native", "ieee"):
+        return "UNSUPPORTED_HARDWARE", "Direct controller hardware commands blocked by USB mass storage bridge."
+    return "PHYSICAL_EXECUTION_UNAVAILABLE", "Physical execution unavailable until a qualified hardware adapter is configured."
 
 
 class DrexApp(tk.Tk):
