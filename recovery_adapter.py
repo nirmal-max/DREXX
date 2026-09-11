@@ -276,7 +276,7 @@ class QuickRecoveryAdapter(BaseRecoveryAdapter):
         self.validate_source(source)
         fls_exe = self.require_executable()
         from backend_adapters import build_fls_command, parse_fls_output, CentralProcessRunner
-        cmd = build_fls_command(fls_exe, source, deleted_only=True, recursive=False, long_format=True, full_path=True)
+        cmd = build_fls_command(fls_exe, source, deleted_only=True, recursive=True, long_format=True, full_path=True)
         res = CentralProcessRunner.run(cmd, timeout=timeout, cancel_check=cancel)
         if res.exit_code != 0 and not res.stdout:
             raise RecoveryError(f"Quick Recovery scan failed: {res.stderr or 'non-zero exit code'}")
@@ -323,7 +323,7 @@ class SmartRecoveryAdapter(BaseRecoveryAdapter):
         if fls_exe is None:
             raise RecoveryError(f"Smart Recovery requires The Sleuth Kit. {self.unavailable_reason}")
         from backend_adapters import build_fls_command, parse_fls_output, CentralProcessRunner
-        cmd = build_fls_command(fls_exe, source, deleted_only=True, recursive=False, long_format=True, full_path=True)
+        cmd = build_fls_command(fls_exe, source, deleted_only=True, recursive=True, long_format=True, full_path=True)
         res = CentralProcessRunner.run(cmd, timeout=timeout, cancel_check=cancel)
         candidates = parse_fls_output(res.stdout, module="Smart Recovery")
         return RecoveryScan(
@@ -350,7 +350,7 @@ class TargetedRecoveryAdapter(BaseRecoveryAdapter):
         if fls_exe is None:
             raise RecoveryError(f"Targeted Recovery requires The Sleuth Kit. {self.unavailable_reason}")
         from backend_adapters import build_fls_command, parse_fls_output, CentralProcessRunner
-        cmd = build_fls_command(fls_exe, source, deleted_only=True, recursive=False, long_format=True, full_path=True)
+        cmd = build_fls_command(fls_exe, source, deleted_only=True, recursive=True, long_format=True, full_path=True)
         res = CentralProcessRunner.run(cmd, timeout=timeout, cancel_check=cancel)
         candidates = parse_fls_output(res.stdout, module="Targeted Recovery")
         if file_types:
@@ -866,19 +866,29 @@ class DamagedMediaRecoveryAdapter(BaseRecoveryAdapter):
 
         # Step 2: Extract files from salvaged image using Filesystem/TSK recover
         recovered_paths: list[Path] = []
+        tsk_extraction_error: str | None = None
         destination.mkdir(parents=True, exist_ok=True)
 
         try:
             from backend_adapters import build_tsk_recover_command, CentralProcessRunner
             tsk_rec = find_backend_executable("tsk", self.root, self.meipass)
-            if tsk_rec is not None:
+            if tsk_rec is None:
+                tsk_extraction_error = "TSK backend not found in native_bin or PATH."
+            else:
                 tsk_exe = tsk_rec.parent / "tsk_recover.exe"
                 cmd = build_tsk_recover_command(tsk_exe, str(salvaged_image_path), str(destination), all_files=True)
-                CentralProcessRunner.run(cmd, timeout=timeout)
+                proc = CentralProcessRunner.run(cmd, timeout=timeout)
+                if proc.exit_code != 0:
+                    tsk_extraction_error = (
+                        f"tsk_recover exited with code {proc.exit_code}. "
+                        f"stderr: {proc.stderr[:400] if proc.stderr else '(none)'}"
+                    )
                 recovered_paths = [p for p in destination.rglob("*") if p.is_file()]
-        except Exception:
-            pass
+        except Exception as exc:
+            tsk_extraction_error = f"TSK extraction raised unexpected exception: {exc}"
 
+        stats["tsk_extraction_error"] = tsk_extraction_error
+        stats["tsk_extracted_files"] = len(recovered_paths)
         return stats, recovered_paths
 
 

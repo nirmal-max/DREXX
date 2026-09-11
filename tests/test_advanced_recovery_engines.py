@@ -142,7 +142,12 @@ class TestVirtualRaidReconstruction:
 
 class TestDamagedMediaWorkflow:
     def test_damaged_media_end_to_end_imaging_and_recovery(self, tmp_path: Path):
-        """End-to-end: Damaged source -> direct sector imaging + mapfile -> recovery extraction."""
+        """End-to-end: Damaged source -> direct sector imaging + mapfile -> recovery extraction.
+
+        The source is a synthetic byte stream (not a valid FAT/NTFS filesystem),
+        so tsk_recover will exit with a non-zero code — this is expected and must now be
+        explicitly recorded in stats['tsk_extraction_error'] rather than silently swallowed.
+        """
         source_data = b"RECOVERABLE_RECORD_A" * 32 + b"CORRUPTED_BAD_SECTOR" * 32 + b"RECOVERABLE_RECORD_B" * 32
         salvaged_img = tmp_path / "salvaged.raw"
         mapfile = tmp_path / "salvaged.map"
@@ -159,6 +164,7 @@ class TestDamagedMediaWorkflow:
             bad_sector_ranges=[(1, 1)],  # Middle sector bad
         )
 
+        # Sector imaging stats — must be accurate regardless of TSK outcome
         assert stats["rescued_bytes"] > 0
         assert stats["bad_bytes"] == 512
         assert salvaged_img.exists()
@@ -168,3 +174,19 @@ class TestDamagedMediaWorkflow:
         parsed = parse_ddrescue_mapfile(mapfile.read_text(encoding="utf-8"))
         assert parsed["rescued_bytes"] == stats["rescued_bytes"]
         assert parsed["bad_bytes"] == 512
+
+        # Explicit error-reporting: tsk_extraction_error must be a string or None —
+        # NEVER silently swallowed. For a synthetic fixture (no real filesystem),
+        # TSK will fail with a non-zero exit code, so the error field will be non-None.
+        assert "tsk_extraction_error" in stats, (
+            "stats must contain tsk_extraction_error — silent pass is not allowed"
+        )
+        assert "tsk_extracted_files" in stats, (
+            "stats must contain tsk_extracted_files count"
+        )
+        # The error field is either None (TSK succeeded) or a non-empty string (TSK failed)
+        error_val = stats["tsk_extraction_error"]
+        assert error_val is None or isinstance(error_val, str), (
+            f"tsk_extraction_error must be None or str, got {type(error_val)}"
+        )
+
