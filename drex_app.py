@@ -2187,12 +2187,13 @@ def execute_drive_method(
     emit: Callable[[str], None],
     progress: Callable[[int, int], None],
     cancel_event: threading.Event | None = None,
+    caps: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Central drive-erasure dispatcher for methods #1–#7.
 
     Execution contract:
-      1. Probe capabilities (non-destructive, fresh every call)
+      1. Probe capabilities (non-destructive, fresh every call or pre-probed)
       2. Verify identity (fresh OS query, abort if mismatch)
       3. C:/PhysicalDisk0 hard block
       4. Route to correct backend
@@ -2207,13 +2208,14 @@ def execute_drive_method(
       VERIFICATION_FAILED  — execution completed but read-back mismatch
     """
     started = utc_now()
-    emit(f"[{method_id.upper()}] Probing device capabilities for {drive.path}...")
-    caps = probe_drive_capabilities(drive)
+    if caps is None:
+        emit(f"[{method_id.upper()}] Probing device capabilities for {drive.path}...")
+        caps = probe_drive_capabilities(drive)
     phys_num = caps.get("physical_disk_number")
     bus_type = caps.get("bus_type", "UNKNOWN")
     emit(f"  Bus: {bus_type}  PhysicalDisk: {phys_num}  Model: {caps.get('model')}")
     emit(f"  Serial: {caps.get('serial')}  Capacity: {fmt_bytes(caps.get('capacity'))}")
-    if caps["probe_errors"]:
+    if caps.get("probe_errors"):
         for e in caps["probe_errors"]:
             emit(f"  [probe_warning] {e}")
 

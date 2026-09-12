@@ -731,3 +731,68 @@ class TestAllTwentyFiveMethodsPreserved:
         assert len(drive_ids) == len(set(drive_ids)), f"Duplicate drive IDs: {drive_ids}"
         assert len(file_ids)  == len(set(file_ids)),  f"Duplicate file IDs: {file_ids}"
         assert len(rec_ids)   == len(set(rec_ids)),   f"Duplicate recovery IDs: {rec_ids}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXECUTE_DRIVE_METHOD SIGNATURE AND CAPS INTEGRATION REGRESSION TEST
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDriveMethodSignatureAndCaps:
+    """Regression test: execute_drive_method must accept caps keyword argument."""
+
+    def test_execute_drive_method_signature_has_caps(self):
+        import inspect
+        from drex_app import execute_drive_method
+
+        sig = inspect.signature(execute_drive_method)
+        params = list(sig.parameters.keys())
+        assert "method_id" in params
+        assert "drive" in params
+        assert "emit" in params
+        assert "progress" in params
+        assert "cancel_event" in params
+        assert "caps" in params
+        assert sig.parameters["caps"].default is None
+
+    def test_execute_drive_method_with_pre_probed_caps(self):
+        from unittest.mock import MagicMock
+        from drex_app import execute_drive_method, DriveInfo
+
+        mock_drive = DriveInfo(
+            path="E:\\",
+            device_path=r"\\.\PHYSICALDRIVE1",
+            model="SanDisk Cruzer Blade",
+            serial="12345",
+            capacity=1024 * 1024,
+            interface="USB",
+            drive_type="Removable",
+            filesystem="FAT32",
+            free=512 * 1024,
+            health="OK",
+            status="Online",
+            device_id=r"\\.\PHYSICALDRIVE1",
+        )
+        caps = {
+            "physical_disk_number": 1,
+            "bus_type": "USB",
+            "model": "SanDisk Cruzer Blade",
+            "serial": "12345",
+            "capacity": 1024 * 1024,
+            "probe_errors": [],
+            "native_sanitize": "UNSUPPORTED",
+            "ata_secure_erase": "UNSUPPORTED",
+            "nvme_controller": "UNSUPPORTED",
+        }
+        events = []
+        # Method native returns UNSUPPORTED_HARDWARE for USB without executing physical write
+        res = execute_drive_method(
+            "native",
+            mock_drive,
+            events.append,
+            lambda d, t: None,
+            caps=caps,
+        )
+        assert isinstance(res, dict)
+        assert res.get("status") == "UNSUPPORTED_HARDWARE"
+        assert res.get("capabilities") == caps
+
