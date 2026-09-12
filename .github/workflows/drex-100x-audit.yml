@@ -1,0 +1,84 @@
+name: DREXX 100x Deep Audit
+
+on:
+  push:
+    branches: [audit/100x-20260912]
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest cryptography qrcode reportlab pillow psutil
+
+      - name: Compile every Python source
+        run: python -m compileall -q .
+
+      - name: Static source audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'Scanning active Python for obvious unsafe process patterns...'
+          ! grep -RIn --exclude-dir=.git --include='*.py' 'shell=True' .
+          ! grep -RIn --exclude-dir=.git --include='*.py' 'os\.system(' .
+          echo 'Scanning test inventory...'
+          python - <<'PY'
+          from pathlib import Path
+          root = Path('.')
+          files = [p for p in root.rglob('*.py') if '.git' not in p.parts and '__pycache__' not in p.parts]
+          print(f'Python sources discovered: {len(files)}')
+          assert files
+          PY
+
+      - name: Run complete pytest suite once
+        run: python -m pytest tests/ -q --tb=short
+
+      - name: Run complete pytest suite 100x
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 100); do
+            echo "========== DREXX FULL SUITE ITERATION $i/100 =========="
+            python -m pytest tests/ -q --tb=short
+          done
+
+      - name: Run audit-specific regressions 100x
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 100); do
+            echo "========== AUDIT REGRESSIONS $i/100 =========="
+            python -m pytest tests/test_100x_audit_regressions.py -q --tb=short
+          done
+
+      - name: End-to-end CLI smoke
+        shell: bash
+        run: |
+          set +e
+          python drex_app.py --version
+          version_rc=$?
+          python drex_app.py --self-test
+          self_rc=$?
+          python drex_app.py --doctor
+          doctor_rc=$?
+          echo "version_rc=$version_rc self_rc=$self_rc doctor_rc=$doctor_rc"
+          # Windows-only WMI/raw-drive doctor behavior cannot be fully asserted on Ubuntu.
+          # Require version/self-test not to crash the interpreter; doctor is informational here.
+          test $version_rc -eq 0
+          test $self_rc -eq 0
+
+      - name: Final summary
+        run: echo 'DREXX deep audit completed: full pytest suite + dedicated regression suite executed 100 times each.'
