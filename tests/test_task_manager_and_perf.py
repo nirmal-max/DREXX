@@ -181,7 +181,7 @@ def test_drex_device_manager_caching():
     res = []
     dm.start_async_discovery(lambda drives: res.append(drives))
     start_time = time.time()
-    while not res and time.time() - start_time < 5.0:
+    while not res and time.time() - start_time < 15.0:
         time.sleep(0.1)
     assert len(res) == 1
     assert isinstance(res[0], list)

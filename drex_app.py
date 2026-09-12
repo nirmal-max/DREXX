@@ -284,6 +284,7 @@ EV_TASK_FINISHED  = "task_finished"   # TaskManager internal
 EV_FINISHED       = "finished"        # worker: operation teardown complete
 EV_ERROR_ALERT    = "error_alert"     # worker: (title, desc, severity, tech)
 EV_RESULT         = "result"          # worker: (status_str, detail_str)
+EV_CAPABILITIES   = "capabilities_updated"  # worker: (DriveInfo, caps_dict)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -353,7 +354,7 @@ class DrexTimer:
         self._start_time: float | None = None
         self._stop_time: float | None = None
         self._running: bool = False
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def start(self) -> None:
         with self._lock:
@@ -415,7 +416,7 @@ class DrexProgressTracker:
         self._samples: list[tuple[float, int]] = []
         self._ema_speed: float = 0.0
         self._ema_alpha = ema_alpha
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def start(self, total_bytes: int = 0, stage: str = "Starting") -> None:
         self.reset(total=total_bytes, stage=stage)
@@ -446,7 +447,7 @@ class DrexProgressTracker:
             if len(self._samples) >= 2:
                 dt = self._samples[-1][0] - self._samples[0][0]
                 db = self._samples[-1][1] - self._samples[0][1]
-                if dt > 0.05 and db >= 0:
+                if dt > 0.001 and db >= 0:
                     inst_speed = db / dt
                     if self._ema_speed <= 0:
                         self._ema_speed = inst_speed
@@ -1550,16 +1551,18 @@ def probe_drive_capabilities(drive: DriveInfo) -> dict[str, Any]:
     """
     Query Windows WMI/PowerShell to build a structured capability map for a drive.
 
-    References:
-      - Seagate openSeaChest wiki: Sanitizing Storage Devices
-        https://github.com/Seagate/openSeaChest/wiki/Sanitizing-Storage-Devices
-      - nvme-cli: nvme sanitize / nvme format documentation
-      - DriveWipe: NIST/IEEE-oriented device profiling and capability detection
-      - hdparm: ATA Identify Device / Security sub-commands
-
+    MUST NEVER be executed on the Tk main thread to guarantee UI responsiveness.
     Every key is one of: SUPPORTED | UNSUPPORTED | UNKNOWN | BLOCKED
     UNKNOWN must never be treated as SUPPORTED by callers.
     """
+    # ── Thread Affinity Assertion ──────────────────────────────────────────────
+    if getattr(probe_drive_capabilities, "enforce_worker_thread", True):
+        if threading.current_thread() is threading.main_thread():
+            raise RuntimeError(
+                "Thread Affinity Violation: probe_drive_capabilities() must NEVER be executed on the Tk main thread! "
+                "Use DrexCapabilityManager.request_capabilities_async() or run on a background worker."
+            )
+
     caps: dict[str, Any] = {
         # Identity
         "physical_disk_number": None,
@@ -1606,6 +1609,40 @@ def probe_drive_capabilities(drive: DriveInfo) -> dict[str, Any]:
         caps["bus_type"] = drive.interface.upper()
     elif drive.drive_type == "Removable":
         caps["bus_type"] = "USB"
+
+    # Step 1b: OS-level PowerShell query if running on Windows
+    if os.name == "nt":
+        try:
+            letter = drive.path.rstrip("\\/").rstrip(":")
+            if letter:
+                ps_cmd = (
+                    f"$p = Get-Partition | Where-Object {{ $_.DriveLetter -eq '{letter}' }}; "
+                    "if ($p) { "
+                    "  $disk = Get-PhysicalDisk | Where-Object { $_.DeviceId -eq $p.DiskNumber }; "
+                    "  [PSCustomObject]@{ "
+                    "    DiskNumber=$p.DiskNumber; BusType=$disk.BusType; "
+                    "    MediaType=$disk.MediaType; Size=$disk.Size; "
+                    "    FriendlyName=$disk.FriendlyName; SerialNumber=$disk.SerialNumber "
+                    "  } | ConvertTo-Json -Compress "
+                    "} else { 'null' }"
+                )
+                res = subprocess.run(
+                    ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
+                    capture_output=True, text=True, timeout=8, check=False,
+                )
+                if res.returncode == 0 and res.stdout.strip() not in ("", "null"):
+                    data = json.loads(res.stdout.strip())
+                    if isinstance(data, dict):
+                        if data.get("DiskNumber") is not None:
+                            caps["physical_disk_number"] = int(data["DiskNumber"])
+                        if data.get("BusType"):
+                            caps["bus_type"] = str(data["BusType"]).upper()
+                        if data.get("MediaType"):
+                            caps["media_type"] = str(data["MediaType"]).upper()
+                        if data.get("Size") and not caps["capacity"]:
+                            caps["capacity"] = int(data["Size"])
+        except Exception as exc:
+            caps["probe_errors"].append(str(exc))
 
     # ── Step 2: Determine system/boot disk ─────────────────────────────────────
     is_c = drive.path.upper().startswith("C:")
@@ -1668,14 +1705,20 @@ def probe_drive_capabilities(drive: DriveInfo) -> dict[str, Any]:
 
 class DrexCapabilityManager:
     """
-    High-performance device capability cache.
-    Caches capability probing maps per physical/logical device identity for 60 seconds,
-    enabling sub-millisecond card rendering and instantaneous method selection.
+    High-performance, non-blocking asynchronous device capability manager.
+    Guarantees:
+      1. Memory-only instant cached lookups via get_cached(drive) — 0ms, thread-safe.
+      2. get_capabilities(drive) NEVER blocks Tk thread: on main thread cache miss, returns cached or empty dict and initiates async background probe.
+      3. Asynchronous probing via background thread pool with single-flight request deduplication.
+      4. Multi-listener fanout: all callers subscribing during an in-flight probe are notified upon completion.
+      5. Emits EV_CAPABILITIES / calls completion callback when probing finishes.
     """
     def __init__(self, ttl_seconds: float = 60.0):
         self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._pending_listeners: dict[str, list[tuple[queue.Queue[tuple[str, Any]] | None, Callable[[dict[str, Any]], None] | None]]] = {}
         self._lock = threading.RLock()
         self._ttl = ttl_seconds
+        self._executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="drex_cap_worker")
 
     @staticmethod
     def _key(drive: DriveInfo | None) -> str:
@@ -1683,29 +1726,107 @@ class DrexCapabilityManager:
             return "none"
         return f"{drive.path}|{drive.device_path}|{drive.model}|{drive.serial}"
 
+    def get_cached(self, drive: DriveInfo | None) -> dict[str, Any] | None:
+        """Strictly memory-only, non-blocking cache lookup."""
+        if drive is None:
+            return None
+        key = self._key(drive)
+        now = time.time()
+        with self._lock:
+            if key in self._cache:
+                ts, caps = self._cache[key]
+                if now - ts < self._ttl:
+                    return dict(caps)
+        return None
+
     def get_capabilities(self, drive: DriveInfo | None, force_refresh: bool = False) -> dict[str, Any]:
+        """
+        Safe capability accessor.
+        If called on Tk main thread: NEVER blocks or calls probe_drive_capabilities().
+        Returns cached dict if valid, else triggers async probe and returns empty dict.
+        If called on worker thread: evaluates probe_drive_capabilities() if cache miss.
+        """
         if drive is None:
             return {}
+        cached = self.get_cached(drive)
+        if cached is not None and not force_refresh:
+            return cached
+
+        # Check thread affinity
+        if threading.current_thread() is threading.main_thread():
+            # Kick off async probe without blocking UI
+            self.request_capabilities_async(drive, force_refresh=force_refresh)
+            return cached or {}
+
+        # On worker thread: perform synchronous probe and cache result
+        caps = probe_drive_capabilities(drive)
+        key = self._key(drive)
+        now = time.time()
+        with self._lock:
+            self._cache[key] = (now, caps)
+        return dict(caps)
+
+    def request_capabilities_async(
+        self,
+        drive: DriveInfo | None,
+        event_queue: queue.Queue[tuple[str, Any]] | None = None,
+        on_complete: Callable[[dict[str, Any]], None] | None = None,
+        force_refresh: bool = False,
+    ) -> None:
+        """Asynchronously probe drive capabilities in background worker thread with multi-listener fanout."""
+        if drive is None:
+            return
         key = self._key(drive)
         now = time.time()
         with self._lock:
             if not force_refresh and key in self._cache:
                 ts, caps = self._cache[key]
                 if now - ts < self._ttl:
-                    return dict(caps)
-        caps = probe_drive_capabilities(drive)
-        with self._lock:
-            self._cache[key] = (now, caps)
-            return dict(caps)
+                    if on_complete:
+                        try:
+                            on_complete(dict(caps))
+                        except Exception:
+                            pass
+                    if event_queue is not None:
+                        event_queue.put((EV_CAPABILITIES, (drive, dict(caps))))
+                    return
 
-    def get_cached(self, drive: DriveInfo | None) -> dict[str, Any] | None:
-        if drive is None:
-            return None
-        key = self._key(drive)
-        with self._lock:
-            if key in self._cache:
-                return dict(self._cache[key][1])
-        return None
+            if key in self._pending_listeners:
+                self._pending_listeners[key].append((event_queue, on_complete))
+                return
+            self._pending_listeners[key] = [(event_queue, on_complete)]
+
+        def _worker():
+            try:
+                caps = probe_drive_capabilities(drive)
+            except Exception as exc:
+                caps = {
+                    "physical_disk_number": None,
+                    "model": drive.model,
+                    "serial": drive.serial,
+                    "capacity": drive.capacity,
+                    "bus_type": drive.interface or "UNKNOWN",
+                    "write_capable": "UNKNOWN",
+                    "overwrite_backend_qualified": "UNKNOWN",
+                    "probe_errors": [str(exc)],
+                }
+            with self._lock:
+                self._cache[key] = (time.time(), caps)
+                listeners = self._pending_listeners.pop(key, [])
+
+            for eq, cb in listeners:
+                if cb:
+                    try:
+                        cb(dict(caps))
+                    except Exception:
+                        pass
+                if eq is not None:
+                    try:
+                        eq.put((EV_CAPABILITIES, (drive, dict(caps))))
+                    except Exception:
+                        pass
+
+        self._executor.submit(_worker)
 
     def invalidate(self, drive: DriveInfo | str | None = None) -> None:
         with self._lock:
@@ -2385,6 +2506,7 @@ def drive_method_status(method_id: str, drive: DriveInfo | None, caps: dict[str,
 
     Status labels:
       Available                     — method can execute on this drive
+      CHECKING...                   — capability probe in progress (cold cache)
       UNSUPPORTED_HARDWARE          — hardware genuinely blocks this protocol
       PHYSICAL_EXECUTION_UNAVAILABLE — no qualified backend
       EXECUTION_BLOCKED             — safety guard (system disk, PhysicalDisk 0, etc.)
@@ -2392,12 +2514,17 @@ def drive_method_status(method_id: str, drive: DriveInfo | None, caps: dict[str,
     if drive is None:
         return "Unavailable", "Select a detected device first."
 
-    # Fast path — cached capabilities without running repetitive subprocess queries
+    # Fast path — memory-only cached capabilities without running repetitive subprocess queries
     try:
         if caps is None:
-            caps = _global_capability_manager.get_capabilities(drive)
+            caps = _global_capability_manager.get_cached(drive)
     except Exception as exc:
-        return "Unavailable", f"Capability probe failed: {exc}"
+        return "Unavailable", f"Capability lookup failed: {exc}"
+
+    if caps is None:
+        # Cold cache: non-blocking background request kicked off, UI displays CHECKING...
+        _global_capability_manager.request_capabilities_async(drive)
+        return "CHECKING...", "Evaluating device capabilities in background..."
 
     phys_num = caps.get("physical_disk_number")
     bus_type = caps.get("bus_type", "UNKNOWN")
@@ -2454,6 +2581,7 @@ class DrexApp(tk.Tk):
             except (AttributeError, OSError):
                 pass
         super().__init__()
+        sys._inside_tk_mainloop = True
         self.title(f"DREX — Unified Data Recovery & Sanitization Platform — v{VERSION}")
         self.geometry("1440x900")
         self.minsize(1100, 700)
@@ -2503,6 +2631,10 @@ class DrexApp(tk.Tk):
         self.after(30, self._poll_events)
         self.after(25, self._timer_tick)
         self.after(50, self.refresh_devices)
+
+    def destroy(self):
+        sys._inside_tk_mainloop = False
+        super().destroy()
 
     def on_closing(self):
         if self.task_manager.is_active():
@@ -3053,7 +3185,13 @@ class DrexApp(tk.Tk):
         tk.Frame(sec_card, bg="white", height=12).pack()
 
     def _show_device_details_dialog(self, drive: DriveInfo):
-        caps = self.capability_manager.get_capabilities(drive)
+        caps = self.capability_manager.get_cached(drive)
+        if caps is None:
+            self.capability_manager.request_capabilities_async(drive, event_queue=self.events)
+            caps = {}
+            status_desc = "CHECKING... (Probing in background)"
+        else:
+            status_desc = "Available (Cached)"
         lines = [
             f"Device Path: {drive.device_path}",
             f"Mount Path: {drive.path}",
@@ -3061,13 +3199,14 @@ class DrexApp(tk.Tk):
             f"Serial: {drive.display('serial')}",
             f"Capacity: {fmt_bytes(drive.capacity)} ({drive.capacity or 0:,} bytes)",
             f"Filesystem: {drive.display('filesystem')}",
-            f"Bus Type: {caps.get('bus_type', 'Unknown')}",
-            f"Physical Disk Number: {caps.get('physical_disk_number', 'Unknown')}",
-            f"Write Capable: {caps.get('write_capable')}",
-            f"Native Sanitize: {caps.get('native_sanitize')}",
-            f"ATA Pass-Through: {caps.get('ata_secure_erase')}",
-            f"NVMe Controller: {caps.get('nvme_controller')}",
-            f"Overwrite Qualified: {caps.get('overwrite_backend_qualified')}",
+            f"Capability State: {status_desc}",
+            f"Bus Type: {caps.get('bus_type', 'Probing...' if not caps else 'Unknown')}",
+            f"Physical Disk Number: {caps.get('physical_disk_number', 'Probing...' if not caps else 'Unknown')}",
+            f"Write Capable: {caps.get('write_capable', 'Probing...' if not caps else 'Unknown')}",
+            f"Native Sanitize: {caps.get('native_sanitize', 'Probing...' if not caps else 'Unknown')}",
+            f"ATA Pass-Through: {caps.get('ata_secure_erase', 'Probing...' if not caps else 'Unknown')}",
+            f"NVMe Controller: {caps.get('nvme_controller', 'Probing...' if not caps else 'Unknown')}",
+            f"Overwrite Qualified: {caps.get('overwrite_backend_qualified', 'Probing...' if not caps else 'Unknown')}",
         ]
         if caps.get("probe_errors"):
             lines.append("\nProbe Warnings:")
@@ -3245,21 +3384,28 @@ class DrexApp(tk.Tk):
             if self.current_page == "Destroy Drive":
                 self.render_destroy_page()
 
-    def _update_drive_method_badges(self):
+    def _update_drive_method_badges(self, caps: dict[str, Any] | None = None):
         if not hasattr(self, "_method_badges") or not self.selected_drive:
             return
-        caps = self.capability_manager.get_capabilities(self.selected_drive)
+        if caps is None:
+            caps = self.capability_manager.get_cached(self.selected_drive)
+        if caps is None:
+            self.capability_manager.request_capabilities_async(self.selected_drive, event_queue=self.events)
         for mid, badge_lbl in self._method_badges.items():
             try:
                 if not badge_lbl.winfo_exists():
                     continue
                 status_text, _ = drive_method_status(mid, self.selected_drive, caps=caps)
-                is_available = (status_text == "Available")
-                if status_text not in ("Available", ""):
-                    badge_text = "Needs Hardware" if status_text == "UNSUPPORTED_HARDWARE" else status_text
-                    badge_lbl.configure(text=f"● {badge_text}", fg=ORANGE, bg=ORANGE_LIGHT)
-                elif is_available:
+                if status_text == "CHECKING...":
+                    badge_lbl.configure(text="● CHECKING...", fg=MUTED, bg=BG_SECONDARY)
+                elif status_text == "Available":
                     badge_lbl.configure(text="● Available", fg=GREEN_DARK, bg=GREEN_PALE)
+                elif status_text == "UNSUPPORTED_HARDWARE":
+                    badge_lbl.configure(text="● Needs Hardware", fg=ORANGE, bg=ORANGE_LIGHT)
+                elif status_text == "EXECUTION_BLOCKED":
+                    badge_lbl.configure(text="● Protected", fg=RED, bg=RED_LIGHT)
+                else:
+                    badge_lbl.configure(text=f"● {status_text}", fg=ORANGE, bg=ORANGE_LIGHT)
             except Exception:
                 pass
 
@@ -3358,7 +3504,9 @@ class DrexApp(tk.Tk):
         self._method_cards = {}
         self._method_badges = {}
         theme_accent = PURPLE if kind == "recovery" else BLUE
-        caps = self.capability_manager.get_capabilities(self.selected_drive) if (kind == "drive" and self.selected_drive) else None
+        caps = self.capability_manager.get_cached(self.selected_drive) if (kind == "drive" and self.selected_drive) else None
+        if kind == "drive" and self.selected_drive and caps is None:
+            self.capability_manager.request_capabilities_async(self.selected_drive, event_queue=self.events)
 
         for index, item in enumerate(methods):
             if kind == "recovery":
@@ -3367,7 +3515,8 @@ class DrexApp(tk.Tk):
                 method_id, name, assurance = item["id"], item["name"], item["assurance"]
 
             status_text, status_reason = self._method_status(method_id, kind, caps=caps)
-            is_available = status_text == "Available"
+            is_available = (status_text == "Available")
+            is_checking = (status_text == "CHECKING...")
 
             card = tk.Frame(grid, bg="white", highlightbackground=LINE, highlightthickness=1)
             card.grid(row=index // columns, column=index % columns, sticky="nsew", padx=4, pady=4, ipady=6)
@@ -3396,13 +3545,19 @@ class DrexApp(tk.Tk):
                 }.get(status_text, status_text[:28])
                 badge_lbl = tk.Label(text_frame, text=f"● {badge_text}", font=("Segoe UI", 7, "bold"), fg=MUTED, bg=BG_SECONDARY, padx=4, pady=1)
                 badge_lbl.pack(anchor="w", pady=(3, 0))
-            elif kind == "drive" and status_text not in ("Available", ""):
-                badge_text = "Needs Hardware" if status_text == "UNSUPPORTED_HARDWARE" else status_text
-                badge_lbl = tk.Label(text_frame, text=f"● {badge_text}", font=("Segoe UI", 7, "bold"), fg=ORANGE, bg=ORANGE_LIGHT, padx=4, pady=1)
-                badge_lbl.pack(anchor="w", pady=(3, 0))
-            elif is_available:
-                badge_lbl = tk.Label(text_frame, text="● Available", font=("Segoe UI", 7, "bold"), fg=GREEN_DARK, bg=GREEN_PALE, padx=4, pady=1)
-                badge_lbl.pack(anchor="w", pady=(3, 0))
+            elif kind == "drive":
+                if is_checking:
+                    badge_lbl = tk.Label(text_frame, text="● CHECKING...", font=("Segoe UI", 7, "bold"), fg=MUTED, bg=BG_SECONDARY, padx=4, pady=1)
+                    badge_lbl.pack(anchor="w", pady=(3, 0))
+                elif status_text not in ("Available", ""):
+                    badge_text = "Needs Hardware" if status_text == "UNSUPPORTED_HARDWARE" else ("Protected" if status_text == "EXECUTION_BLOCKED" else status_text)
+                    fg_c = RED if status_text == "EXECUTION_BLOCKED" else ORANGE
+                    bg_c = RED_LIGHT if status_text == "EXECUTION_BLOCKED" else ORANGE_LIGHT
+                    badge_lbl = tk.Label(text_frame, text=f"● {badge_text}", font=("Segoe UI", 7, "bold"), fg=fg_c, bg=bg_c, padx=4, pady=1)
+                    badge_lbl.pack(anchor="w", pady=(3, 0))
+                elif is_available:
+                    badge_lbl = tk.Label(text_frame, text="● Available", font=("Segoe UI", 7, "bold"), fg=GREEN_DARK, bg=GREEN_PALE, padx=4, pady=1)
+                    badge_lbl.pack(anchor="w", pady=(3, 0))
             elif kind == "recovery" and not is_available:
                 badge_lbl = tk.Label(text_frame, text="● Engine Required", font=("Segoe UI", 7, "bold"), fg=MUTED, bg=BG_SECONDARY, padx=4, pady=1)
                 badge_lbl.pack(anchor="w", pady=(3, 0))
@@ -3615,7 +3770,7 @@ class DrexApp(tk.Tk):
             )
         if kind == "drive":
             if caps is None and self.selected_drive:
-                caps = self.capability_manager.get_capabilities(self.selected_drive)
+                caps = self.capability_manager.get_cached(self.selected_drive)
             return drive_method_status(method_id, self.selected_drive, caps=caps)
         if kind == "recovery":
             return self.recovery_dispatcher.status(method_id)
@@ -3911,13 +4066,17 @@ class DrexApp(tk.Tk):
                 toggle_lbl.configure(text="Hide Technical Details ▴")
                 self.tech_details_frame.pack(fill="x", pady=(8, 0))
                 if self.selected_drive:
-                    caps = probe_drive_capabilities(self.selected_drive)
-                    probe_lines = [
-                        f"PhysicalDisk: {caps.get('physical_disk_number')} | Bus: {caps.get('bus_type')} | Model: {caps.get('model')}",
-                        f"Native Sanitize: {caps.get('native_sanitize')} | ATA Secure Erase: {caps.get('ata_secure_erase')} | NVMe: {caps.get('nvme_controller')}",
-                        f"Overwrite Backend: {caps.get('overwrite_backend_qualified')} | Write Capable: {caps.get('write_capable')}",
-                    ]
-                    self.tech_details_label.configure(text="\n".join(probe_lines))
+                    caps = self.capability_manager.get_cached(self.selected_drive)
+                    if caps is None:
+                        self.capability_manager.request_capabilities_async(self.selected_drive, event_queue=self.events)
+                        self.tech_details_label.configure(text="Probing device capabilities in background (CHECKING...)...")
+                    else:
+                        probe_lines = [
+                            f"PhysicalDisk: {caps.get('physical_disk_number')} | Bus: {caps.get('bus_type')} | Model: {caps.get('model')}",
+                            f"Native Sanitize: {caps.get('native_sanitize')} | ATA Secure Erase: {caps.get('ata_secure_erase')} | NVMe: {caps.get('nvme_controller')}",
+                            f"Overwrite Backend: {caps.get('overwrite_backend_qualified')} | Write Capable: {caps.get('write_capable')}",
+                        ]
+                        self.tech_details_label.configure(text="\n".join(probe_lines))
                 else:
                     self.tech_details_label.configure(text="No device selected for capability probing.")
             else:
@@ -3928,7 +4087,12 @@ class DrexApp(tk.Tk):
 
         self._operation_area("Operation Log")
 
-        if self.selected_drive:
+        if self.selected_drive and self.drives:
+            try:
+                idx = self.drives.index(self.selected_drive)
+                self.drive_combo.current(idx)
+            except ValueError:
+                pass
             self._drive_selected()
         elif self.drives:
             self.drive_combo.current(0)
@@ -4310,55 +4474,26 @@ class DrexApp(tk.Tk):
                 messagebox.showwarning("Select a drive", "Choose a detected device before starting.")
                 return
             drive = self.selected_drive
-            caps = self.capability_manager.get_capabilities(drive)
-            phys_num = caps.get("physical_disk_number")
-
-            if (phys_num is not None and int(phys_num) == 0) or drive.path.upper().startswith("C:"):
+            
+            # Cheap local safety check (0ms, Tk thread)
+            if drive.path.upper().startswith("C:") or (drive.device_path and "PHYSICALDRIVE0" in drive.device_path.upper()):
                 messagebox.showerror(
                     "Safety Guard — System Disk Protected",
-                    f"Selected device {drive.path} (PhysicalDisk {phys_num}) is protected by DREX safety architecture.\n\n"
+                    f"Selected device {drive.path} is protected by DREX safety architecture.\n\n"
                     "Destructive operations against the system drive are permanently blocked."
                 )
                 return
 
-            status, reason = drive_method_status(method_id, self.selected_drive, caps=caps)
-            if status == "UNSUPPORTED_HARDWARE":
-                messagebox.showinfo(
-                    "Hardware Capability Report",
-                    f"Method: {method_id.upper()}\nStatus: UNSUPPORTED_HARDWARE\n\n{reason}\n\n"
-                    "This is expected for protocols not supported by this bus. The result is logged."
-                )
-                return
-            if status not in ("Available",):
-                messagebox.showerror("Method unavailable", f"{status}\n\n{reason}")
-                return
-
-            model = caps.get("model") or drive.model or "Unknown"
-            serial = caps.get("serial") or drive.serial or "Unknown"
-            capacity_bytes = caps.get("capacity") or drive.capacity or 0
-            # Phase 10: CAPACITY SAFETY GUARD
-            # Per master requirement §15: unknown capacity MUST block destructive execution.
-            # Never assume 1 GiB, never invent a fallback.
-            # Distinguish PHYSICAL_DEVICE_CAPACITY from VOLUME_CAPACITY.
-            capacity_kind = CapacityKind.PHYSICAL_DEVICE if capacity_bytes > 0 and caps.get("capacity") else CapacityKind.UNKNOWN
-            if capacity_kind == CapacityKind.UNKNOWN or capacity_bytes <= 0:
-                messagebox.showerror(
-                    "EXECUTION BLOCKED — Unknown Capacity",
-                    f"DREX could not determine the physical device capacity for:\n\n"
-                    f"  {drive.path} (PhysicalDisk {phys_num})\n\n"
-                    "Destructive operations with unknown capacity are permanently blocked.\n"
-                    "This is a hard safety requirement: DREX never assumes a fallback size.\n\n"
-                    "Please ensure the device is properly connected and recognized by Windows.",
-                )
-                return
+            model = drive.model or "Storage Device"
+            serial = drive.serial or "Unknown"
+            capacity_bytes = drive.capacity or 0
             capacity = fmt_bytes(capacity_bytes)
-            bus = caps.get("bus_type", "Unknown")
 
             if not messagebox.askyesno(
                 "Confirm Physical Drive Sanitization",
                 f"DESTRUCTIVE OPERATION — IRREVERSIBLE\n\n"
                 f"Target Drive: {drive.path} ({model})\n"
-                f"Physical Device: PhysicalDisk {phys_num}\n"
+                f"Physical Device: {drive.device_path or 'PhysicalDrive'}\n"
                 f"Serial: {serial}\n"
                 f"Capacity: {capacity}\n"
                 f"Selected Method: {method_id.upper()}\n\n"
@@ -4396,17 +4531,71 @@ class DrexApp(tk.Tk):
                 def _emit(msg):
                     self.events.put((EV_LOG, msg))
 
-                # Emit (progress, (0, total)) immediately so the UI shows 0%.
-                # Without this, the first progress event would arrive only after
-                # the first 1 MiB chunk is written, leaving the bar stuck at 0.00%.
-                self.events.put((EV_PROGRESS, (0, capacity_bytes)))
-
                 def _progress(done, total):
                     self.events.put((EV_PROGRESS, (done, total)))
 
                 try:
+                    _emit(f"Starting background operation: {method_id.upper()} on {drive.path}...")
+                    
+                    # ── AUTHORITATIVE SAFETY GATE & CAPABILITY DISCOVERY (Worker Thread) ──
+                    caps = probe_drive_capabilities(drive)
+                    phys_num = caps.get("physical_disk_number")
+                    bus_type = caps.get("bus_type", "UNKNOWN")
+                    _emit(f"  [Safety Gate] Target: {drive.path} | PhysicalDisk: {phys_num} | Bus: {bus_type}")
+
+                    # 1. System disk / PhysicalDisk 0 check
+                    if (phys_num is not None and int(phys_num) == 0) or drive.path.upper().startswith("C:") or caps.get("system_disk") == "SUPPORTED":
+                        block_msg = "PhysicalDisk 0 / C: system disk detected — operation blocked by DREX safety architecture."
+                        _emit(f"[BLOCKED] {block_msg}")
+                        blocked_res = OperationResult(
+                            operation_id=op_id, kind="drive", method_id=method_id, method_name=method_id.upper(),
+                            status="EXECUTION_BLOCKED", backend="safety_gate", target=str(drive.device_path or drive.path),
+                            started=started, completed=utc_now(), verification="NOT_EXECUTED",
+                            evidence={"reason": block_msg, "capabilities": caps}, warnings=[], limitations=[],
+                            detail=block_msg, error=block_msg,
+                        )
+                        self.events.put(("status", ("EXECUTION_BLOCKED", RED)))
+                        self.events.put((EV_OP_COMPLETED, blocked_res))
+                        return blocked_res
+
+                    # 2. Method hardware eligibility check
+                    status, reason = drive_method_status(method_id, drive, caps=caps)
+                    if status != "Available":
+                        _emit(f"[BLOCKED] Method {method_id.upper()} unavailable: {reason}")
+                        blocked_res = OperationResult(
+                            operation_id=op_id, kind="drive", method_id=method_id, method_name=method_id.upper(),
+                            status="UNSUPPORTED_HARDWARE" if status == "UNSUPPORTED_HARDWARE" else "EXECUTION_BLOCKED",
+                            backend="capability_gate", target=str(drive.device_path or drive.path),
+                            started=started, completed=utc_now(), verification="NOT_EXECUTED",
+                            evidence={"reason": reason, "capabilities": caps}, warnings=[], limitations=[],
+                            detail=reason, error=reason,
+                        )
+                        self.events.put(("status", (status, ORANGE if status == "UNSUPPORTED_HARDWARE" else RED)))
+                        self.events.put((EV_OP_COMPLETED, blocked_res))
+                        return blocked_res
+
+                    # 3. Capacity Safety Guard (Master requirement §15)
+                    dev_capacity = caps.get("capacity") or drive.capacity or 0
+                    if dev_capacity <= 0:
+                        cap_msg = "EXECUTION BLOCKED: Unknown Capacity. DREX never assumes a fallback size."
+                        _emit(f"[BLOCKED] {cap_msg}")
+                        blocked_res = OperationResult(
+                            operation_id=op_id, kind="drive", method_id=method_id, method_name=method_id.upper(),
+                            status="EXECUTION_BLOCKED", backend="capacity_gate", target=str(drive.device_path or drive.path),
+                            started=started, completed=utc_now(), verification="NOT_EXECUTED",
+                            evidence={"reason": cap_msg, "capabilities": caps}, warnings=[], limitations=[],
+                            detail=cap_msg, error=cap_msg,
+                        )
+                        self.events.put(("status", ("EXECUTION_BLOCKED", RED)))
+                        self.events.put((EV_OP_COMPLETED, blocked_res))
+                        return blocked_res
+
+                    # Initial progress tick (0, dev_capacity)
+                    self.events.put((EV_PROGRESS, (0, dev_capacity)))
+
+                    # 4. Physical Execution
                     result = execute_drive_method(
-                        method_id, drive, _emit, _progress, ce
+                        method_id, drive, _emit, _progress, ce, caps=caps
                     )
                     status_out = result.get("status", "UNKNOWN")
                     completed = utc_now()
@@ -4444,6 +4633,26 @@ class DrexApp(tk.Tk):
                         _emit(f"Evidence saved: {ev_file}")
                     except Exception as ev_err:
                         _emit(f"[warning] Evidence save failed: {ev_err}")
+
+                    # Generate Certificate & Audit Log (off Tk thread — inside worker!)
+                    if op_result.status == "SUCCESS":
+                        try:
+                            cert = self.cert_manager.create_certificate(
+                                operation_type="drive",
+                                method_id=method_id,
+                                method_name=method_id.upper(),
+                                target_path=str(drive.device_path or drive.path),
+                                target_size_bytes=dev_capacity,
+                                status="SUCCESS",
+                                duration_seconds=max(0, int((datetime.fromisoformat(completed.replace("Z", "+00:00")) - datetime.fromisoformat(started.replace("Z", "+00:00"))).total_seconds())),
+                                verification_status=v_status,
+                                evidence=result,
+                            )
+                            op_result.certificate_id = cert.certificate_id
+                            op_result.certificate_path = cert.certificate_path
+                            _emit(f"Certificate generated: {cert.certificate_id}")
+                        except Exception as cert_err:
+                            _emit(f"[warning] Certificate generation failed: {cert_err}")
 
                     fg = GREEN if status_out in ("PASS_PHYSICAL", "PASS_POLICY") else (
                         ORANGE if status_out in ("UNSUPPORTED_HARDWARE", "PHYSICAL_EXECUTION_UNAVAILABLE", "HOST_OVERWRITE_ASSURANCE") else RED
@@ -4842,6 +5051,18 @@ class DrexApp(tk.Tk):
                 # ── Device discovery
                 elif kind in ("devices_discovered", EV_DEVICES):
                     self._on_devices_discovered(value)
+                # ── Asynchronous device capabilities updated
+                elif kind in ("capabilities_updated", EV_CAPABILITIES):
+                    probed_drive, caps = value
+                    if self.selected_drive and (getattr(probed_drive, "path", None) == self.selected_drive.path or getattr(probed_drive, "device_path", None) == self.selected_drive.device_path):
+                        self._update_drive_method_badges(caps=caps)
+                        if getattr(self, "_tech_details_visible", False) and hasattr(self, "tech_details_label") and self.tech_details_label.winfo_exists():
+                            probe_lines = [
+                                f"PhysicalDisk: {caps.get('physical_disk_number')} | Bus: {caps.get('bus_type')} | Model: {caps.get('model')}",
+                                f"Native Sanitize: {caps.get('native_sanitize')} | ATA Secure Erase: {caps.get('ata_secure_erase')} | NVMe: {caps.get('nvme_controller')}",
+                                f"Overwrite Backend: {caps.get('overwrite_backend_qualified')} | Write Capable: {caps.get('write_capable')}",
+                            ]
+                            self.tech_details_label.configure(text="\n".join(probe_lines))
                 # ── Legacy status/result events (kept for backwards compat)
                 elif kind == "status":
                     status_out, fg_color = value

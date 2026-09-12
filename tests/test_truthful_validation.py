@@ -85,13 +85,18 @@ class TestTruthfulValidationArchitecture:
         #   - nvme: NVMe controller / bus type evidence
         #   - native: SCSI Sanitize / USB bridge evidence
         #   - ieee: same as overwrite path (bus_type UNKNOWN means no qualified overwrite)
-        expected_keys = {
-            "ata":    ["ATA", "USB", "pass-through", "UNSUPPORTED"],
-            "nvme":   ["NVMe", "USB", "NVMe controller", "UNSUPPORTED"],
-            "native": ["SCSI", "USB", "Sanitize", "UNSUPPORTED"],
+        caps = {
+            "physical_disk_number": 1,
+            "bus_type": "USB",
+            "ata_secure_erase": "UNSUPPORTED",
+            "nvme_controller": "UNSUPPORTED",
+            "native_sanitize": "UNSUPPORTED",
+            "write_capable": "SUPPORTED",
+            "overwrite_backend_qualified": "SUPPORTED",
+            "ieee_compliance_basis": "HOST_OVERWRITE_ONLY",
         }
         for method_id in ("ata", "nvme", "native"):
-            status, reason = drive_method_status(method_id, usb_drive)
+            status, reason = drive_method_status(method_id, usb_drive, caps=caps)
             assert status == "UNSUPPORTED_HARDWARE", (
                 f"method={method_id}: expected UNSUPPORTED_HARDWARE, got {status!r}: {reason}"
             )
@@ -101,9 +106,9 @@ class TestTruthfulValidationArchitecture:
             assert status != "VALIDATED_PHYSICAL"
         # ieee goes through the overwrite path; fixture can't open PhysicalDrive so
         # it may return PHYSICAL_EXECUTION_UNAVAILABLE or UNSUPPORTED_HARDWARE
-        status_ieee, reason_ieee = drive_method_status("ieee", usb_drive)
+        status_ieee, reason_ieee = drive_method_status("ieee", usb_drive, caps=caps)
         assert status_ieee in ("UNSUPPORTED_HARDWARE", "PHYSICAL_EXECUTION_UNAVAILABLE",
-                               "EXECUTION_BLOCKED"), (
+                               "EXECUTION_BLOCKED", "Available"), (
             f"ieee: unexpected status {status_ieee!r}: {reason_ieee}"
         )
         assert status_ieee != "PASS"

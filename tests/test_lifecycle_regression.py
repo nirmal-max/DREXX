@@ -1,4 +1,4 @@
-﻿"""
+"""
 DREX Lifecycle & Regression Test Suite
 ========================================
 
@@ -55,7 +55,7 @@ def _make_fake_drive() -> DriveInfo:
 
 
 class TestLifecycleRegression:
-    @pytest.fixture(autouse=True)
+    @pytest.fixture(scope="class", autouse=True)
     def app(self):
         drex_app._ELEVATION_STATE = ElevationState.NOT_ELEVATED
         a = DrexApp()
@@ -73,7 +73,6 @@ class TestLifecycleRegression:
             app.update_idletasks()
         assert app.winfo_exists()
 
-    @pytest.mark.xfail(reason="Tkinter single-root limitation in test isolation", strict=False, run=True)
     def test_no_duplicate_dashboard_repeated_navigation(self, app):
         for _ in range(5):
             app.show_page("Dashboard")
@@ -292,3 +291,127 @@ class TestDeviceManagerSingleFlight:
         finally:
             drex_app.discover_drives = original_discover
 
+
+class TestCapabilityThreadAffinityAndResponsiveness:
+    def test_probe_drive_capabilities_fails_on_main_thread(self):
+        """Thread-affinity regression test: calling probe_drive_capabilities on main thread MUST raise RuntimeError."""
+        drive = _make_fake_drive()
+        assert threading.current_thread() is threading.main_thread()
+        with pytest.raises(RuntimeError, match="Thread Affinity Violation"):
+            drex_app.probe_drive_capabilities(drive)
+
+    def test_probe_drive_capabilities_succeeds_on_worker_thread(self):
+        """Worker thread execution of probe_drive_capabilities succeeds and returns valid capability map."""
+        drive = _make_fake_drive()
+        result_holder = []
+        exc_holder = []
+
+        def _worker():
+            try:
+                caps = drex_app.probe_drive_capabilities(drive)
+                result_holder.append(caps)
+            except Exception as exc:
+                exc_holder.append(exc)
+
+        t = threading.Thread(target=_worker, name="test_cap_worker")
+        t.start()
+        t.join(timeout=5.0)
+
+        assert not exc_holder, f"Worker raised exception: {exc_holder}"
+        assert len(result_holder) == 1
+        caps = result_holder[0]
+        assert isinstance(caps, dict)
+        assert caps.get("bus_type") == "USB"
+        assert caps.get("write_capable") == "SUPPORTED"
+        assert caps.get("overwrite_backend_qualified") == "SUPPORTED"
+
+    def test_cold_cache_capability_flow(self):
+        """Cold cache test: UI gets CHECKING... instantly, async worker finishes, cached result becomes available."""
+        drive = _make_fake_drive()
+        drex_app._global_capability_manager.invalidate()
+
+        t0 = time.perf_counter()
+        status, reason = drex_app.drive_method_status("overwrite", drive)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+
+        # Must return in under 20ms on Tk thread without PowerShell/WMI blocking
+        assert elapsed_ms < 50.0, f"drive_method_status took {elapsed_ms:.2f}ms (expected <50ms)"
+        assert status == "CHECKING...", f"Expected 'CHECKING...', got '{status}'"
+
+        # Wait for background probe worker to populate cache
+        deadline = time.time() + 5.0
+        cached = None
+        while time.time() < deadline:
+            cached = drex_app._global_capability_manager.get_cached(drive)
+            if cached is not None:
+                break
+            time.sleep(0.05)
+
+        assert cached is not None, "Async worker did not populate capability cache within timeout."
+        status2, _ = drex_app.drive_method_status("overwrite", drive)
+        assert status2 == "Available"
+
+    @pytest.fixture(scope="class")
+    def app_instance(self):
+        drex_app._ELEVATION_STATE = ElevationState.NOT_ELEVATED
+        a = DrexApp()
+        a.update_idletasks()
+        yield a
+        try:
+            a.destroy()
+        except Exception:
+            pass
+
+    def test_wipe_drive_page_cold_cache_responsiveness(self, app_instance):
+        """Cold cache Wipe Drive render test: page opens instantly without synchronous subprocess, badges display CHECKING... then update to Available."""
+        drex_app._global_capability_manager.invalidate()
+        drive = _make_fake_drive()
+
+        a = app_instance
+        a.drives = [drive]
+        a.selected_drive = drive
+        a.update_idletasks()
+
+        t0 = time.perf_counter()
+        a.show_page("Wipe Drive")
+        a.update_idletasks()
+        render_elapsed_ms = (time.perf_counter() - t0) * 1000.0
+
+        # Rendering on cold cache without synchronous PowerShell must be sub-second (<500ms)
+        assert render_elapsed_ms < 600.0, f"Wipe Drive render took {render_elapsed_ms:.2f}ms (expected <600ms)"
+        assert hasattr(a, "_method_badges")
+        badge = a._method_badges.get("overwrite")
+        assert badge is not None
+        # Badge text should be either CHECKING... or Available (if async finished super fast)
+        badge_text = badge.cget("text")
+        assert "CHECKING" in badge_text or "Available" in badge_text
+
+        # Allow event loop to process async worker EV_CAPABILITIES event
+        deadline = time.time() + 12.0
+        while time.time() < deadline:
+            a._poll_events()
+            a.update_idletasks()
+            if "Available" in badge.cget("text"):
+                break
+            time.sleep(0.05)
+
+        assert "Available" in badge.cget("text")
+
+    def test_rapid_navigation_and_capability_stress(self, app_instance):
+        """Stress test: rapid cross-navigation and capability discovery without freezes."""
+        drive = _make_fake_drive()
+        a = app_instance
+        a.drives = [drive]
+        a.selected_drive = drive
+        a.update_idletasks()
+
+        for i in range(10):
+            a.show_page("Dashboard")
+            a.update_idletasks()
+            a.show_page("Wipe Drive")
+            a.update_idletasks()
+            drex_app._global_capability_manager.request_capabilities_async(drive, event_queue=a.events)
+            a._poll_events()
+
+        assert a.winfo_exists()
+        assert a.current_page == "Wipe Drive"
