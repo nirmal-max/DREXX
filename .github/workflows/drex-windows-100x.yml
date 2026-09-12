@@ -1,0 +1,55 @@
+name: DREXX Windows 100x Runtime Audit
+
+on:
+  push:
+    branches: [audit/100x-20260912]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Install pytest dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest cryptography qrcode reportlab pillow psutil
+      - name: Compile active Python sources
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Recurse -Filter *.py | Where-Object { $_.FullName -notmatch '\\repo\\' -and $_.FullName -notmatch '\\.git\\' }
+          foreach ($f in $files) { python -m py_compile $f.FullName; if ($LASTEXITCODE -ne 0) { throw "Compile failed: $($f.FullName)" } }
+          Write-Host "Compiled $($files.Count) active Python sources."
+      - name: Full pytest once
+        shell: pwsh
+        run: python -m pytest tests/ -q --tb=short
+      - name: Full pytest 100x
+        shell: pwsh
+        run: |
+          1..100 | ForEach-Object {
+            Write-Host "========== FULL PYTEST ITERATION $_/100 =========="
+            python -m pytest tests/ -q --tb=short
+            if ($LASTEXITCODE -ne 0) { throw "pytest failed on iteration $_" }
+          }
+      - name: Audit regression 100x
+        shell: pwsh
+        run: |
+          1..100 | ForEach-Object {
+            Write-Host "========== AUDIT REGRESSION $_/100 =========="
+            python -m pytest tests/test_100x_audit_regressions.py -q --tb=short
+            if ($LASTEXITCODE -ne 0) { throw "audit regression failed on iteration $_" }
+          }
+      - name: CLI checks
+        shell: pwsh
+        run: |
+          python drex_app.py --version
+          if ($LASTEXITCODE -ne 0) { throw 'version failed' }
+          python drex_app.py --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'self-test failed' }
+          python drex_app.py --doctor
+          if ($LASTEXITCODE -ne 0) { throw 'doctor failed' }
