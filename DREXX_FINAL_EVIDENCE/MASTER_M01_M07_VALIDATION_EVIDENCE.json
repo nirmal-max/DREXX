@@ -1,0 +1,73 @@
+{
+  "session": "2026-09-12T05:15:54Z",
+  "target": {
+    "path": "F:\\",
+    "model": "SanDisk Ultra USB Device",
+    "serial": "03020109032022002215",
+    "physical_disk": 1,
+    "bus_type": "USB",
+    "capacity": 61500030976
+  },
+  "capabilities": {
+    "physical_disk_number": "1",
+    "model": "SanDisk Ultra",
+    "serial": "03020109032022002215",
+    "capacity": "61500030976",
+    "filesystem": "exFAT",
+    "bus_type": "USB",
+    "media_type": "UNSPECIFIED",
+    "removable": "SUPPORTED",
+    "system_disk": "UNSUPPORTED",
+    "boot_disk": "UNSUPPORTED",
+    "usb_bridge": "SUPPORTED",
+    "ata_available": "UNSUPPORTED",
+    "ata_passthrough": "UNSUPPORTED",
+    "ata_secure_erase": "UNSUPPORTED",
+    "ata_enhanced_secure_erase": "UNSUPPORTED",
+    "nvme_controller": "UNSUPPORTED",
+    "nvme_sanitize": "UNSUPPORTED",
+    "nvme_sanitize_crypto": "UNSUPPORTED",
+    "nvme_sanitize_block": "UNSUPPORTED",
+    "nvme_format_secure": "UNSUPPORTED",
+    "native_sanitize": "UNSUPPORTED",
+    "write_capable": "SUPPORTED",
+    "overwrite_backend_qualified": "SUPPORTED",
+    "nist_qualified": "True",
+    "clear_qualified": "True",
+    "ieee_compliance_basis": "HOST_OVERWRITE_ONLY"
+  },
+  "identity_verified": true,
+  "method_results": {
+    "nist": {
+      "status": "Available",
+      "execution": "PASS_PHYSICAL_VIA_OVERWRITE_BACKEND"
+    },
+    "smart": {
+      "status": "Available",
+      "execution": "PASS_PHYSICAL_VIA_OVERWRITE_BACKEND"
+    },
+    "native": {
+      "status": "UNSUPPORTED_HARDWARE",
+      "reason": "USB bridge blocks SCSI Sanitize"
+    },
+    "ata": {
+      "status": "UNSUPPORTED_HARDWARE",
+      "reason": "USB bridge blocks ATA pass-through"
+    },
+    "nvme": {
+      "status": "UNSUPPORTED_HARDWARE",
+      "reason": "Not NVMe device"
+    },
+    "ieee": {
+      "status": "Available",
+      "execution": "HOST_OVERWRITE_ASSURANCE"
+    },
+    "overwrite": {
+      "status": "PASS_PHYSICAL_RANGE",
+      "bytes_written": 268435456,
+      "bytes_verified": 268435456,
+      "mismatches": 0,
+      "verification": "VERIFIED"
+    }
+  }
+}

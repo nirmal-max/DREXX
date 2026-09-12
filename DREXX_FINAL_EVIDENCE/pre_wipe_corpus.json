@@ -1,0 +1,99 @@
+{
+  "corpus_root": "F:\\DREXX_TEST_CORPUS",
+  "created_at": "2026-09-12T05:14:41Z",
+  "file_count": 13,
+  "total_bytes": 4269751,
+  "files": [
+    {
+      "path": "F:\\DREXX_TEST_CORPUS\\readme.txt",
+      "size": 70,
+      "sha256": "739b182355a84343d64730105532f2ed8ba21aafc6442d5304f687a86034d3b3",
+      "creation_time": "2026-09-12T05:14:40.560000+00:00",
+      "last_write_time": "2026-09-12T05:14:42+00:00"
+    },
+    {
+      "path": "F:\\DREXX_TEST_CORPUS\\audit_notes.txt",
+      "size": 65,
+      "sha256": "81f4153863a40dfca39081e91b67a0ce8dbfa57f1ae738aa7754454542c5a151",
+      "creation_time": "2026-09-12T05:14:40.620000+00:00",
+      "last_write_time": "2026-09-12T05:14:42+00:00"
+    },
+    {
+      "path": "F:\\DREXX_TEST_CORPUS\\document.pdf",
+      "size": 317,
+      "sha256": "acffde83cda1ba775d8014278d3915401c5d3fd04fbf9da05531b7d0adb55cf8",
+      "creation_time": "2026-09-12T05:14:40.670000+00:00",
+      "last_write_time": "2026-09-12T05:14:42+00:00"
+    },
+    {
+      "path": "F:\\DREXX_TEST_CORPUS\\evidence_photo.jpg",
+      "size": 91,
+      "sha256": "c501583317838602f903f1d5bc27a152365d9c6fd4d33817b8a347b2a5d1546f",
+      "creation_time": "2026-09-12T05:14:40.730000+00:00",
+      "last_write_time": "2026-09-12T05:14:42+00:00"
+    },
+    {
+      "path": "F:\\DREXX_TEST_CORPUS\\diagram.png",
+      "size": 70,
+      "sha256": "ac5d23ce7707f06cae331e15476aa05a71ea300170171ca370b0918d9ce06187",
+      "creation_time": "2026-09-12T05:14:40.790000+00:00",
+      "last_write_time": "2026-09-12T05:14:42+00:00"
+    },
+    {
+      "path": "F:\\DREXX_TEST_CORPUS\\backup.zip",
+      "size": 811,
+      "sha256": "1f880827829a7e16e8961630a685c39968b482bca73658ff6106a3d97f80136e",
+      "creation_time": "2026-09-12T05:14:40.850000+00:00",
+      "last_write_time": "2026-09-12T05:14:42+00:00"
+    },
+    {
+      "path": "F:\\DREXX_TEST_CORPUS\\large_4mb.bin",
+      "size": 4194304,
+      "sha256": "595a0a7b8bf7ab49be16e44fd482f094753caaac93654101ce9bf85494f4a3d9",
+      "creation_time": "2026-09-12T05:14:40.900000+00:00",
+      "last_write_time": "2026-09-12T05:14:42+00:00"
+    },
+    {
+      "path": "F:\\DREXX_TEST_CORPUS\\small_128b.bin",
+      "size": 128,
+      "sha256": "65c1eaf95a23fa861a1ac2ec36c94affcaf11998d73acdab62d8076747f554a7",
+      "creation_time": "2026-09-12T05:14:41.160000+00:00",
+      "last_write_time": "2026-09-12T05:14:42+00:00"
+    },
+    {
+      "path": "F:\\DREXX_TEST_CORPUS\\dept_records\\q3_audit\\restricted\\deep_manifest.txt",
+      "size": 37,
+      "sha256": "723fd81702fe315b4f84bd511db202c6a694a82e4bd583db2973fdf81fcfad3d",
+      "creation_time": "2026-09-12T05:14:41.300000+00:00",
+      "last_write_time": "2026-09-12T05:14:42+00:00"
+    },
+    {
+      "path": "F:\\DREXX_TEST_CORPUS\\dept_records\\q3_audit\\restricted\\nested_binary.dat",
+      "size": 8192,
+      "sha256": "15c6fbeb6df6d62ec2cd35350aaaa46569625cb71e3d99a8d364ec5985377b63",
+      "creation_time": "2026-09-12T05:14:41.320000+00:00",
+      "last_write_time": "2026-09-12T05:14:42+00:00"
+    },
+    {
+      "path": "F:\\DREXX_TEST_CORPUS\\original_file.bin",
+      "size": 65,
+      "sha256": "b55834775be03de94f2afcc0bb36c368b690e2dd9e81d2619ae979ad2fb29c86",
+      "creation_time": "2026-09-12T05:14:41.330000+00:00",
+      "last_write_time": "2026-09-12T05:14:42+00:00"
+    },
+    {
+      "path": "F:\\DREXX_TEST_CORPUS\\dept_records\\q3_audit\\restricted\\duplicate_copy.bin",
+      "size": 65,
+      "sha256": "b55834775be03de94f2afcc0bb36c368b690e2dd9e81d2619ae979ad2fb29c86",
+      "creation_time": "2026-09-12T05:14:41.340000+00:00",
+      "last_write_time": "2026-09-12T05:14:42+00:00"
+    },
+    {
+      "path": "F:\\DREXX_TEST_CORPUS\\random_entropy.dat",
+      "size": 65536,
+      "sha256": "c46ae77c2ec1fbd43b3aa34b1c92c38ae6e88e7188e6fdadcd622f8656497098",
+      "creation_time": "2026-09-12T05:14:41.360000+00:00",
+      "last_write_time": "2026-09-12T05:14:42+00:00"
+    }
+  ]
+}

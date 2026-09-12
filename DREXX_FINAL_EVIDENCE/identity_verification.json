@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-09-12T05:14:34Z",
+  "expected_physical_disk": 1,
+  "identity_verified": true,
+  "abort_reason": null,
+  "actual_physical_disk": 1,
+  "model": "SanDisk Ultra",
+  "serial": "03020109032022002215",
+  "capacity": 61505273856,
+  "bus_type": "USB"
+}

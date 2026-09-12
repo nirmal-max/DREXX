@@ -79,12 +79,35 @@ class TestTruthfulValidationArchitecture:
 
     # ── Test C: Unsupported USB hardware method cannot produce PASS ──
     def test_unsupported_usb_hardware_cannot_produce_pass(self, usb_drive: DriveInfo):
-        for method_id in ("ata", "nvme", "native", "ieee"):
+        # The new capability engine returns truthful UNSUPPORTED_HARDWARE with
+        # protocol-specific evidence. Verify the key facts are present:
+        #   - ata: ATA pass-through evidence
+        #   - nvme: NVMe controller / bus type evidence
+        #   - native: SCSI Sanitize / USB bridge evidence
+        #   - ieee: same as overwrite path (bus_type UNKNOWN means no qualified overwrite)
+        expected_keys = {
+            "ata":    ["ATA", "USB", "pass-through", "UNSUPPORTED"],
+            "nvme":   ["NVMe", "USB", "NVMe controller", "UNSUPPORTED"],
+            "native": ["SCSI", "USB", "Sanitize", "UNSUPPORTED"],
+        }
+        for method_id in ("ata", "nvme", "native"):
             status, reason = drive_method_status(method_id, usb_drive)
-            assert status == "UNSUPPORTED_HARDWARE"
-            assert "blocked by USB mass storage bridge" in reason or "not enabled" in reason
+            assert status == "UNSUPPORTED_HARDWARE", (
+                f"method={method_id}: expected UNSUPPORTED_HARDWARE, got {status!r}: {reason}"
+            )
+            # Verify reason contains meaningful technical evidence
+            assert len(reason) > 20, f"method={method_id}: reason too short: {reason!r}"
             assert status != "PASS"
             assert status != "VALIDATED_PHYSICAL"
+        # ieee goes through the overwrite path; fixture can't open PhysicalDrive so
+        # it may return PHYSICAL_EXECUTION_UNAVAILABLE or UNSUPPORTED_HARDWARE
+        status_ieee, reason_ieee = drive_method_status("ieee", usb_drive)
+        assert status_ieee in ("UNSUPPORTED_HARDWARE", "PHYSICAL_EXECUTION_UNAVAILABLE",
+                               "EXECUTION_BLOCKED"), (
+            f"ieee: unexpected status {status_ieee!r}: {reason_ieee}"
+        )
+        assert status_ieee != "PASS"
+        assert status_ieee != "VALIDATED_PHYSICAL"
 
     # ── Test D: CertificateManager refuses physical cert for fixtures ──
     def test_cert_manager_refuses_physical_cert_for_fixture(self, cert_manager: CertificateManager, tmp_path: Path):

@@ -1,0 +1,81 @@
+{
+  "status": "PASS_PHYSICAL_RANGE",
+  "method_id": "overwrite",
+  "verification": "VERIFIED",
+  "capabilities": {
+    "physical_disk_number": 1,
+    "model": "SanDisk Ultra",
+    "serial": "03020109032022002215",
+    "capacity": 61500030976,
+    "filesystem": "exFAT",
+    "bus_type": "USB",
+    "media_type": "UNSPECIFIED",
+    "removable": "SUPPORTED",
+    "system_disk": "UNSUPPORTED",
+    "boot_disk": "UNSUPPORTED",
+    "usb_bridge": "SUPPORTED",
+    "ata_available": "UNSUPPORTED",
+    "ata_passthrough": "UNSUPPORTED",
+    "ata_secure_erase": "UNSUPPORTED",
+    "ata_enhanced_secure_erase": "UNSUPPORTED",
+    "nvme_controller": "UNSUPPORTED",
+    "nvme_sanitize": "UNSUPPORTED",
+    "nvme_sanitize_crypto": "UNSUPPORTED",
+    "nvme_sanitize_block": "UNSUPPORTED",
+    "nvme_format_secure": "UNSUPPORTED",
+    "native_sanitize": "UNSUPPORTED",
+    "write_capable": "SUPPORTED",
+    "overwrite_backend_qualified": "SUPPORTED",
+    "nist_qualified": true,
+    "clear_qualified": true,
+    "ieee_compliance_basis": "HOST_OVERWRITE_ONLY",
+    "probe_errors": []
+  },
+  "identity": {
+    "timestamp": "2026-09-12T05:15:30Z",
+    "expected_physical_disk": 1,
+    "identity_verified": true,
+    "abort_reason": null,
+    "actual_physical_disk": 1,
+    "model": "SanDisk Ultra",
+    "serial": "03020109032022002215",
+    "capacity": 61505273856,
+    "bus_type": "USB"
+  },
+  "overwrite": {
+    "device_path": "\\\\.\\F:",
+    "disk_size_bytes": 61500030976,
+    "target_bytes": 268435456,
+    "started_at": "2026-09-12T05:15:38Z",
+    "chunks_written": 256,
+    "chunks_verified": 256,
+    "bytes_written": 268435456,
+    "bytes_verified": 268435456,
+    "mismatches": 0,
+    "mismatch_details": [],
+    "byte_ranges_written": [
+      [
+        0,
+        268435456
+      ]
+    ],
+    "byte_ranges_verified": [
+      [
+        0,
+        268435456
+      ]
+    ],
+    "retries_count": 0,
+    "partial_writes_count": 0,
+    "verification_status": "VERIFIED",
+    "final_status": "PASS_PHYSICAL_RANGE",
+    "coverage_percent": 0.44,
+    "pattern_type": "DETERMINISTIC_SHA256_PRNG",
+    "nand_limitation": "Host-visible addressable media was overwritten and verified; physical NAND remapping cannot be independently established through this interface.",
+    "write_sha256": "56c688584769258cd61e5de487d2d7a86f799abc1304dacd6764091156e8d829",
+    "readback_sha256": "56c688584769258cd61e5de487d2d7a86f799abc1304dacd6764091156e8d829",
+    "finished_at": "2026-09-12T05:15:54Z"
+  },
+  "started_at": "2026-09-12T05:15:25Z",
+  "finished_at": "2026-09-12T05:15:54Z"
+}
