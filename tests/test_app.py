@@ -64,9 +64,9 @@ def test_unsupported_file_method_fails_closed(tmp_path):
     target = tmp_path / "secret.bin"
     target.write_bytes(b"do not touch")
     try:
-        execute_file_method("slack", target, lambda _: None, lambda *_: None)
+        execute_file_method("policy", target, lambda _: None, lambda *_: None)
     except RuntimeError as exc:
-        assert "unavailable" in str(exc).lower() or "backend" in str(exc).lower()
+        assert "unavailable" in str(exc).lower() or "planning" in str(exc).lower() or "backend" in str(exc).lower()
     else:
         raise AssertionError("unsupported method executed")
     assert target.read_bytes() == b"do not touch"

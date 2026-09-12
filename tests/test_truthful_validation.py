@@ -174,3 +174,41 @@ class TestTruthfulValidationArchitecture:
         result = execute_file_method("zero", target, events.append, lambda d, t: None)
         assert result["verified"] is True
         assert not target.exists()
+
+    # ── Test I: Method #9 Cryptographic Erasure fails closed on key destroy & distinguishes software CE ──
+    def test_method_9_crypto_erasure_truthful_contract(self, tmp_path: Path):
+        target = tmp_path / "crypto_payload.bin"
+        target.write_bytes(b"CONFIDENTIAL_PAYLOAD_CRYPTO_TEST_BYTES" * 16)
+        
+        events = []
+        result = execute_file_method("crypto", target, events.append, lambda d, t=1: None)
+        assert result["verified"] is True
+        assert result["removed"] is True
+        assert result["mode"] == "SOFTWARE_CRYPTO_ERASURE"
+        assert not target.exists()
+        assert "SOFTWARE_CRYPTO_ERASURE" in result["classification"]
+
+    # ── Test J: Method #10 File Slack / Cluster-Tip controlled image experiment ──
+    def test_method_10_slack_sanitization_controlled_image(self, tmp_path: Path):
+        target = tmp_path / "dummy_slack_target.bin"
+        target.write_bytes(b"dummy")
+        
+        events = []
+        result = execute_file_method("slack", target, events.append, lambda d, t=1: None)
+        assert result["verified"] is True
+        assert result["mode"] == "PASS_CONTROLLED_IMAGE"
+        assert result["slack_length"] > 0
+        assert result["payload_preserved"] is True
+        assert result["residual_before_sha256"] != result["residual_after_sha256"]
+
+    # ── Test K: Method #13 Free Space controlled residual overwrite & balloon wipe ──
+    def test_method_13_free_space_truthful_contract(self, tmp_path: Path):
+        events = []
+        result = execute_file_method("free_space", tmp_path, events.append, lambda d, t=1: None)
+        assert result["verified"] is True
+        assert result["mode"] == "FILESYSTEM_LAYER_SANITIZATION"
+        assert result["controlled_experiment_passed"] is True
+        assert result["sentinel_size_bytes"] > 0
+        assert result["controlled_bytes_written"] > 0
+        assert "FILESYSTEM_LAYER_SANITIZATION" in result["assurance_boundary"]
+

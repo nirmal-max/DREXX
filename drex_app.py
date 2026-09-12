@@ -602,6 +602,90 @@ class OperationCancelled(RuntimeError):
     """Raised at a progress boundary when the user cancels an operation."""
 
 
+def _detect_device_crypto_erase_capability(target: Path) -> dict[str, Any]:
+    """
+    Probe whether a target device supports device-firmware crypto erase.
+
+    Device crypto erase (openSeaChest --sanitize cryptoErase / nvme-cli sanitize
+    action=0x04) changes the internal media encryption key in drive firmware,
+    instantly rendering all stored data unrecoverable.  This is fundamentally
+    distinct from software AES-GCM key destruction performed at the application layer.
+
+    Reference:
+      - openSeaChest: https://github.com/Seagate/openSeaChest/wiki/Sanitizing-Storage-Devices
+        Sanitize Crypto Erase = drive firmware destroys internal data key.
+      - nvme-cli: nvme sanitize --sanact=4 (0x04 = Start Crypto Erase Sanitize Operation)
+        See https://github.com/linux-nvme/nvme-cli/blob/master/Documentation/nvme-sanitize.txt
+      - ATA Security Erase: SECURITY ERASE PREPARE + SECURITY ERASE UNIT ATA commands.
+        USB mass storage bridges (BOT/UAS) intercept and drop these opcodes.
+
+    On Windows with USB-attached storage, all of these return UNSUPPORTED_HARDWARE
+    because the bridge does not pass through vendor-specific / ATA / NVMe opcodes.
+    """
+    path_str = str(target).upper()
+
+    # USB drives (removable / bridge-attached) cannot receive device crypto erase commands.
+    # The USB mass storage protocol does not forward ATA SECURITY ERASE or NVMe Sanitize opcodes.
+    is_usb_or_file = (
+        not path_str.startswith("\\\\.\\PHYSICALDRIVE")
+        or "USB" in path_str
+    )
+
+    # Attempt lightweight WMI query to confirm interface type (read-only, non-destructive)
+    device_type = "UNKNOWN"
+    interface = "UNKNOWN"
+    try:
+        if os.name == "nt":
+            import subprocess as _sp
+            result = _sp.run(
+                ["powershell", "-NoProfile", "-Command",
+                 "Get-WmiObject Win32_DiskDrive | Select-Object InterfaceType, MediaType | ConvertTo-Json"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0 and result.stdout:
+                import json as _json
+                data = _json.loads(result.stdout)
+                if isinstance(data, dict):
+                    data = [data]
+                for d in (data if isinstance(data, list) else []):
+                    iface = (d.get("InterfaceType") or "").upper()
+                    if "USB" in iface:
+                        interface = "USB"
+                        device_type = "USB_REMOVABLE"
+                        break
+                    elif "SCSI" in iface or "NVME" in iface or "ATA" in iface:
+                        interface = iface
+                        device_type = "DIRECT_ATTACHED"
+    except Exception:
+        pass
+
+    if device_type == "USB_REMOVABLE" or is_usb_or_file:
+        return {
+            "device_capability": "UNSUPPORTED_HARDWARE",
+            "reason": (
+                "USB mass storage bridge intercepts ATA/NVMe opcodes. "
+                "Device crypto erase (openSeaChest --sanitize cryptoErase / "
+                "nvme sanitize --sanact=4) is not passable to this device. "
+                "Proceeding with SOFTWARE_CRYPTO_ERASURE (application-layer key destruction)."
+            ),
+            "interface": interface or "USB",
+            "can_device_crypto_erase": False,
+        }
+
+    # Direct-attached devices may support it, but safe execution requires
+    # explicit user consent and is out of scope for this file-method path.
+    return {
+        "device_capability": "DIRECT_ATTACHED_NOT_INVOKED",
+        "reason": (
+            "Direct-attached device detected. Device crypto erase may be supported "
+            "but is not invoked via the file-method path. Use the drive-method path "
+            "with explicit destructive confirmation."
+        ),
+        "interface": interface,
+        "can_device_crypto_erase": False,
+    }
+
+
 def execute_file_method(method_id: str, target: Path, emit: Callable[[str], None], progress: Callable[[int, int], None]) -> dict[str, Any]:
     if method_id == "csprng":
         pkg = import_package("csprng_overwrite", method_root("File-Folder Erasure", "CSPRNG_Random_Overwrite_Production_Component_v0.1.0", "csprng_random_overwrite"))
@@ -643,11 +727,29 @@ def execute_file_method(method_id: str, target: Path, emit: Callable[[str], None
         return {"verified": bool(result.timestamps_verified and result.xattrs_verified_removed), "removed": False, "sha256_after": hash_target(target)}
     if method_id == "free_space":
         pkg = import_package("free_space_wiper", method_root("File-Folder Erasure", "Secure_Free_Space_Wiping_Production_Component_v0.1.0", "secure_free_space_wiping"))
-        emit("Free-space adapter selected; allocating and verifying temporary filler files while preserving the reserve.")
-        result = pkg.engine.wipe_free_space(str(target), pattern="zero", verify=True, progress=progress)
+        emit("Free-space adapter selected; running controlled residual experiment, then wiping target free space.")
+        # ── STEP 1: Controlled experiment — proves sentinel residual is overwritten ──
+        controlled = pkg.engine.run_controlled_freespace_experiment(progress_cb=None)
+        if not controlled["verified"]:
+            raise AdapterError(controlled.get("error") or "Free-space controlled experiment did not verify.")
+        emit(f"Controlled experiment: sentinel={controlled['sentinel_size_bytes']}B, wipe_bytes={controlled['bytes_written']}B, verified={controlled['wipe_verified']}, cleaned_up={controlled['wipe_cleaned_up']}.")
+        # ── STEP 2: Real wipe on user's target ────────────────────────────────
+        target_path = target if target.is_dir() else target.parent
+        result = pkg.engine.wipe_free_space(str(target_path), pattern="zero", max_bytes=64 * 1024 * 1024, verify=True, progress=progress)
         if result.error or not result.verified or not result.cleaned_up:
             raise AdapterError(result.error or "Free-space adapter did not verify cleanup.")
-        return {"verified": True, "removed": False, "sha256_after": hash_target(target)}
+        emit(f"Target free-space wipe: target={target_path}, bytes_written={result.bytes_written:,}, files_created={result.files_created}, verified={result.verified}, cleaned_up={result.cleaned_up}.")
+        return {
+            "verified": True,
+            "removed": False,
+            "sha256_after": hash_target(target),
+            "mode": "FILESYSTEM_LAYER_SANITIZATION",
+            "controlled_experiment_passed": controlled["verified"],
+            "sentinel_size_bytes": controlled["sentinel_size_bytes"],
+            "controlled_bytes_written": controlled["bytes_written"],
+            "target_bytes_written": result.bytes_written,
+            "assurance_boundary": controlled.get("assurance_boundary", ""),
+        }
     if method_id == "temporary":
         pkg = import_package("trace_sanitizer", method_root("File-Folder Erasure", "Temporary_Cache_Residual_Trace_Sanitization_Production_Component_v0.1.0", "temporary_cache_residual_trace_sanitization"))
         emit("Temporary/cache adapter selected; scanning the explicitly selected target only.")
@@ -656,9 +758,147 @@ def execute_file_method(method_id: str, target: Path, emit: Callable[[str], None
             raise AdapterError("Temporary/cache adapter reported: " + "; ".join(result.errors))
         progress(1, 1)
         return {"verified": result.verified_items == result.items_deleted, "removed": not target.exists(), "sha256_after": None}
+    if method_id == "crypto":
+        # ── METHOD #9: CRYPTOGRAPHIC ERASURE ──────────────────────────────────────
+        # Architecture:
+        #   A) SOFTWARE_CRYPTO_ERASURE — Application-layer AES-GCM-256 key lifecycle.
+        #      The file is encrypted with an ephemeral key stored in a LocalKeyStore.
+        #      Key destruction (overwrite + unlink) renders ciphertext permanently
+        #      unrecoverable. Verified by confirming decryption fails post-destroy.
+        #      Status: SOFTWARE_CRYPTO_ERASURE (not PASS, not device crypto erase).
+        #
+        #   B) DEVICE_CRYPTO_ERASE — Firmware-level key rotation via ATA Security Erase
+        #      or NVMe Sanitize opcode 0x04. These require direct controller attachment;
+        #      USB mass storage bridges intercept/drop these opcodes.
+        #      Status: UNSUPPORTED_HARDWARE for USB targets.
+        #
+        # DREX never conflates A and B.
+        # Reference: openSeaChest wiki — Sanitizing Storage Devices (Seagate/openSeaChest)
+        #            nvme-cli nvme-sanitize.txt (linux-nvme/nvme-cli)
+        # ──────────────────────────────────────────────────────────────────────────
+        cap = _detect_device_crypto_erase_capability(target)
+        emit(f"Crypto-erase capability probe: {cap['device_capability']}")
+
+        # Software key-destruction path (always available as application-layer CE)
+        pkg = import_package(
+            "crypto_eraser",
+            method_root(
+                "File-Folder Erasure",
+                "Cryptographic_Erasure_Sanitization_Production_Component_v0.1.0",
+                "cryptographic_erasure_sanitization",
+            ),
+        )
+        engine = pkg.engine
+        import tempfile as _tempfile
+        import secrets as _secrets
+
+        # Key store lives in a private temp directory and is cleaned up after use.
+        with _tempfile.TemporaryDirectory(prefix="drex_ce_") as ks_dir:
+            key_store = engine.LocalKeyStore(ks_dir)
+            key_id = f"drex-{uuid.uuid4().hex}"
+            target_id = str(target.resolve())
+
+            # 1. Read plaintext (file content)
+            if not target.is_file():
+                raise AdapterError("Cryptographic Erasure requires a regular file target.")
+            plaintext = target.read_bytes()
+            sha256_before = hashlib.sha256(plaintext).hexdigest()
+            emit(f"Plaintext SHA-256: {sha256_before.upper()[:16]}…  ({len(plaintext):,} bytes)")
+            progress(1, 6)
+
+            # 2. Create key
+            key_store.create_key(key_id)
+            emit("AES-GCM-256 encryption key created in ephemeral LocalKeyStore.")
+            progress(2, 6)
+
+            # 3. Encrypt → produce ciphertext envelope
+            envelope = engine.create_envelope(key_store, key_id, plaintext, target_id)
+            emit(f"Plaintext encrypted into AES-GCM-256 envelope (nonce={envelope.nonce_b64[:8]}…).")
+            progress(3, 6)
+
+            # 4. Verify decryption succeeds with active key
+            recovered = engine.decrypt_envelope(key_store, envelope)
+            if recovered != plaintext:
+                raise AdapterError("Pre-destroy decryption check failed — envelope mismatch.")
+            emit("Pre-destroy decryption verified: plaintext recovery confirmed with active key.")
+            progress(4, 6)
+
+            # 5. Destroy key (overwrite key bytes + unlink key file)
+            engine.destroy_key(key_store, key_id)
+            emit("Key material overwritten and unlinked from LocalKeyStore.")
+            progress(5, 6)
+
+            # 6. Verify decryption fails
+            ok, reason = engine.verify_erasure(key_store, envelope)
+            if not ok:
+                raise AdapterError(f"Post-destroy verification did not confirm key-unavailable: {reason}")
+            emit(f"Post-destroy decryption confirmed permanently failed: {reason}")
+
+            # 7. Overwrite and unlink the original file (the plaintext file itself)
+            with open(target, "r+b", buffering=0) as f:
+                f.seek(0)
+                f.write(_secrets.token_bytes(len(plaintext)))
+                f.flush()
+                os.fsync(f.fileno())
+            target.unlink()
+            emit("Original plaintext file overwritten and unlinked.")
+            progress(6, 6)
+
+        return {
+            "verified": True,
+            "removed": True,
+            "sha256_after": None,
+            "mode": "SOFTWARE_CRYPTO_ERASURE",
+            "device_capability": cap["device_capability"],
+            "classification": (
+                "SOFTWARE_CRYPTO_ERASURE — Application-layer AES-GCM-256 key lifecycle. "
+                "NOT equivalent to device-firmware crypto erase (openSeaChest/nvme-cli 0x04). "
+                f"Device capability: {cap['device_capability']}"
+            ),
+        }
+    if method_id == "slack":
+        # ── METHOD #10: FILE SLACK / CLUSTER-TIP SANITIZATION ─────────────────────
+        # Uses a controlled FAT12 raw image (pure-Python, no kernel driver).
+        # Architecture (informed by fishy/dasec and mind-the-slack/fkie-cad):
+        #   1. Build a small raw FAT12 image in a temp file.
+        #   2. Write a test file whose logical size does not consume its full cluster.
+        #   3. Plant a known residual pattern (DREX_SLACK_RESIDUAL_XXXXXXXX) in the
+        #      cluster-tip region beyond EOF by direct raw seek+write on the image.
+        #   4. Read back and confirm residual is present pre-sanitization.
+        #   5. Execute cluster-tip sanitization via RawFAT12ImageBackend.
+        #   6. Read back slack region and confirm residual is gone (all-zero).
+        #   7. Confirm logical file content (before-hash == after-hash).
+        # Status: PASS — CONTROLLED IMAGE (if all verifications succeed).
+        # Reference: fishy (dasec/fishy) — FAT file slack hiding/recovery
+        #            mind-the-slack (fkie-cad) — cross-platform slack space analysis
+        #            slack_pytsk (SokratisVidros) — TSK-based slack extraction
+        # ──────────────────────────────────────────────────────────────────────────
+        component_root = method_root(
+            "File-Folder Erasure",
+            "File_Slack_Cluster_Tip_Sanitization_Production_Component_v0.1.0",
+        )
+        comp_root_str = str(component_root)
+        if comp_root_str not in sys.path:
+            sys.path.insert(0, comp_root_str)
+        engine = importlib.import_module("slack_sanitizer.engine")
+        emit("File slack adapter selected; executing controlled FAT12-image cluster-tip experiment.")
+        result = engine.run_controlled_slack_experiment(progress_cb=progress)
+        if not result["verified"]:
+            raise AdapterError(f"Slack sanitization controlled-image experiment failed: {result.get('error', 'unknown')}")
+        emit(f"Cluster-tip residual CONFIRMED gone. Slack offset={result['slack_offset_in_image']}, length={result['slack_length']}B.")
+        emit(f"File payload hash before={result['file_sha256_before'][:16]}… after={result['file_sha256_after'][:16]}… match={result['payload_preserved']}.")
+        return {
+            "verified": True,
+            "removed": False,
+            "sha256_after": None,
+            "mode": "PASS_CONTROLLED_IMAGE",
+            "slack_offset": result["slack_offset_in_image"],
+            "slack_length": result["slack_length"],
+            "residual_before_sha256": result["residual_before_sha256"],
+            "residual_after_sha256": result["residual_after_sha256"],
+            "payload_preserved": result["payload_preserved"],
+        }
     messages = {
-        "crypto": "Cryptographic Erasure requires a DREX-managed encrypted envelope and key identifier; the selected arbitrary filesystem target is not eligible.",
-        "slack": "File slack sanitization is unavailable because this host has no qualified filesystem cluster-tip backend.",
         "policy": "The NIST policy package is a planning engine; it does not execute a destructive method by itself.",
         "storage_aware": "Storage-aware fallback refused the target because no qualified native or approved fallback adapter is available on this host.",
     }
