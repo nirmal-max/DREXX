@@ -2025,6 +2025,7 @@ def _physical_overwrite_windows(
     emit: Callable[[str], None],
     progress: Callable[[int, int], None],
     cancel_event: threading.Event | None = None,
+    max_bytes: int | None = None,
 ) -> dict[str, Any]:
     """
     Raw physical/volume overwrite on Windows with chunk-level read-back verification.
@@ -2060,10 +2061,212 @@ def _physical_overwrite_windows(
         else:
             target_path = f"\\\\.\\{target_path}"
 
+    target_bytes = min(disk_size_bytes, max_bytes) if max_bytes is not None and max_bytes > 0 else disk_size_bytes
+
+    evidence: dict[str, Any] = {
+        "device_path": target_path,
+        "disk_size_bytes": disk_size_bytes,
+        "target_bytes": target_bytes,
+        "bytes_written": 0,
+        "bytes_verified": 0,
+        "chunks_written": 0,
+        "chunks_verified": 0,
+        "byte_ranges_written": [],
+        "byte_ranges_verified": [],
+        "mismatches": 0,
+        "mismatch_details": [],
+        "verification_status": "NOT_EXECUTED",
+        "final_status": "NOT_STARTED",
+        "started_at": utc_now(),
+    }
+
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        GENERIC_READ = 0x80000000
+        GENERIC_WRITE = 0x40000000
+        FILE_SHARE_READ = 0x00000001
+        FILE_SHARE_WRITE = 0x00000002
+        OPEN_EXISTING = 3
+        FILE_BEGIN = 0
+        INVALID_HANDLE = ctypes.c_void_p(-1).value
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateFileW.argtypes = [
+            wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+            ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p
+        ]
+        k32.CreateFileW.restype = wintypes.HANDLE
+        k32.SetFilePointerEx.argtypes = [
+            wintypes.HANDLE, ctypes.c_int64, ctypes.POINTER(ctypes.c_int64), wintypes.DWORD
+        ]
+        k32.SetFilePointerEx.restype = wintypes.BOOL
+        k32.WriteFile.argtypes = [
+            wintypes.HANDLE, ctypes.c_char_p, wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p
+        ]
+        k32.WriteFile.restype = wintypes.BOOL
+        k32.ReadFile.argtypes = [
+            wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD), ctypes.c_void_p
+        ]
+        k32.ReadFile.restype = wintypes.BOOL
+        k32.FlushFileBuffers.argtypes = [wintypes.HANDLE]
+        k32.FlushFileBuffers.restype = wintypes.BOOL
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        k32.CloseHandle.restype = wintypes.BOOL
+
+        h_dev = k32.CreateFileW(
+            target_path,
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None,
+            OPEN_EXISTING,
+            0,
+            None
+        )
+        if h_dev == INVALID_HANDLE or h_dev == 0 or h_dev is None:
+            win_err = ctypes.get_last_error()
+            err_msg = (
+                f"Cannot open physical device {target_path} (WinError {win_err}). "
+                "Administrator privileges (UAC elevation) are required for physical drive operations."
+                if win_err in (5, 0x5) else
+                f"Cannot open {target_path}: WinError={win_err}"
+            )
+            emit(f"ERROR: {err_msg}")
+            evidence["final_status"] = "FAILED"
+            evidence["open_error"] = err_msg
+            return evidence
+
+        emit(f"Device opened successfully via Win32 handle. Starting streaming overwrite ({fmt_bytes(target_bytes)}).")
+        progress(0, target_bytes)
+        _last_progress_emit: float = time.perf_counter()
+
+        def _deterministic_pattern(offset_val: int, length: int) -> bytes:
+            seed = struct.pack("<Q", offset_val) + b"_DREXX_NIST_IEEE_OVERWRITE_SALT_2026_"
+            h_block = hashlib.sha256(seed).digest()
+            rep = (length + len(h_block) - 1) // len(h_block)
+            return (h_block * rep)[:length]
+
+        try:
+            offset = 0
+            total = target_bytes
+            write_hash = hashlib.sha256()
+            read_hash = hashlib.sha256()
+
+            # ── PASS 1: High-speed Sequential Overwrite ───────────────────────
+            new_pos = ctypes.c_int64(0)
+            k32.SetFilePointerEx(h_dev, ctypes.c_int64(0), ctypes.byref(new_pos), FILE_BEGIN)
+            while offset < total:
+                if cancel_event and cancel_event.is_set():
+                    evidence["final_status"] = "CANCELLED"
+                    return evidence
+
+                n = min(CHUNK, total - offset)
+                expected_data = _deterministic_pattern(offset, n)
+                bytes_written = wintypes.DWORD(0)
+                ok = k32.WriteFile(h_dev, expected_data, n, ctypes.byref(bytes_written), None)
+                if not ok or bytes_written.value == 0:
+                    win_err = ctypes.get_last_error()
+                    err_msg = (
+                        f"WriteFile failed at offset {offset} (WinError {win_err}). "
+                        "Windows blocked physical sector write — Administrator privileges (UAC elevation) or volume dismount required."
+                        if win_err in (5, 0x5) else
+                        f"WriteFile failed at offset {offset} (WinError {win_err})."
+                    )
+                    emit(f"ERROR: {err_msg}")
+                    evidence["final_status"] = "FAILED"
+                    evidence["write_error"] = err_msg
+                    return evidence
+
+                w_len = bytes_written.value
+                write_hash.update(expected_data[:w_len])
+                offset += w_len
+                evidence["chunks_written"] += 1
+                evidence["bytes_written"] = offset
+
+                _now = time.perf_counter()
+                if _now - _last_progress_emit >= 0.05 or offset >= total:
+                    progress(offset, total)
+                    _last_progress_emit = _now
+
+            k32.FlushFileBuffers(h_dev)
+            if evidence["bytes_written"] > 0:
+                evidence["byte_ranges_written"].append([0, evidence["bytes_written"]])
+
+            # ── PASS 2: Sequential Read-Back Verification ────────────────────
+            emit(f"Write pass complete ({fmt_bytes(evidence['bytes_written'])}). Starting read-back verification pass...")
+            k32.SetFilePointerEx(h_dev, ctypes.c_int64(0), ctypes.byref(new_pos), FILE_BEGIN)
+            verify_offset = 0
+            while verify_offset < total:
+                if cancel_event and cancel_event.is_set():
+                    evidence["final_status"] = "CANCELLED"
+                    return evidence
+
+                n = min(CHUNK, total - verify_offset)
+                expected_data = _deterministic_pattern(verify_offset, n)
+                buf = ctypes.create_string_buffer(n)
+                bytes_read = wintypes.DWORD(0)
+                ok = k32.ReadFile(h_dev, buf, n, ctypes.byref(bytes_read), None)
+                if not ok or bytes_read.value == 0:
+                    win_err = ctypes.get_last_error()
+                    err_msg = f"ReadFile failed at offset {verify_offset} (WinError {win_err})."
+                    emit(f"ERROR: {err_msg}")
+                    evidence["final_status"] = "FAILED"
+                    evidence["read_error"] = err_msg
+                    return evidence
+
+                actual_data = buf.raw[:bytes_read.value]
+                if actual_data != expected_data[:bytes_read.value]:
+                    evidence["mismatches"] += 1
+                    evidence["verification_status"] = "PARTIAL"
+                    evidence["mismatch_details"].append({
+                        "offset": verify_offset,
+                        "expected_sha256": hashlib.sha256(expected_data).hexdigest(),
+                        "actual_sha256": hashlib.sha256(actual_data).hexdigest(),
+                        "actual_length": len(actual_data),
+                        "expected_length": len(expected_data),
+                    })
+                else:
+                    read_hash.update(actual_data)
+                    evidence["chunks_verified"] += 1
+                    evidence["bytes_verified"] += len(actual_data)
+
+                verify_offset += bytes_read.value
+
+            if evidence["bytes_verified"] > 0:
+                evidence["byte_ranges_verified"].append([0, evidence["bytes_verified"]])
+            evidence["write_sha256"] = write_hash.hexdigest()
+            evidence["readback_sha256"] = read_hash.hexdigest()
+
+            coverage = (
+                round((evidence["bytes_verified"] / disk_size_bytes) * 100, 2)
+                if disk_size_bytes > 0
+                else 0.0
+            )
+            evidence["coverage_percent"] = coverage
+
+            if evidence["mismatches"] == 0:
+                if evidence["bytes_verified"] >= disk_size_bytes:
+                    evidence["verification_status"] = "VERIFIED"
+                    evidence["final_status"] = "PASS_PHYSICAL"
+                else:
+                    evidence["verification_status"] = "VERIFIED"
+                    evidence["final_status"] = "PASS_PHYSICAL_RANGE"
+            else:
+                evidence["verification_status"] = "PARTIAL"
+                evidence["final_status"] = "VERIFICATION_FAILED"
+
+            return evidence
+        finally:
+            k32.CloseHandle(h_dev)
+
+    # POSIX fallback
     try:
         f_dev = open(target_path, "r+b", buffering=0)
     except PermissionError:
-        err_msg = "Permission denied opening physical drive. Please run DREX as Administrator."
+        err_msg = "Permission denied opening physical drive. Superuser privileges required."
         emit(f"ERROR: {err_msg}")
         evidence["final_status"] = "FAILED"
         evidence["open_error"] = err_msg
@@ -2077,9 +2280,9 @@ def _physical_overwrite_windows(
 
     emit(f"Device opened successfully. Starting streaming overwrite ({fmt_bytes(target_bytes)}).")
     progress(0, target_bytes)
-    _last_progress_emit: float = time.perf_counter()
+    _last_progress_emit = time.perf_counter()
 
-    def _deterministic_pattern(offset_val: int, length: int) -> bytes:
+    def _deterministic_pattern_posix(offset_val: int, length: int) -> bytes:
         seed = struct.pack("<Q", offset_val) + b"_DREXX_NIST_IEEE_OVERWRITE_SALT_2026_"
         h_block = hashlib.sha256(seed).digest()
         rep = (length + len(h_block) - 1) // len(h_block)
@@ -2091,7 +2294,6 @@ def _physical_overwrite_windows(
         write_hash = hashlib.sha256()
         read_hash = hashlib.sha256()
 
-        # ── PASS 1: High-speed Sequential Overwrite ───────────────────────────
         f_dev.seek(0)
         while offset < total:
             if cancel_event and cancel_event.is_set():
@@ -2099,7 +2301,7 @@ def _physical_overwrite_windows(
                 return evidence
 
             n = min(CHUNK, total - offset)
-            expected_data = _deterministic_pattern(offset, n)
+            expected_data = _deterministic_pattern_posix(offset, n)
             f_dev.write(expected_data)
             write_hash.update(expected_data)
 
@@ -2116,7 +2318,6 @@ def _physical_overwrite_windows(
         if evidence["bytes_written"] > 0:
             evidence["byte_ranges_written"].append([0, evidence["bytes_written"]])
 
-        # ── PASS 2: Sequential Read-Back Verification ────────────────────────
         emit(f"Write pass complete ({fmt_bytes(evidence['bytes_written'])}). Starting read-back verification pass...")
         f_dev.seek(0)
         verify_offset = 0
@@ -2127,19 +2328,12 @@ def _physical_overwrite_windows(
                 return evidence
 
             n = min(CHUNK, total - verify_offset)
-            expected_data = _deterministic_pattern(verify_offset, n)
+            expected_data = _deterministic_pattern_posix(verify_offset, n)
             actual_data = f_dev.read(n)
 
             if actual_data != expected_data:
                 evidence["mismatches"] += 1
                 evidence["verification_status"] = "PARTIAL"
-                evidence["mismatch_details"].append({
-                    "offset": verify_offset,
-                    "expected_sha256": hashlib.sha256(expected_data).hexdigest(),
-                    "actual_sha256": hashlib.sha256(actual_data).hexdigest(),
-                    "actual_length": len(actual_data),
-                    "expected_length": len(expected_data),
-                })
             else:
                 read_hash.update(actual_data)
                 evidence["chunks_verified"] += 1
@@ -2152,7 +2346,6 @@ def _physical_overwrite_windows(
         evidence["write_sha256"] = write_hash.hexdigest()
         evidence["readback_sha256"] = read_hash.hexdigest()
 
-        # Compute coverage
         coverage = (
             round((evidence["bytes_verified"] / disk_size_bytes) * 100, 2)
             if disk_size_bytes > 0
@@ -2171,6 +2364,7 @@ def _physical_overwrite_windows(
             evidence["verification_status"] = "PARTIAL"
             evidence["final_status"] = "VERIFICATION_FAILED"
 
+        return evidence
     finally:
         try:
             f_dev.close()
@@ -2188,6 +2382,7 @@ def execute_drive_method(
     progress: Callable[[int, int], None],
     cancel_event: threading.Event | None = None,
     caps: dict[str, Any] | None = None,
+    max_bytes: int | None = None,
 ) -> dict[str, Any]:
     """
     Central drive-erasure dispatcher for methods #1–#7.
@@ -2377,7 +2572,7 @@ def execute_drive_method(
         emit(f"  Rationale: {rationale}")
         emit(f"  Beginning physical overwrite on {device_path}...")
         overwrite_result = _physical_overwrite_windows(
-            device_path, disk_size, emit, progress, cancel_event
+            device_path, disk_size, emit, progress, cancel_event, max_bytes=max_bytes
         )
         final_status = (
             "PASS_PHYSICAL" if overwrite_result.get("final_status") == "PASS_PHYSICAL" else
@@ -2419,7 +2614,7 @@ def execute_drive_method(
             emit(f"    {c['method']}: {c['status']} — {c['reason']}")
         emit(f"  Executing: Verified Overwrite on {device_path}...")
         overwrite_result = _physical_overwrite_windows(
-            device_path, disk_size, emit, progress, cancel_event
+            device_path, disk_size, emit, progress, cancel_event, max_bytes=max_bytes
         )
         final_status = overwrite_result.get("final_status", "FAILED")
         return {
@@ -2454,7 +2649,7 @@ def execute_drive_method(
         emit(f"  Note: {purge_note}")
         emit(f"  Executing host overwrite on {device_path}...")
         overwrite_result = _physical_overwrite_windows(
-            device_path, disk_size, emit, progress, cancel_event
+            device_path, disk_size, emit, progress, cancel_event, max_bytes=max_bytes
         )
         final_status = overwrite_result.get("final_status", "FAILED")
         return {
@@ -2475,7 +2670,7 @@ def execute_drive_method(
         emit(f"  Verified Overwrite: raw physical device write + chunk read-back.")
         emit(f"  Target: {device_path}  Size: {fmt_bytes(disk_size)}")
         overwrite_result = _physical_overwrite_windows(
-            device_path, disk_size, emit, progress, cancel_event
+            device_path, disk_size, emit, progress, cancel_event, max_bytes=max_bytes
         )
         final_status = overwrite_result.get("final_status", "FAILED")
         verification = (
