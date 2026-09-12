@@ -1,0 +1,42 @@
+name: DREX Windows Stress 100x
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stress:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Install test dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest cryptography qrcode reportlab pillow psutil
+      - name: Compile active sources
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem -Recurse -Filter *.py | Where-Object { $_.FullName -notmatch '\\repo\\' -and $_.FullName -notmatch '\\.git\\' }
+          foreach ($f in $files) { python -m py_compile $f.FullName; if ($LASTEXITCODE -ne 0) { throw "Compile failed: $($f.FullName)" } }
+      - name: Original test suite 100x
+        shell: pwsh
+        run: |
+          1..100 | ForEach-Object {
+            Write-Host "========== ORIGINAL TEST SUITE ITERATION $_/100 =========="
+            python -m pytest tests/ -q --tb=short --ignore=tests/test_100x_audit_regressions.py
+            if ($LASTEXITCODE -ne 0) { throw "Original pytest suite failed on iteration $_" }
+          }
+      - name: CLI self-test 100x
+        shell: pwsh
+        run: |
+          1..100 | ForEach-Object {
+            Write-Host "========== CLI ITERATION $_/100 =========="
+            python drex_app.py --version
+            if ($LASTEXITCODE -ne 0) { throw "--version failed on iteration $_" }
+            python drex_app.py --self-test
+            if ($LASTEXITCODE -ne 0) { throw "--self-test failed on iteration $_" }
+          }
