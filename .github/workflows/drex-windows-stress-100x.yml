@@ -1,6 +1,8 @@
 name: DREX Windows Stress 100x
 
 on:
+  push:
+    branches: [audit/100x-20260912]
   workflow_dispatch:
 
 jobs:
