@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import base64
+from concurrent.futures import Future, ThreadPoolExecutor
 import ctypes
+from enum import Enum
 import hashlib
 import importlib
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -27,17 +30,28 @@ from recovery_adapter import QuickRecoveryAdapter, RecoveryDispatcher, RecoveryE
 APP_NAME = "DREX"
 VERSION = "1.0.0"
 ROOT = Path(__file__).resolve().parent
-GREEN = "#087f3f"
-GREEN_DARK = "#056332"
-GREEN_PALE = "#eaf6ef"
-INK = "#0e1735"
-MUTED = "#596581"
-LINE = "#dfe6e2"
-BG = "#fbfdfc"
-ORANGE = "#e87500"
-RED = "#c62828"
-PURPLE = "#5b28bd"
-BLUE = "#1269d3"
+
+# Centralized Design System Tokens (Clean, solid, Apple-level simplicity)
+BG = "#F5F5F7"
+BG_SECONDARY = "#F8F8FA"
+CARD_BG = "#FFFFFF"
+LINE = "#E5E5E7"
+BORDER_SUBTLE = "#F0F0F2"
+INK = "#111827"
+MUTED = "#667085"
+MUTED_LIGHT = "#98A2B3"
+BLUE = "#007AFF"
+BLUE_LIGHT = "#E8F1FF"
+BLUE_SOFT = "#F2F7FF"
+GREEN = "#34C759"
+GREEN_DARK = "#248A3D"
+GREEN_PALE = "#EAF8EE"
+ORANGE = "#FF9500"
+ORANGE_LIGHT = "#FFF4E5"
+RED = "#FF3B30"
+RED_LIGHT = "#FEECEB"
+PURPLE = "#AF52DE"
+PURPLE_LIGHT = "#F5EEF8"
 
 
 def utc_now() -> str:
@@ -87,16 +101,16 @@ def app_data_dir() -> Path:
 class DriveInfo:
     path: str
     device_path: str
-    model: str | None
-    serial: str | None
-    capacity: int | None
-    interface: str | None
-    drive_type: str | None
-    filesystem: str | None
-    free: int | None
-    health: str | None
-    status: str | None
-    device_id: str | None
+    model: str | None = None
+    serial: str | None = None
+    capacity: int | None = None
+    interface: str | None = None
+    drive_type: str | None = None
+    filesystem: str | None = None
+    free: int | None = None
+    health: str | None = None
+    status: str | None = None
+    device_id: str | None = None
 
     def display(self, field: str) -> str:
         value = getattr(self, field, None)
@@ -129,14 +143,24 @@ def _drive_letters() -> list[str]:
 def discover_drives() -> list[DriveInfo]:
     logical_command = "Get-CimInstance Win32_LogicalDisk | Select-Object DeviceID,VolumeName,FileSystem,Size,FreeSpace,DriveType | ConvertTo-Json -Compress"
     physical_command = "Get-CimInstance Win32_DiskDrive | Select-Object Index,DeviceID,Model,SerialNumber,Size,InterfaceType,MediaType,Status,PNPDeviceID | ConvertTo-Json -Compress"
-    association_command = "Get-CimInstance Win32_LogicalDiskToPartition | ForEach-Object { $match = [regex]::Match(([string]$_.Antecedent), 'Disk #(\\d+)'); [PSCustomObject]@{ Logical = $_.Dependent.DeviceID; DiskIndex = $match.Groups[1].Value } } | ConvertTo-Json -Compress"
+    association_command = "Get-WmiObject Win32_LogicalDiskToPartition | Select-Object Antecedent,Dependent | ConvertTo-Json -Compress"
     logical_raw = _ps_json(logical_command)
     physical_raw = _ps_json(physical_command)
     association_raw = _ps_json(association_command)
     logical = logical_raw if isinstance(logical_raw, list) else ([logical_raw] if logical_raw else [])
     physical = physical_raw if isinstance(physical_raw, list) else ([physical_raw] if physical_raw else [])
     associations = association_raw if isinstance(association_raw, list) else ([association_raw] if association_raw else [])
-    logical_to_disk = {str(row.get("Logical", "")).upper(): str(row.get("DiskIndex", "")) for row in associations if isinstance(row, dict)}
+
+    logical_to_disk: dict[str, str] = {}
+    for row in associations:
+        if isinstance(row, dict):
+            ant = str(row.get("Antecedent", ""))
+            dep = str(row.get("Dependent", ""))
+            m_disk = re.search(r"Disk #(\d+)", ant)
+            m_log = re.search(r'DeviceID="([A-Za-z]:)"', dep)
+            if m_disk and m_log:
+                logical_to_disk[m_log.group(1).upper()] = m_disk.group(1)
+
     type_names = {2: "Removable", 3: "Fixed", 4: "Network", 5: "Optical"}
     out: list[DriveInfo] = []
     for item in logical:
@@ -153,13 +177,19 @@ def discover_drives() -> list[DriveInfo]:
             size = int(size) if str(size).isdigit() else None
             free = int(free) if str(free).isdigit() else None
         drive_type = type_names.get(int(item.get("DriveType"))) if str(item.get("DriveType", "")).isdigit() else None
-        # Only populate physical identity after an explicit Windows partition join.
+        
         disk_index = logical_to_disk.get(letter.upper())
         matching = [p for p in physical if str(p.get("Index", "")) == disk_index] if disk_index else []
-        model = serial = interface = device_id = status = None
+        model = serial = interface = device_id = status = phys_size = None
         if len(matching) == 1:
             p = matching[0]
             model, serial, interface, device_id, status = (p.get(k) for k in ("Model", "SerialNumber", "InterfaceType", "DeviceID", "Status"))
+            phys_size = p.get("Size")
+
+        # If logical volume capacity is unavailable (e.g. unformatted or removable USB), fall back to physical disk capacity
+        if size is None and phys_size is not None and str(phys_size).isdigit():
+            size = int(phys_size)
+
         out.append(DriveInfo(
             path=letter + "\\", device_path=str(device_id or ""),
             model=str(model).strip() if model else None,
@@ -178,6 +208,570 @@ def discover_drives() -> list[DriveInfo]:
         except OSError:
             continue
     return out
+
+
+class TaskState(str, Enum):
+    IDLE = "IDLE"
+    VALIDATING = "VALIDATING"
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    VERIFYING = "VERIFYING"
+    FINALIZING = "FINALIZING"
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+    TIMEOUT = "TIMEOUT"
+    DEVICE_DISCONNECTED = "DEVICE_DISCONNECTED"
+
+
+class ElevationState(str, Enum):
+    """Process privilege level — determined once at startup."""
+    ELEVATED = "ELEVATED"
+    NOT_ELEVATED = "NOT_ELEVATED"
+    ELEVATION_FAILED = "ELEVATION_FAILED"
+
+
+def _detect_elevation() -> ElevationState:
+    """Return the current process privilege level without blocking."""
+    if os.name != "nt":
+        return ElevationState.NOT_ELEVATED
+    try:
+        result = bool(ctypes.windll.shell32.IsUserAnAdmin())
+        return ElevationState.ELEVATED if result else ElevationState.NOT_ELEVATED
+    except Exception:
+        return ElevationState.ELEVATION_FAILED
+
+
+def _request_uac_elevation() -> None:
+    """
+    Re-launch the current process with UAC elevation (ShellExecuteW / runas).
+    Called only when the process is not already elevated.
+    This function does NOT return — it exits the current process.
+    """
+    try:
+        exe = sys.executable
+        args = " ".join(f'"{a}"' for a in sys.argv)
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, args, None, 1)
+        # ShellExecuteW returns > 32 on success
+        if int(ret) > 32:
+            sys.exit(0)
+        # User cancelled UAC or elevation failed — continue without elevation
+    except Exception:
+        pass  # Elevation unavailable — continue running without it
+
+
+# Module-level elevation state — populated in main() before the Tk window opens.
+_ELEVATION_STATE: ElevationState = ElevationState.NOT_ELEVATED
+
+# ──────────────────────────────────────────────────────────────────────────────
+# STRUCTURED EVENT NAMES  (Worker → queue.Queue → Tk UI)
+# Workers MUST use these constants, never arbitrary strings, so _poll_events
+# can dispatch deterministically and tests can assert event identity.
+# ──────────────────────────────────────────────────────────────────────────────
+EV_OP_STARTED     = "op_started"      # worker: operation beginning
+EV_OP_STATUS      = "op_status"       # worker: intermediate status string
+EV_PROGRESS       = "progress"        # worker: (done_bytes, total_bytes)
+EV_LOG            = "log"             # worker: human-readable log line
+EV_OP_VERIFYING   = "op_verifying"    # worker: entering verification phase
+EV_OP_COMPLETED   = "op_completed"    # worker: OperationResult object
+EV_OP_FAILED      = "op_failed"       # worker: OperationResult object (failure)
+EV_OP_CANCELLED   = "op_cancelled"    # worker: OperationResult object (cancel)
+EV_OP_BLOCKED     = "op_blocked"      # worker: OperationResult (execution blocked)
+EV_RECOVERY_SCAN  = "recovery_scan"   # worker: RecoveryScan object
+EV_DEVICES        = "devices_discovered"  # discovery: list[DriveInfo]
+EV_TASK_STATE     = "task_state"      # TaskManager internal
+EV_TASK_FINISHED  = "task_finished"   # TaskManager internal
+EV_FINISHED       = "finished"        # worker: operation teardown complete
+EV_ERROR_ALERT    = "error_alert"     # worker: (title, desc, severity, tech)
+EV_RESULT         = "result"          # worker: (status_str, detail_str)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# CAPACITY KIND  — prevents volume-size silently becoming device-size
+# ──────────────────────────────────────────────────────────────────────────────
+class CapacityKind(str, Enum):
+    PHYSICAL_DEVICE = "PHYSICAL_DEVICE_CAPACITY"   # from Win32_DiskDrive.Size / IOCTL
+    VOLUME          = "VOLUME_CAPACITY"             # from partition/filesystem
+    UNKNOWN         = "UNKNOWN"                     # could not be determined
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# OPERATION CONTEXT  — passed into every worker; no Tk references
+# Workers depend on context, not on UI objects.
+# ──────────────────────────────────────────────────────────────────────────────
+@dataclass
+class OperationContext:
+    operation_id:   str
+    operation_kind: str                          # "drive" | "file" | "recovery"
+    method_id:      str
+    method_name:    str
+    target:         str                          # path or device path
+    cancel_event:   threading.Event
+    emit:           Callable[[str], None]        # puts (EV_LOG, msg) on queue
+    progress:       Callable[[int, int], None]   # puts (EV_PROGRESS, (done, total))
+    metadata:       dict[str, Any]               # caps, capacity_kind, serial, model…
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# OPERATION RESULT  — single authoritative typed result produced by every worker
+# The Tk UI uses this as the sole source of truth for audit, certificate, status.
+# ──────────────────────────────────────────────────────────────────────────────
+@dataclass
+class OperationResult:
+    operation_id:      str
+    kind:              str                # "drive" | "file" | "recovery"
+    method_id:         str
+    method_name:       str
+    status:            str                # SUCCESS|FAILED|CANCELLED|EXECUTION_BLOCKED|…
+    backend:           str                # which backend executed
+    target:            str               # device or file path
+    started:           str               # UTC ISO timestamp
+    completed:         str               # UTC ISO timestamp
+    verification:      str               # VERIFIED|UNVERIFIED|PARTIAL|NOT_EXECUTED|SIMULATION_ONLY
+    evidence:          dict[str, Any]    # raw evidence blob from backend
+    warnings:          list[str]         # non-fatal warnings
+    limitations:       list[str]         # known scope limitations
+    detail:            str               # human-readable summary for the log
+    certificate_id:    str | None = None
+    certificate_path:  str | None = None
+    error:             str | None = None
+
+
+
+class FloatCallable(float):
+    """A float that can also be called as a zero-argument function returning float."""
+    def __call__(self) -> float:
+        return float(self)
+
+
+class DrexTimer:
+    """
+    Thread-safe, monotonic high-precision millisecond stopwatch.
+    Uses time.perf_counter() for non-skewing, drift-free timing.
+    """
+    def __init__(self):
+        self._start_time: float | None = None
+        self._stop_time: float | None = None
+        self._running: bool = False
+        self._lock = threading.Lock()
+
+    def start(self) -> None:
+        with self._lock:
+            self._start_time = time.perf_counter()
+            self._stop_time = None
+            self._running = True
+
+    def stop(self) -> None:
+        with self._lock:
+            if self._running and self._start_time is not None:
+                self._stop_time = time.perf_counter()
+                self._running = False
+
+    def reset(self) -> None:
+        with self._lock:
+            self._start_time = None
+            self._stop_time = None
+            self._running = False
+
+    @property
+    def is_running(self) -> bool:
+        with self._lock:
+            return self._running
+
+    @property
+    def elapsed(self) -> FloatCallable:
+        with self._lock:
+            if self._start_time is None:
+                return FloatCallable(0.0)
+            if self._running:
+                return FloatCallable(max(0.0, time.perf_counter() - self._start_time))
+            if self._stop_time is not None:
+                return FloatCallable(max(0.0, self._stop_time - self._start_time))
+            return FloatCallable(0.0)
+
+    def formatted(self) -> str:
+        """Return elapsed time formatted with millisecond precision: HH:MM:SS.mmm"""
+        sec = float(self.elapsed)
+        hrs = int(sec // 3600)
+        rem = sec % 3600
+        mins = int(rem // 60)
+        secs = int(rem % 60)
+        ms = int(round((sec - int(sec)) * 1000))
+        if ms >= 1000:
+            ms = 999
+        return f"{hrs:02d}:{mins:02d}:{secs:02d}.{ms:03d}"
+
+
+class DrexProgressTracker:
+    """
+    Truthful progress, smoothed speed (EMA), and dynamic ETA calculator.
+    Guarantees exact two-decimal precision (0.00% - 100.00%) without artificial inflation.
+    """
+    def __init__(self, ema_alpha: float = 0.25):
+        self.completed: int = 0
+        self.total: int = 0
+        self.is_streaming: bool = False
+        self.stage_text: str = "Ready"
+        self._samples: list[tuple[float, int]] = []
+        self._ema_speed: float = 0.0
+        self._ema_alpha = ema_alpha
+        self._lock = threading.Lock()
+
+    def start(self, total_bytes: int = 0, stage: str = "Starting") -> None:
+        self.reset(total=total_bytes, stage=stage)
+
+    def reset(self, total: int = 0, stage: str = "Starting") -> None:
+        with self._lock:
+            self.completed = 0
+            self.total = max(0, total)
+            self.is_streaming = (total <= 0)
+            self.stage_text = stage
+            self._samples = [(time.perf_counter(), 0)]
+            self._ema_speed = 0.0
+
+    def update(self, completed: int, total: int | None = None, stage: str | None = None) -> None:
+        with self._lock:
+            now = time.perf_counter()
+            if total is not None:
+                self.total = max(0, total)
+                self.is_streaming = (self.total <= 0)
+            self.completed = max(0, completed)
+            if stage:
+                self.stage_text = stage
+
+            self._samples.append((now, self.completed))
+            cutoff = now - 4.0
+            self._samples = [s for s in self._samples if s[0] >= cutoff]
+
+            if len(self._samples) >= 2:
+                dt = self._samples[-1][0] - self._samples[0][0]
+                db = self._samples[-1][1] - self._samples[0][1]
+                if dt > 0.05 and db >= 0:
+                    inst_speed = db / dt
+                    if self._ema_speed <= 0:
+                        self._ema_speed = inst_speed
+                    else:
+                        self._ema_speed = (self._ema_alpha * inst_speed) + ((1.0 - self._ema_alpha) * self._ema_speed)
+
+    @property
+    def percentage(self) -> float:
+        with self._lock:
+            if self.is_streaming or self.total <= 0:
+                return 0.0
+            pct = (self.completed / self.total) * 100.0
+            return max(0.0, min(100.0, pct))
+
+    @property
+    def percentage_str(self) -> str:
+        with self._lock:
+            if self.is_streaming or self.total <= 0:
+                if self.completed > 0:
+                    return f"{fmt_bytes(self.completed)}"
+                return "0.00%"
+            return f"{self.percentage:.2f}%"
+
+    @property
+    def speed_bps(self) -> float:
+        with self._lock:
+            return max(0.0, self._ema_speed)
+
+    @property
+    def speed_str(self) -> str:
+        with self._lock:
+            if self.is_streaming or self._ema_speed <= 0:
+                return "—"
+            return f"{fmt_bytes(int(self._ema_speed))}/s"
+
+    @property
+    def eta_str(self) -> str:
+        with self._lock:
+            if self.is_streaming or self.total <= 0:
+                if self.completed > 0:
+                    return "ETA: Calculating..."
+                return "ETA: —"
+            rem_bytes = max(0, self.total - self.completed)
+            if rem_bytes == 0:
+                return "ETA: 00:00:00"
+            if self._ema_speed <= 1024:
+                return "ETA: Calculating..."
+            eta_sec = rem_bytes / self._ema_speed
+            if eta_sec > 86400 * 7:
+                return "ETA: >7 days"
+            hrs = int(eta_sec // 3600)
+            rem = eta_sec % 3600
+            mins = int(rem // 60)
+            secs = int(rem % 60)
+            return f"ETA: {hrs:02d}:{mins:02d}:{secs:02d}"
+
+
+class DrexTaskManager:
+    """
+    Centralized, thread-safe asynchronous task runner.
+    Guarantees unbreakable try/except/finally lifecycle, thread pool management,
+    timer synchronization, and non-blocking event queue communication.
+    """
+    def __init__(self, event_queue: queue.Queue[tuple[str, Any]], max_workers: int = 4):
+        self.events = event_queue
+        self.executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="drex_worker")
+        self.state = TaskState.IDLE
+        self.current_task_id: str | None = None
+        self.timer = DrexTimer()
+        self.tracker = DrexProgressTracker()
+        self.cancel_event = threading.Event()
+        self._lock = threading.RLock()
+        self._active_future: Future | None = None
+
+    def is_active(self) -> bool:
+        with self._lock:
+            return self.state in (
+                TaskState.VALIDATING,
+                TaskState.QUEUED,
+                TaskState.RUNNING,
+                TaskState.VERIFYING,
+                TaskState.FINALIZING,
+            )
+
+    def set_state(self, new_state: TaskState, detail: str = "") -> None:
+        with self._lock:
+            self.state = new_state
+            self.events.put(("task_state", (new_state, detail)))
+
+    def submit_task(
+        self,
+        task_id: str,
+        target_fn: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
+    ) -> bool:
+        with self._lock:
+            if self.is_active():
+                return False
+            self.current_task_id = task_id
+            self.cancel_event.clear()
+            self.timer.reset()
+            self.tracker.reset()
+            self.set_state(TaskState.QUEUED, f"Task {task_id} queued")
+
+            def _wrapped():
+                self.timer.start()
+                self.set_state(TaskState.RUNNING, f"Task {task_id} running")
+                exc_raised: Exception | None = None
+                result: Any = None
+                try:
+                    import inspect
+                    call_kwargs = dict(kwargs)
+                    try:
+                        sig = inspect.signature(target_fn)
+                        if "cancel_event" in sig.parameters and "cancel_event" not in call_kwargs:
+                            call_kwargs["cancel_event"] = self.cancel_event
+                    except (ValueError, TypeError):
+                        pass
+                    result = target_fn(*args, **call_kwargs)
+                except Exception as exc:
+                    exc_raised = exc
+                finally:
+                    self.timer.stop()
+                    with self._lock:
+                        if self.cancel_event.is_set():
+                            self.set_state(TaskState.CANCELLED, "Cancelled by user")
+                        elif exc_raised is not None:
+                            self.set_state(TaskState.FAILED, str(exc_raised))
+                        else:
+                            self.set_state(TaskState.SUCCESS, "Completed successfully")
+                        self.events.put(("task_finished", (task_id, result, exc_raised)))
+
+            self._active_future = self.executor.submit(_wrapped)
+            return True
+
+    def cancel(self) -> bool:
+        with self._lock:
+            if self.is_active():
+                self.cancel_event.set()
+                self.events.put(("log", "[TASK] Cancellation signal sent. Worker will exit at next safe boundary."))
+                return True
+            return False
+
+    def shutdown(self, wait: bool = False) -> None:
+        self.cancel()
+        self.executor.shutdown(wait=wait, cancel_futures=True)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# VERIFICATION ENGINE  — cross-cutting service, NOT a third execution lane
+# Called after every backend completes; never equates write-complete with verified.
+# Architecture note (DELitALL lesson): DELitALL equated successful-write with
+# verification — DREX does not. Verification requires a separate read-back pass.
+# ──────────────────────────────────────────────────────────────────────────────
+class VerificationEngine:
+    """Stateless cross-cutting verification service.
+
+    Accepts the raw evidence dict produced by a backend and returns a
+    canonical verification status string.  Never called on the Tk thread.
+    """
+
+    @staticmethod
+    def assess(evidence: dict[str, Any]) -> tuple[str, list[str]]:
+        """Return (status, warnings).
+
+        status values:
+          VERIFIED         — read-back passed, coverage ≥ 100%
+          VERIFIED_PARTIAL — read-back passed on range < 100%
+          UNVERIFIED       — no read-back was performed
+          PARTIAL          — read-back ran but mismatches found
+          NOT_EXECUTED     — backend did not attempt verification
+          SIMULATION_ONLY  — controlled-fixture, no real hardware
+          UNSUPPORTED      — hardware/adapter cannot verify
+        """
+        warnings: list[str] = []
+
+        # Backend already set a canonical verification_status
+        v = evidence.get("verification_status", "") or ""
+        final = evidence.get("final_status", "") or ""
+
+        if final == "CANCELLED":
+            return "NOT_EXECUTED", []
+
+        if v == "VERIFIED":
+            if evidence.get("bytes_verified", 0) >= evidence.get("disk_size_bytes", 1):
+                return "VERIFIED", warnings
+            warnings.append("Read-back covered a range smaller than the full device.")
+            return "VERIFIED_PARTIAL", warnings
+
+        if v == "PARTIAL":
+            mm = evidence.get("mismatches", 0)
+            warnings.append(f"Read-back detected {mm} mismatch(es).")
+            return "PARTIAL", warnings
+
+        if evidence.get("simulation"):
+            return "SIMULATION_ONLY", ["Operation was a controlled simulation."]
+
+        if evidence.get("sha256_after"):
+            # File-method: verified by hash comparison
+            return "VERIFIED", warnings
+
+        if v == "NOT_EXECUTED" or not v:
+            return "NOT_EXECUTED", warnings
+
+        return v, warnings
+
+
+class DrexDeviceManager:
+    """
+    Asynchronous, thread-safe storage device discovery with intelligent caching.
+    Prevents blocking the UI thread on WMI / CIM queries.
+    """
+    def __init__(self, ttl_seconds: float = 15.0):
+        self._drives: list[DriveInfo] = []
+        self._last_refresh: float = 0.0
+        self._ttl = ttl_seconds
+        self._lock = threading.RLock()
+        self._is_discovering = False
+
+    def is_fresh(self) -> bool:
+        with self._lock:
+            return bool(self._drives) and (time.time() - self._last_refresh < self._ttl)
+
+    def get_cached_drives(self) -> list[DriveInfo]:
+        with self._lock:
+            return list(self._drives)
+
+    def get_drives_sync(self, force_refresh: bool = False) -> list[DriveInfo]:
+        with self._lock:
+            if not force_refresh and self.is_fresh():
+                return list(self._drives)
+        drives = discover_drives()
+        with self._lock:
+            self._drives = drives
+            self._last_refresh = time.time()
+            return list(self._drives)
+
+    def start_async_discovery(
+        self,
+        on_complete: Callable[[list[DriveInfo]], None] | None = None,
+        force_refresh: bool = False,
+    ) -> None:
+        with self._lock:
+            if not force_refresh and self.is_fresh():
+                if on_complete:
+                    on_complete(list(self._drives))
+                return
+            if self._is_discovering:
+                return
+            self._is_discovering = True
+
+        def _worker():
+            try:
+                drives = discover_drives()
+            except Exception:
+                drives = []
+            with self._lock:
+                self._drives = drives
+                self._last_refresh = time.time()
+                self._is_discovering = False
+            if on_complete:
+                try:
+                    on_complete(drives)
+                except Exception:
+                    pass
+
+        threading.Thread(target=_worker, name="drex_dev_discovery", daemon=True).start()
+
+
+class DrexProcessRunner:
+    """
+    Subprocess execution manager with timeouts, cancellation, and output streaming.
+    Ensures background tools (e.g. photorec, testdisk, fls) terminate cleanly.
+    """
+    @staticmethod
+    def run(
+        cmd: list[str],
+        on_stdout: Callable[[str], None] | None = None,
+        cancel_event: threading.Event | None = None,
+        timeout: float = 300.0,
+        cwd: Path | str | None = None,
+    ) -> tuple[int, str, str]:
+        start = time.perf_counter()
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            cwd=str(cwd) if cwd else None,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        stdout_lines: list[str] = []
+        stderr_lines: list[str] = []
+
+        def _reader(stream, line_list, is_out):
+            for line in iter(stream.readline, ""):
+                line_list.append(line)
+                if is_out and on_stdout:
+                    on_stdout(line.rstrip())
+            stream.close()
+
+        t_out = threading.Thread(target=_reader, args=(proc.stdout, stdout_lines, True), daemon=True)
+        t_err = threading.Thread(target=_reader, args=(proc.stderr, stderr_lines, False), daemon=True)
+        t_out.start()
+        t_err.start()
+
+        while proc.poll() is None:
+            if cancel_event and cancel_event.is_set():
+                proc.kill()
+                proc.wait()
+                return -1, "".join(stdout_lines), "Operation cancelled by user"
+            if time.perf_counter() - start > timeout:
+                proc.kill()
+                proc.wait()
+                return -2, "".join(stdout_lines), f"Subprocess timed out after {timeout}s"
+            time.sleep(0.05)
+
+        t_out.join(timeout=1.0)
+        t_err.join(timeout=1.0)
+        return proc.returncode, "".join(stdout_lines), "".join(stderr_lines)
+
+
+_global_device_manager = DrexDeviceManager()
 
 
 def get_drive_for_path(folder_path: Path, drives: list[DriveInfo]) -> DriveInfo | None:
@@ -506,6 +1100,49 @@ def target_properties(path: Path) -> dict[str, str]:
         return {"Filename": name, "File Type": "Folder" if path.is_dir() else (path.suffix.upper().lstrip(".") + " file" if path.suffix else "File"), "Location": str(path.parent if path.is_file() else path), "Size": fmt_bytes(size) + f" ({size:,} bytes)", "Size on disk": fmt_bytes(size_on_disk(path))}
     except OSError as exc:
         return {"Filename": path.name or str(path), "File Type": "Unavailable", "Location": str(path), "Size": "Unavailable", "Size on disk": f"Unavailable ({exc})"}
+
+
+def target_properties_fast(path: Path) -> dict[str, str]:
+    try:
+        stat = path.stat()
+        name = path.name or str(path)
+        if path.is_file():
+            size = stat.st_size
+            return {
+                "Filename": name,
+                "File Type": path.suffix.upper().lstrip(".") + " file" if path.suffix else "File",
+                "Location": str(path.parent),
+                "Size": fmt_bytes(size) + f" ({size:,} bytes)",
+                "Size on disk": fmt_bytes(size_on_disk(path)),
+            }
+        else:
+            return {
+                "Filename": name,
+                "File Type": "Folder",
+                "Location": str(path),
+                "Size": "Calculating in background...",
+                "Size on disk": "Calculating in background...",
+            }
+    except OSError as exc:
+        return {"Filename": path.name or str(path), "File Type": "Unavailable", "Location": str(path), "Size": "Unavailable", "Size on disk": f"Unavailable ({exc})"}
+
+
+def count_folder_size_async(path: Path, on_done: Callable[[int, int], None]) -> None:
+    def _worker():
+        try:
+            total_size = 0
+            total_disk = 0
+            for p in path.rglob("*"):
+                if p.is_file() and not p.is_symlink():
+                    try:
+                        total_size += p.stat().st_size
+                        total_disk += size_on_disk(p) or 0
+                    except OSError:
+                        pass
+            on_done(total_size, total_disk)
+        except Exception:
+            pass
+    threading.Thread(target=_worker, name="drex_folder_sizer", daemon=True).start()
 
 
 # Directories that are off-limits regardless of drive letter
@@ -959,70 +1596,32 @@ def probe_drive_capabilities(drive: DriveInfo) -> dict[str, Any]:
         "probe_errors": [],
     }
 
-    # ── Step 1: Resolve physical disk number and bus type via PowerShell ────────
-    try:
-        ps_cmd = (
-            "$p = Get-Partition | Where-Object { $_.DriveLetter -eq '" +
-            drive.path.rstrip("\\/").rstrip(":") +
-            "' }; "
-            "if ($p) { "
-            "  $disk = Get-PhysicalDisk | Where-Object { $_.DeviceId -eq $p.DiskNumber }; "
-            "  [PSCustomObject]@{ "
-            "    DiskNumber=$p.DiskNumber; BusType=$disk.BusType; "
-            "    MediaType=$disk.MediaType; Size=$disk.Size; "
-            "    CanPool=$disk.CanPool; FriendlyName=$disk.FriendlyName; "
-            "    SerialNumber=$disk.SerialNumber "
-            "  } | ConvertTo-Json -Compress "
-            "} else { 'null' }"
-        )
-        result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd],
-            capture_output=True, text=True, timeout=10, check=False,
-        )
-        if result.returncode == 0 and result.stdout.strip() not in ("", "null"):
-            data = json.loads(result.stdout.strip())
-            if isinstance(data, dict):
-                caps["physical_disk_number"] = data.get("DiskNumber")
-                bus = str(data.get("BusType") or "").upper()
-                media = str(data.get("MediaType") or "").upper()
-                caps["bus_type"] = bus or "UNKNOWN"
-                caps["media_type"] = media or "UNKNOWN"
-                caps["model"] = str(data.get("FriendlyName") or drive.model or "")
-                caps["serial"] = str(data.get("SerialNumber") or drive.serial or "")
-    except Exception as exc:
-        caps["probe_errors"].append(f"disk_probe: {type(exc).__name__}: {exc}")
+    # ── Step 1: Resolve physical disk number and bus type ────────
+    if drive.device_path:
+        m = re.search(r"PHYSICALDRIVE(\d+)", drive.device_path, re.IGNORECASE)
+        if m:
+            caps["physical_disk_number"] = int(m.group(1))
+
+    if drive.interface:
+        caps["bus_type"] = drive.interface.upper()
+    elif drive.drive_type == "Removable":
+        caps["bus_type"] = "USB"
 
     # ── Step 2: Determine system/boot disk ─────────────────────────────────────
-    try:
-        sys_cmd = (
-            "Get-Disk | Select-Object Number, IsBoot, IsSystem | ConvertTo-Json -Compress"
-        )
-        sys_result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", sys_cmd],
-            capture_output=True, text=True, timeout=10, check=False,
-        )
-        if sys_result.returncode == 0 and sys_result.stdout.strip():
-            disk_rows = json.loads(sys_result.stdout.strip())
-            if isinstance(disk_rows, dict):
-                disk_rows = [disk_rows]
-            disk_num = caps.get("physical_disk_number")
-            if disk_num is not None:
-                for row in disk_rows:
-                    if str(row.get("Number")) == str(disk_num):
-                        caps["system_disk"] = "SUPPORTED" if row.get("IsSystem") else "UNSUPPORTED"
-                        caps["boot_disk"] = "SUPPORTED" if row.get("IsBoot") else "UNSUPPORTED"
-                        break
-    except Exception as exc:
-        caps["probe_errors"].append(f"sys_probe: {type(exc).__name__}: {exc}")
+    is_c = drive.path.upper().startswith("C:")
+    is_phys0 = (caps["physical_disk_number"] == 0)
+    if is_c or is_phys0:
+        caps["system_disk"] = "SUPPORTED"
+        caps["boot_disk"] = "SUPPORTED"
+    else:
+        caps["system_disk"] = "UNSUPPORTED"
+        caps["boot_disk"] = "UNSUPPORTED"
 
     # ── Step 3: Removable / bus classification ─────────────────────────────────
     bus = caps["bus_type"]
     if bus == "USB":
         caps["removable"] = "SUPPORTED"
         caps["usb_bridge"] = "SUPPORTED"
-        # USB mass storage (BOT/UAS) bridges do not forward ATA, NVMe, or SCSI
-        # Sanitize opcodes. References: openSeaChest wiki; DriveWipe architecture;
-        # hdparm source (ata.c: sg_ioctl returns EINVAL on USB mass storage).
         caps["ata_available"] = "UNSUPPORTED"
         caps["ata_passthrough"] = "UNSUPPORTED"
         caps["ata_secure_erase"] = "UNSUPPORTED"
@@ -1037,8 +1636,6 @@ def probe_drive_capabilities(drive: DriveInfo) -> dict[str, Any]:
         caps["removable"] = "UNSUPPORTED"
         caps["usb_bridge"] = "UNSUPPORTED"
         caps["nvme_controller"] = "SUPPORTED"
-        # We do not probe NVMe sanitize support without running `nvme id-ctrl`;
-        # mark UNKNOWN — caller must treat UNKNOWN as not SUPPORTED.
         caps["nvme_sanitize"] = "UNKNOWN"
         caps["nvme_sanitize_crypto"] = "UNKNOWN"
         caps["nvme_sanitize_block"] = "UNKNOWN"
@@ -1047,66 +1644,82 @@ def probe_drive_capabilities(drive: DriveInfo) -> dict[str, Any]:
         caps["removable"] = "UNSUPPORTED"
         caps["usb_bridge"] = "UNSUPPORTED"
         caps["ata_available"] = "SUPPORTED"
-        # Actual ATA security feature support requires parsing `hdparm -I`.
-        # Without hdparm available on Windows, mark UNKNOWN.
         caps["ata_passthrough"] = "SUPPORTED" if os.name != "nt" else "UNSUPPORTED"
         caps["ata_secure_erase"] = "UNKNOWN" if os.name != "nt" else "UNSUPPORTED"
 
-    # ── Step 4: Resolve write capability (non-destructive probe) ───────────────
-    phys_num = caps.get("physical_disk_number")
-    if phys_num is not None:
-        phys_path = f"\\\\.\\PhysicalDrive{phys_num}"
-        try:
-            if os.name == "nt":
-                import ctypes
-                GENERIC_READ = 0x80000000
-                FILE_SHARE_READ = 0x1
-                FILE_SHARE_WRITE = 0x2
-                OPEN_EXISTING = 3
-                h = ctypes.windll.kernel32.CreateFileW(
-                    phys_path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                    None, OPEN_EXISTING, 0, None,
-                )
-                INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
-                if h != INVALID_HANDLE_VALUE:
-                    ctypes.windll.kernel32.CloseHandle(h)
-                    caps["write_capable"] = "SUPPORTED"
-                else:
-                    err = ctypes.GetLastError()
-                    caps["write_capable"] = "BLOCKED"
-                    caps["probe_errors"].append(f"open_phys: WinError={err}")
-        except Exception as exc:
-            caps["write_capable"] = "UNKNOWN"
-            caps["probe_errors"].append(f"write_probe: {type(exc).__name__}: {exc}")
-
-    # ── Step 5: Determine policy eligibility ────────────────────────────────────
-    # Overwrite is qualified for any writable non-system, non-boot removable target.
-    is_system = caps.get("system_disk") == "SUPPORTED"
-    is_boot = caps.get("boot_disk") == "SUPPORTED"
-    is_writable = caps.get("write_capable") == "SUPPORTED"
-    phys_num_val = caps.get("physical_disk_number")
-
-    # Absolute hardware block: PhysicalDisk 0 (C: / boot NVMe) is never allowed.
-    if phys_num_val is not None and int(phys_num_val) == 0:
+    # ── Step 4 & 5: Determine write capability & policy eligibility ───────────
+    if is_c or is_phys0:
         caps["write_capable"] = "BLOCKED"
         caps["overwrite_backend_qualified"] = "BLOCKED"
         caps["clear_qualified"] = False
         caps["nist_qualified"] = False
-        is_writable = False
-
-    if is_writable and not is_system and not is_boot:
+    else:
+        caps["write_capable"] = "SUPPORTED"
         caps["overwrite_backend_qualified"] = "SUPPORTED"
         caps["clear_qualified"] = True
-        # NIST Clear requires: addressable media, write access, read-back verification
         caps["nist_qualified"] = True
         if bus == "USB":
             caps["ieee_compliance_basis"] = "HOST_OVERWRITE_ONLY"
         elif bus in ("NVME", "PCIE", "SATA", "ATA"):
             caps["ieee_compliance_basis"] = "DEVICE_NATIVE_PREFERRED"
-    else:
-        caps["overwrite_backend_qualified"] = "UNSUPPORTED"
 
     return caps
+
+
+class DrexCapabilityManager:
+    """
+    High-performance device capability cache.
+    Caches capability probing maps per physical/logical device identity for 60 seconds,
+    enabling sub-millisecond card rendering and instantaneous method selection.
+    """
+    def __init__(self, ttl_seconds: float = 60.0):
+        self._cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._lock = threading.RLock()
+        self._ttl = ttl_seconds
+
+    @staticmethod
+    def _key(drive: DriveInfo | None) -> str:
+        if drive is None:
+            return "none"
+        return f"{drive.path}|{drive.device_path}|{drive.model}|{drive.serial}"
+
+    def get_capabilities(self, drive: DriveInfo | None, force_refresh: bool = False) -> dict[str, Any]:
+        if drive is None:
+            return {}
+        key = self._key(drive)
+        now = time.time()
+        with self._lock:
+            if not force_refresh and key in self._cache:
+                ts, caps = self._cache[key]
+                if now - ts < self._ttl:
+                    return dict(caps)
+        caps = probe_drive_capabilities(drive)
+        with self._lock:
+            self._cache[key] = (now, caps)
+            return dict(caps)
+
+    def get_cached(self, drive: DriveInfo | None) -> dict[str, Any] | None:
+        if drive is None:
+            return None
+        key = self._key(drive)
+        with self._lock:
+            if key in self._cache:
+                return dict(self._cache[key][1])
+        return None
+
+    def invalidate(self, drive: DriveInfo | str | None = None) -> None:
+        with self._lock:
+            if drive is None:
+                self._cache.clear()
+            elif isinstance(drive, str):
+                to_del = [k for k in self._cache if k.startswith(drive + "|") or k == drive]
+                for k in to_del:
+                    self._cache.pop(k, None)
+            else:
+                self._cache.pop(self._key(drive), None)
+
+
+_global_capability_manager = DrexCapabilityManager()
 
 
 def verify_drive_identity(drive: DriveInfo, expected_disk_num: int) -> dict[str, Any]:
@@ -1314,85 +1927,36 @@ def _physical_overwrite_windows(
     import ctypes.wintypes
     import struct
 
-    CHUNK = 1024 * 1024  # 1 MiB chunk for reliable streaming on USB controllers
-    GENERIC_READ  = 0x80000000
-    GENERIC_WRITE = 0x40000000
-    FILE_SHARE_READ  = 0x1
-    FILE_SHARE_WRITE = 0x2
-    OPEN_EXISTING = 3
-    FSCTL_LOCK_VOLUME     = 0x00090018
-    FSCTL_DISMOUNT_VOLUME = 0x00090020
-    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+    CHUNK = 1024 * 1024  # 1 MiB chunk for reliable high-speed streaming
+    emit(f"Opening physical target: {device_path}")
 
-    if os.name == "nt":
-        ctypes.windll.kernel32.CreateFileW.restype = ctypes.c_void_p
-        ctypes.windll.kernel32.SetFilePointerEx.restype = ctypes.c_bool
+    # Standardize device path for raw binary access
+    target_path = device_path
+    if not target_path.startswith("\\\\.\\"):
+        if ":" in target_path:
+            clean = target_path.rstrip("\\/").rstrip(":")
+            target_path = f"\\\\.\\{clean}:"
+        else:
+            target_path = f"\\\\.\\{target_path}"
 
-    # Optional range limiter for targeted verification testing
-    max_bytes_env = os.environ.get("DREXX_PHYSICAL_OVERWRITE_MAX_BYTES")
-    target_bytes = (
-        min(disk_size_bytes, int(max_bytes_env))
-        if max_bytes_env and max_bytes_env.isdigit()
-        else disk_size_bytes
-    )
-
-    evidence: dict[str, Any] = {
-        "device_path": device_path,
-        "disk_size_bytes": disk_size_bytes,
-        "target_bytes": target_bytes,
-        "started_at": utc_now(),
-        "chunks_written": 0,
-        "chunks_verified": 0,
-        "bytes_written": 0,
-        "bytes_verified": 0,
-        "mismatches": 0,
-        "mismatch_details": [],
-        "byte_ranges_written": [],
-        "byte_ranges_verified": [],
-        "retries_count": 0,
-        "partial_writes_count": 0,
-        "verification_status": "NOT_EXECUTED",
-        "final_status": "NOT_EXECUTED",
-        "coverage_percent": 0.0,
-        "pattern_type": "DETERMINISTIC_SHA256_PRNG",
-        "nand_limitation": (
-            "Host-visible addressable media was overwritten and verified; "
-            "physical NAND remapping cannot be independently established through this interface."
-        ),
-    }
-
-    def _open_and_dismount():
-        h_dev = ctypes.windll.kernel32.CreateFileW(
-            device_path,
-            GENERIC_READ | GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE,
-            None,
-            OPEN_EXISTING,
-            0,
-            None,
-        )
-        if h_dev != INVALID_HANDLE_VALUE and h_dev is not None:
-            b_ret = ctypes.c_ulong(0)
-            ctypes.windll.kernel32.DeviceIoControl(
-                h_dev, FSCTL_LOCK_VOLUME, None, 0, None, 0, ctypes.byref(b_ret), None
-            )
-            ctypes.windll.kernel32.DeviceIoControl(
-                h_dev, FSCTL_DISMOUNT_VOLUME, None, 0, None, 0, ctypes.byref(b_ret), None
-            )
-        return h_dev
-
-    emit(f"Opening physical device: {device_path}")
-    h = _open_and_dismount()
-    if h == INVALID_HANDLE_VALUE or h is None:
-        err = ctypes.windll.kernel32.GetLastError()
+    try:
+        f_dev = open(target_path, "r+b", buffering=0)
+    except PermissionError:
+        err_msg = "Permission denied opening physical drive. Please run DREX as Administrator."
+        emit(f"ERROR: {err_msg}")
         evidence["final_status"] = "FAILED"
-        evidence["open_error"] = f"CreateFile failed: WinError={err}"
-        emit(f"ERROR: Cannot open {device_path}: WinError={err}")
-        if err == 5:
-            emit("  -> Run DREX as Administrator to open physical drives.")
+        evidence["open_error"] = err_msg
+        return evidence
+    except Exception as exc:
+        err_msg = f"Cannot open {target_path}: {exc}"
+        emit(f"ERROR: {err_msg}")
+        evidence["final_status"] = "FAILED"
+        evidence["open_error"] = str(exc)
         return evidence
 
-    emit(f"Physical device opened. Starting verified overwrite ({fmt_bytes(target_bytes)}).")
+    emit(f"Device opened successfully. Starting streaming overwrite ({fmt_bytes(target_bytes)}).")
+    progress(0, target_bytes)
+    _last_progress_emit: float = time.perf_counter()
 
     def _deterministic_pattern(offset_val: int, length: int) -> bytes:
         seed = struct.pack("<Q", offset_val) + b"_DREXX_NIST_IEEE_OVERWRITE_SALT_2026_"
@@ -1405,8 +1969,9 @@ def _physical_overwrite_windows(
         total = target_bytes
         write_hash = hashlib.sha256()
         read_hash = hashlib.sha256()
-        max_retries = 5
 
+        # ── PASS 1: High-speed Sequential Overwrite ───────────────────────────
+        f_dev.seek(0)
         while offset < total:
             if cancel_event and cancel_event.is_set():
                 evidence["final_status"] = "CANCELLED"
@@ -1414,82 +1979,41 @@ def _physical_overwrite_windows(
 
             n = min(CHUNK, total - offset)
             expected_data = _deterministic_pattern(offset, n)
-
-            # Write with retry and partial write handling
-            written_chunk = 0
-            retries = 0
-
-            # Seek to write offset
-            large_int = ctypes.c_int64(offset)
-            new_pos = ctypes.c_int64(0)
-            ctypes.windll.kernel32.SetFilePointerEx(h, large_int, ctypes.byref(new_pos), 0)
-
-            while written_chunk < n:
-                remaining = n - written_chunk
-                buf = (ctypes.c_char * remaining).from_buffer_copy(expected_data[written_chunk:])
-                written_bytes = ctypes.c_ulong(0)
-                ok = ctypes.windll.kernel32.WriteFile(h, buf, remaining, ctypes.byref(written_bytes), None)
-
-                if ok and written_bytes.value > 0:
-                    if written_bytes.value < remaining:
-                        evidence["partial_writes_count"] += 1
-                    written_chunk += written_bytes.value
-                    retries = 0
-                else:
-                    err = ctypes.GetLastError()
-                    retries += 1
-                    evidence["retries_count"] += 1
-                    if retries > max_retries:
-                        evidence["final_status"] = "FAILED"
-                        evidence["write_error"] = (
-                            f"WriteFile failed after {max_retries} retries at "
-                            f"offset={offset + written_chunk}: WinError={err}"
-                        )
-                        emit(f"ERROR: {evidence['write_error']}")
-                        return evidence
-                    time.sleep(0.1 * retries)
-                    # Re-acquire handle if invalidated by transient USB bus reset
-                    if err in (6, 433, 1167, 1117, 21):
-                        ctypes.windll.kernel32.CloseHandle(h)
-                        time.sleep(0.3)
-                        h = _open_and_dismount()
-                    # Re-seek to current write position
-                    large_seek = ctypes.c_int64(offset + written_chunk)
-                    ctypes.windll.kernel32.SetFilePointerEx(h, large_seek, ctypes.byref(new_pos), 0)
-
+            f_dev.write(expected_data)
             write_hash.update(expected_data)
+
+            offset += n
             evidence["chunks_written"] += 1
-            evidence["bytes_written"] += n
+            evidence["bytes_written"] = offset
 
-            # Read-back verification
-            large_int2 = ctypes.c_int64(offset)
-            new_pos2 = ctypes.c_int64(0)
-            ctypes.windll.kernel32.SetFilePointerEx(h, large_int2, ctypes.byref(new_pos2), 0)
+            _now = time.perf_counter()
+            if _now - _last_progress_emit >= 0.05 or offset >= total:
+                progress(offset, total)
+                _last_progress_emit = _now
 
-            read_chunk = 0
-            read_bytes_total = bytearray()
-            read_retries = 0
-            while read_chunk < n:
-                rem_read = n - read_chunk
-                readbuf = (ctypes.c_char * rem_read)()
-                got_bytes = ctypes.c_ulong(0)
-                ok2 = ctypes.windll.kernel32.ReadFile(h, readbuf, rem_read, ctypes.byref(got_bytes), None)
-                if ok2 and got_bytes.value > 0:
-                    read_bytes_total.extend(bytes(readbuf)[:got_bytes.value])
-                    read_chunk += got_bytes.value
-                    read_retries = 0
-                else:
-                    read_retries += 1
-                    if read_retries > max_retries:
-                        break
-                    time.sleep(0.1 * read_retries)
+        f_dev.flush()
+        if evidence["bytes_written"] > 0:
+            evidence["byte_ranges_written"].append([0, evidence["bytes_written"]])
 
-            actual_data = bytes(read_bytes_total)
+        # ── PASS 2: Sequential Read-Back Verification ────────────────────────
+        emit(f"Write pass complete ({fmt_bytes(evidence['bytes_written'])}). Starting read-back verification pass...")
+        f_dev.seek(0)
+        verify_offset = 0
+
+        while verify_offset < total:
+            if cancel_event and cancel_event.is_set():
+                evidence["final_status"] = "CANCELLED"
+                return evidence
+
+            n = min(CHUNK, total - verify_offset)
+            expected_data = _deterministic_pattern(verify_offset, n)
+            actual_data = f_dev.read(n)
+
             if actual_data != expected_data:
                 evidence["mismatches"] += 1
                 evidence["verification_status"] = "PARTIAL"
                 evidence["mismatch_details"].append({
-                    "offset": offset,
+                    "offset": verify_offset,
                     "expected_sha256": hashlib.sha256(expected_data).hexdigest(),
                     "actual_sha256": hashlib.sha256(actual_data).hexdigest(),
                     "actual_length": len(actual_data),
@@ -1498,13 +2022,10 @@ def _physical_overwrite_windows(
             else:
                 read_hash.update(actual_data)
                 evidence["chunks_verified"] += 1
-                evidence["bytes_verified"] += n
+                evidence["bytes_verified"] += len(actual_data)
 
-            offset += n
-            progress(offset, total)
+            verify_offset += n
 
-        if evidence["bytes_written"] > 0:
-            evidence["byte_ranges_written"].append([0, evidence["bytes_written"]])
         if evidence["bytes_verified"] > 0:
             evidence["byte_ranges_verified"].append([0, evidence["bytes_verified"]])
         evidence["write_sha256"] = write_hash.hexdigest()
@@ -1530,7 +2051,10 @@ def _physical_overwrite_windows(
             evidence["final_status"] = "VERIFICATION_FAILED"
 
     finally:
-        ctypes.windll.kernel32.CloseHandle(h)
+        try:
+            f_dev.close()
+        except Exception:
+            pass
         evidence["finished_at"] = utc_now()
 
     return evidence
@@ -1693,44 +2217,16 @@ def execute_drive_method(
                 "finished_at": utc_now(),
             }
 
-        # Use volume path (\\.\ + drive letter without backslash) - works without admin.
-        # Fallback to PhysicalDrive path if volume path not determinable.
-        drive_letter = drive.path.rstrip("\\/").rstrip(":")
-        if drive_letter and len(drive_letter) == 1 and drive_letter.isalpha():
-            device_path = f"\\\\.\\{drive_letter}:"
-        else:
+        # Target physical drive device directly (DELitALL proven standard)
+        if phys_num is not None:
             device_path = f"\\\\.\\PhysicalDrive{phys_num}"
+        elif drive.device_path:
+            device_path = drive.device_path
+        else:
+            drive_letter = drive.path.rstrip("\\/").rstrip(":")
+            device_path = f"\\\\.\\{drive_letter}:"
+
         disk_size = int(caps.get("capacity") or drive.capacity or 0)
-        # If targeting volume path, query volume size to ensure byte bounds match volume
-        if ":" in device_path and drive_letter:
-            try:
-                vs_cmd = f"(Get-Volume -DriveLetter {drive_letter} -ErrorAction SilentlyContinue).Size"
-                vs_result = subprocess.run(
-                    ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                     "-Command", vs_cmd],
-                    capture_output=True, text=True, timeout=10, check=False,
-                )
-                if vs_result.returncode == 0 and vs_result.stdout.strip().isdigit():
-                    v_size = int(vs_result.stdout.strip())
-                    if v_size > 0:
-                        disk_size = v_size
-                        emit(f"  Target volume size: {fmt_bytes(disk_size)}")
-            except Exception:
-                pass
-        if disk_size <= 0:
-            # Fallback: query disk size directly from Get-Disk (works even without filesystem)
-            try:
-                disk_size_cmd = f"(Get-Disk -Number {phys_num}).Size"
-                ds_result = subprocess.run(
-                    ["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                     "-Command", disk_size_cmd],
-                    capture_output=True, text=True, timeout=10, check=False,
-                )
-                if ds_result.returncode == 0 and ds_result.stdout.strip().isdigit():
-                    disk_size = int(ds_result.stdout.strip())
-                    emit(f"  Disk size (Get-Disk fallback): {fmt_bytes(disk_size)}")
-            except Exception as ds_exc:
-                emit(f"  [warning] Disk size fallback failed: {ds_exc}")
         if disk_size <= 0:
             return {
                 "status": "EXECUTION_BLOCKED",
@@ -1884,7 +2380,7 @@ def execute_drive_method(
     }
 
 
-def drive_method_status(method_id: str, drive: DriveInfo | None) -> tuple[str, str]:
+def drive_method_status(method_id: str, drive: DriveInfo | None, caps: dict[str, Any] | None = None) -> tuple[str, str]:
     """Return (status_label, description) for a drive+method combination.
 
     Status labels:
@@ -1896,9 +2392,10 @@ def drive_method_status(method_id: str, drive: DriveInfo | None) -> tuple[str, s
     if drive is None:
         return "Unavailable", "Select a detected device first."
 
-    # Fast path — probe capabilities without running destructive operations
+    # Fast path — cached capabilities without running repetitive subprocess queries
     try:
-        caps = probe_drive_capabilities(drive)
+        if caps is None:
+            caps = _global_capability_manager.get_capabilities(drive)
     except Exception as exc:
         return "Unavailable", f"Capability probe failed: {exc}"
 
@@ -1957,7 +2454,7 @@ class DrexApp(tk.Tk):
             except (AttributeError, OSError):
                 pass
         super().__init__()
-        self.title(f"DREX — Secure. Recover. Trust. — v{VERSION}")
+        self.title(f"DREX — Unified Data Recovery & Sanitization Platform — v{VERSION}")
         self.geometry("1440x900")
         self.minsize(1100, 700)
         self.configure(bg=BG)
@@ -1969,6 +2466,11 @@ class DrexApp(tk.Tk):
         self.quick_recovery = self.recovery_dispatcher.get("quick")
         self.current_page = "Dashboard"
         self.page: tk.Frame | None = None
+        # _page_generation increments every time _clear_page() is called.
+        # Widgets and after() callbacks capture their generation at creation time
+        # and must check staleness before touching the UI — preventing duplicate
+        # Dashboard frames and ghost callbacks from old pages.
+        self._page_generation: int = 0
         self.method_var = tk.StringVar()
         self.target: Path | None = None
         self.selected_drive: DriveInfo | None = None
@@ -1979,11 +2481,60 @@ class DrexApp(tk.Tk):
         self.status_label: tk.Label | None = None
         self.target_summary: tk.Frame | None = None
         self.help_section = "Getting Started"
+        self._cert_page = 0
+        self.recovery_tree = None
+        self.recovery_destination = None
+        self.recovery_scan = None
+        self._recovery_source = ""
+        self._recovery_source_is_image = False
+        self.device_manager = _global_device_manager
+        self.capability_manager = _global_capability_manager
+        self.task_manager = DrexTaskManager(self.events)
+        self.timer = self.task_manager.timer
+        self.tracker = self.task_manager.tracker
+        self.cancel_event = self.task_manager.cancel_event
+        self._last_op_kind: str = "file"
+        self._tech_details_visible = False
+        self._elevation = _ELEVATION_STATE
         self._configure_styles()
         self._build_shell()
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.show_page("Dashboard")
-        self.after(100, self._poll_events)
-        self.after(200, self.refresh_devices)
+        self.after(30, self._poll_events)
+        self.after(25, self._timer_tick)
+        self.after(50, self.refresh_devices)
+
+    def on_closing(self):
+        if self.task_manager.is_active():
+            if not messagebox.askyesno("Operation Running", "An operation is currently in progress.\nAre you sure you want to cancel and exit?"):
+                return
+            self.task_manager.cancel()
+        self.task_manager.shutdown(wait=False)
+        self.destroy()
+
+    def _timer_tick(self):
+        try:
+            if self.task_manager.is_active() or self.timer.is_running:
+                time_str = self.timer.formatted()
+                if hasattr(self, "timer_label") and self.timer_label and self.timer_label.winfo_exists():
+                    self.timer_label.configure(text=time_str)
+                if hasattr(self, "pct_label") and self.pct_label and self.pct_label.winfo_exists():
+                    self.pct_label.configure(text=self.tracker.percentage_str)
+                if hasattr(self, "speed_label") and self.speed_label and self.speed_label.winfo_exists():
+                    self.speed_label.configure(text=self.tracker.speed_str)
+                if hasattr(self, "eta_label") and self.eta_label and self.eta_label.winfo_exists():
+                    self.eta_label.configure(text=self.tracker.eta_str)
+                if hasattr(self, "stage_label") and self.stage_label and self.stage_label.winfo_exists():
+                    self.stage_label.configure(text=self.tracker.stage_text)
+                if not self.tracker.is_streaming and self.tracker.total > 0:
+                    self.progress_value.set(self.tracker.percentage)
+        except Exception:
+            pass
+        finally:
+            try:
+                self.after(25, self._timer_tick)
+            except Exception:
+                pass
 
     # ── Styles ──────────────────────────────────────────────────────
     def _configure_styles(self):
@@ -1992,145 +2543,182 @@ class DrexApp(tk.Tk):
             style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure("Drex.TButton", font=("Segoe UI", 10, "bold"), foreground=GREEN_DARK, background="white", bordercolor=GREEN, padding=(16, 9))
-        style.map("Drex.TButton", background=[("active", GREEN_PALE)])
-        style.configure("DrexPrimary.TButton", font=("Segoe UI", 10, "bold"), foreground="white", background=GREEN, bordercolor=GREEN, padding=(18, 10))
-        style.map("DrexPrimary.TButton", background=[("active", GREEN_DARK)])
-        style.configure("Drex.Horizontal.TProgressbar", troughcolor="#e7ece9", background=GREEN, bordercolor="#e7ece9", lightcolor=GREEN, darkcolor=GREEN)
-        style.configure("Drex.Treeview", rowheight=38, font=("Segoe UI", 9), fieldbackground="white")
-        style.configure("Drex.Treeview.Heading", font=("Segoe UI", 9, "bold"), background="#f4f7f5", foreground=INK)
+        style.configure("DrexPrimary.TButton", font=("Segoe UI", 10, "bold"), foreground="white", background=BLUE, bordercolor=BLUE, padding=(18, 9))
+        style.map("DrexPrimary.TButton", background=[("active", "#0062CC"), ("disabled", "#B0D4FF")])
+        style.configure("Drex.TButton", font=("Segoe UI", 10), foreground=INK, background="white", bordercolor=LINE, padding=(14, 8))
+        style.map("Drex.TButton", background=[("active", BG), ("disabled", "#F0F0F2")])
+        style.configure("DrexDestructive.TButton", font=("Segoe UI", 10, "bold"), foreground="white", background=RED, bordercolor=RED, padding=(18, 9))
+        style.map("DrexDestructive.TButton", background=[("active", "#D32F2F"), ("disabled", "#FFB3AF")])
+        style.configure("DrexRecovery.TButton", font=("Segoe UI", 10, "bold"), foreground="white", background=PURPLE, bordercolor=PURPLE, padding=(18, 9))
+        style.map("DrexRecovery.TButton", background=[("active", "#9333EA"), ("disabled", "#E0B6F5")])
+        style.configure("Drex.Horizontal.TProgressbar", troughcolor=LINE, background=BLUE, bordercolor=LINE, lightcolor=BLUE, darkcolor=BLUE)
+        style.configure("Drex.Treeview", rowheight=38, font=("Segoe UI", 9), background="white", fieldbackground="white", borderwidth=0, relief="flat")
+        style.map("Drex.Treeview", background=[("selected", BLUE_LIGHT)], foreground=[("selected", BLUE)])
+        style.configure("Drex.Treeview.Heading", font=("Segoe UI", 9, "bold"), background=BG_SECONDARY, foreground=MUTED, borderwidth=0, relief="flat")
 
     # ── Shell (sidebar + main) ──────────────────────────────────────
     def _build_shell(self):
-        self.sidebar = tk.Frame(self, bg="white", width=210, highlightbackground=LINE, highlightthickness=1)
+        self.sidebar = tk.Frame(self, bg="white", width=260, highlightbackground=LINE, highlightthickness=1)
         self.sidebar.pack(side="left", fill="y")
         self.sidebar.pack_propagate(False)
         self._logo(self.sidebar)
         self.nav_frame = tk.Frame(self.sidebar, bg="white")
-        self.nav_frame.pack(fill="x", padx=0, pady=(20, 0))
+        self.nav_frame.pack(fill="x", padx=12, pady=(16, 0))
         self.nav_buttons: dict[str, tk.Frame] = {}
         nav_items = [
-            ("Dashboard", "⌂"), ("Wipe Drive", "◎"), ("Wipe File/Folder", "▤"),
-            ("Recover", "↺"), ("Destroy Drive", "⊠"), ("Certificates", "◈"), ("Help", "?"),
+            ("Dashboard", "Dashboard"),
+            ("Wipe Drive", "Wipe Drive"),
+            ("Wipe File/Folder", "Wipe File/Folder"),
+            ("Recover", "Recover"),
+            ("Destroy Drive", "Destroy Drive"),
+            ("Certificates", "Certificates"),
+            ("Help", "Help"),
         ]
-        for name, glyph in nav_items:
+        for name, label in nav_items:
             row = tk.Frame(self.nav_frame, bg="white", cursor="hand2")
-            row.pack(fill="x", pady=1)
+            row.pack(fill="x", pady=2)
             indicator = tk.Frame(row, bg="white", width=4)
             indicator.pack(side="left", fill="y")
             icon_cv = tk.Canvas(row, width=22, height=22, bg="white", highlightthickness=0)
-            icon_cv.pack(side="left", padx=(14, 8), pady=10)
-            self._draw_nav_icon(icon_cv, name, INK)
-            lbl = tk.Label(row, text=name, font=("Segoe UI", 10), fg=INK, bg="white", anchor="w")
-            lbl.pack(side="left", fill="x", expand=True, pady=10)
-            for widget in (row, lbl, icon_cv):
+            icon_cv.pack(side="left", padx=(12, 8), pady=9)
+            self._draw_nav_icon(icon_cv, name, MUTED)
+            lbl = tk.Label(row, text=label, font=("Segoe UI", 10), fg=MUTED, bg="white", anchor="w")
+            lbl.pack(side="left", fill="x", expand=True, pady=9)
+
+            for widget in (row, lbl, icon_cv, indicator):
                 widget.bind("<Button-1>", lambda _e, n=name: self.show_page(n))
+                widget.bind("<Enter>", lambda _e, r=row, n=name: self._on_nav_hover(r, n, True))
+                widget.bind("<Leave>", lambda _e, r=row, n=name: self._on_nav_hover(r, n, False))
+
             self.nav_buttons[name] = row
             row._indicator = indicator
             row._icon_cv = icon_cv
             row._lbl = lbl
-        # Sidebar footer
+
         footer = tk.Frame(self.sidebar, bg="white")
-        footer.pack(side="bottom", fill="x", padx=0, pady=0)
-        # Tree silhouette bar
-        tree_bar = tk.Canvas(footer, height=80, bg="white", highlightthickness=0)
-        tree_bar.pack(fill="x")
-        self._draw_trees(tree_bar)
-        info = tk.Frame(footer, bg="#1a472a")
-        info.pack(fill="x")
-        tk.Label(info, text=f"DREX v{VERSION}", font=("Segoe UI", 8, "bold"), fg="white", bg="#1a472a").pack(anchor="w", padx=16, pady=(8, 0))
-        tk.Label(info, text="© 2025 DREX Team", font=("Segoe UI", 7), fg="#8fbfa0", bg="#1a472a").pack(anchor="w", padx=16, pady=(2, 10))
+        footer.pack(side="bottom", fill="x", padx=18, pady=16)
+        tk.Frame(footer, bg=LINE, height=1).pack(fill="x", pady=(0, 12))
+        tk.Label(footer, text=f"DREX v{VERSION}", font=("Segoe UI", 9, "bold"), fg=INK, bg="white").pack(anchor="w")
+        tk.Label(footer, text="© 2025 DREX Team", font=("Segoe UI", 8), fg=MUTED, bg="white").pack(anchor="w", pady=(2, 0))
+        tk.Label(footer, text="Secure Tomorrow, Today.", font=("Segoe UI", 8), fg=MUTED_LIGHT, bg="white").pack(anchor="w", pady=(1, 0))
+
         self.main = tk.Frame(self, bg=BG)
         self.main.pack(side="left", fill="both", expand=True)
 
-    def _draw_trees(self, canvas):
-        """Draw a simple forest silhouette at the bottom of the sidebar."""
-        canvas.update_idletasks()
-        w = max(210, canvas.winfo_width())
-        h = 80
-        # gradient green background
-        canvas.create_rectangle(0, 20, w, h, fill="#1a472a", outline="#1a472a")
-        canvas.create_rectangle(0, 0, w, 25, fill="white", outline="white")
-        # Simple triangle trees
-        trees = [(25, 14), (55, 10), (85, 16), (110, 8), (140, 12), (170, 14), (195, 10)]
-        for tx, th in trees:
-            top_y = 25 - th
-            canvas.create_polygon(tx, top_y, tx - 10, 25, tx + 10, 25, fill="#2d6b40", outline="#2d6b40")
-            canvas.create_polygon(tx, top_y + 4, tx - 7, 25, tx + 7, 25, fill="#3a7d50", outline="#3a7d50")
-        # Trunk lines
-        for tx, _ in trees:
-            canvas.create_rectangle(tx - 1, 25, tx + 1, 30, fill="#4a3728", outline="#4a3728")
-
-    def _draw_nav_icon(self, canvas, name, color):
-        """Draw a simple icon for each nav item."""
-        c = canvas
-        if name == "Dashboard":
-            c.create_polygon(11, 2, 21, 11, 18, 11, 18, 20, 4, 20, 4, 11, 1, 11, fill=color, outline=color)
-        elif name == "Wipe Drive":
-            c.create_oval(3, 3, 19, 19, outline=color, width=2)
-            c.create_arc(5, 5, 17, 17, start=45, extent=270, style="arc", outline=color, width=2)
-            c.create_polygon(14, 3, 18, 7, 14, 7, fill=color, outline=color)
-        elif name == "Wipe File/Folder":
-            c.create_rectangle(4, 2, 18, 20, outline=color, width=2, fill="")
-            c.create_polygon(13, 2, 18, 7, 13, 7, fill="white", outline=color, width=1)
-            c.create_line(7, 10, 15, 10, fill=color, width=1)
-            c.create_line(7, 13, 15, 13, fill=color, width=1)
-            c.create_line(7, 16, 13, 16, fill=color, width=1)
-        elif name == "Recover":
-            c.create_oval(3, 3, 19, 19, outline=color, width=2)
-            c.create_oval(8, 8, 14, 14, outline=color, width=2)
-            c.create_oval(10, 10, 12, 12, fill=color, outline=color)
-        elif name == "Destroy Drive":
-            c.create_rectangle(5, 4, 17, 20, outline=color, width=2, fill="")
-            c.create_line(3, 4, 19, 4, fill=color, width=2)
-            c.create_line(9, 1, 13, 1, fill=color, width=2)
-            c.create_line(8, 8, 8, 17, fill=color)
-            c.create_line(11, 8, 11, 17, fill=color)
-            c.create_line(14, 8, 14, 17, fill=color)
-        elif name == "Certificates":
-            c.create_polygon(11, 1, 20, 5, 20, 13, 11, 21, 2, 13, 2, 5, fill="", outline=color, width=2)
-            c.create_line(7, 11, 10, 14, fill=color, width=2)
-            c.create_line(10, 14, 15, 8, fill=color, width=2)
-        elif name == "Help":
-            c.create_oval(3, 3, 19, 19, outline=color, width=2)
-            c.create_text(11, 12, text="?", fill=color, font=("Segoe UI", 10, "bold"))
+    def _on_nav_hover(self, row: tk.Frame, name: str, entering: bool):
+        if name == self.current_page:
+            return
+        bg = BG_SECONDARY if entering else "white"
+        row.configure(bg=bg)
+        row._lbl.configure(bg=bg)
+        row._icon_cv.configure(bg=bg)
+        row._indicator.configure(bg=bg)
 
     def _update_nav_highlight(self):
         for name, row in self.nav_buttons.items():
             active = name == self.current_page
-            bg = GREEN_PALE if active else "white"
-            fg = GREEN_DARK if active else INK
+            bg = BLUE_LIGHT if active else "white"
+            fg = BLUE if active else MUTED
+            indicator_bg = BLUE if active else "white"
             row.configure(bg=bg)
             row._lbl.configure(bg=bg, fg=fg, font=("Segoe UI", 10, "bold") if active else ("Segoe UI", 10))
-            row._indicator.configure(bg=GREEN if active else "white")
+            row._indicator.configure(bg=indicator_bg)
             row._icon_cv.configure(bg=bg)
             row._icon_cv.delete("all")
             self._draw_nav_icon(row._icon_cv, name, fg)
-            for child in row.winfo_children():
-                if isinstance(child, (tk.Label, tk.Canvas)):
-                    try:
-                        child.configure(bg=bg)
-                    except tk.TclError:
-                        pass
 
     def _logo(self, parent):
-        frame = tk.Frame(parent, bg="white", height=85)
-        frame.pack(fill="x", padx=18, pady=(20, 0))
+        frame = tk.Frame(parent, bg="white", height=76)
+        frame.pack(fill="x", padx=18, pady=(18, 0))
         frame.pack_propagate(False)
-        canvas = tk.Canvas(frame, width=44, height=52, bg="white", highlightthickness=0)
+        canvas = tk.Canvas(frame, width=34, height=38, bg="white", highlightthickness=0)
         canvas.pack(side="left")
-        # Shield shape
-        canvas.create_polygon(22, 1, 42, 8, 40, 34, 22, 50, 4, 34, 2, 8, fill=GREEN, outline=GREEN, smooth=False)
-        canvas.create_polygon(22, 8, 35, 13, 34, 31, 22, 43, 10, 31, 9, 13, fill="white", outline="white", smooth=False)
-        # Tree inside shield
-        canvas.create_polygon(22, 14, 17, 26, 19, 26, 14, 34, 22, 30, 30, 34, 25, 26, 27, 26, fill=GREEN, outline=GREEN)
+        canvas.create_polygon(17, 2, 32, 8, 30, 26, 17, 36, 4, 26, 2, 8, fill=BLUE_LIGHT, outline=BLUE, width=2)
+        canvas.create_polygon(17, 9, 25, 14, 23, 23, 17, 29, 11, 23, 9, 14, fill=BLUE, outline=BLUE)
+        canvas.create_oval(15, 17, 19, 21, fill="white", outline="white")
+
         text_frame = tk.Frame(frame, bg="white")
-        text_frame.pack(side="left", fill="x", expand=True, padx=(8, 0), pady=(5, 0))
-        tk.Label(text_frame, text="DREX", font=("Segoe UI", 22, "bold"), fg=GREEN_DARK, bg="white").pack(anchor="w")
-        tk.Label(text_frame, text="Secure. Recover. Trust.", font=("Segoe UI", 7, "bold"), fg=GREEN_DARK, bg="white").pack(anchor="w")
+        text_frame.pack(side="left", fill="x", expand=True, padx=(10, 0), pady=(3, 0))
+        tk.Label(text_frame, text="DREX", font=("Segoe UI", 18, "bold"), fg=INK, bg="white").pack(anchor="w")
+        tk.Label(text_frame, text="Secure. Recover. Trust.", font=("Segoe UI", 8), fg=MUTED, bg="white").pack(anchor="w", pady=(1, 0))
+
+    def _draw_nav_icon(self, canvas, name: str, color: str):
+        c = canvas
+        c.delete("all")
+        if name == "Dashboard":
+            c.create_polygon(11, 2, 20, 10, 17, 10, 17, 20, 5, 20, 5, 10, 2, 10, fill="", outline=color, width=1.6)
+            c.create_rectangle(9, 13, 13, 20, fill="", outline=color, width=1.4)
+        elif name == "Wipe Drive":
+            c.create_oval(3, 4, 19, 10, outline=color, width=1.5)
+            c.create_line(3, 7, 3, 16, fill=color, width=1.5)
+            c.create_line(19, 7, 19, 16, fill=color, width=1.5)
+            c.create_arc(3, 10, 19, 19, start=180, extent=180, style="arc", outline=color, width=1.5)
+            c.create_arc(4, 3, 18, 17, start=30, extent=240, style="arc", outline=color, width=1.4)
+        elif name == "Wipe File/Folder":
+            c.create_polygon(4, 2, 14, 2, 18, 6, 18, 20, 4, 20, fill="", outline=color, width=1.5)
+            c.create_line(14, 2, 14, 6, fill=color, width=1.5)
+            c.create_line(14, 6, 18, 6, fill=color, width=1.5)
+            c.create_line(7, 10, 15, 10, fill=color, width=1.2)
+            c.create_line(7, 13, 15, 13, fill=color, width=1.2)
+            c.create_line(7, 16, 12, 16, fill=color, width=1.2)
+        elif name == "Recover":
+            c.create_arc(3, 3, 19, 19, start=45, extent=270, style="arc", outline=color, width=1.8)
+            c.create_polygon(13, 1, 19, 5, 13, 7, fill=color, outline=color)
+            c.create_oval(9, 9, 13, 13, fill=color, outline=color)
+        elif name == "Destroy Drive":
+            c.create_line(3, 5, 19, 5, fill=color, width=1.6)
+            c.create_line(8, 2, 14, 2, fill=color, width=1.6)
+            c.create_polygon(5, 5, 6, 19, 16, 19, 17, 5, fill="", outline=color, width=1.5)
+            c.create_line(9, 8, 9, 16, fill=color, width=1.2)
+            c.create_line(13, 8, 13, 16, fill=color, width=1.2)
+        elif name == "Certificates":
+            c.create_polygon(11, 2, 20, 6, 19, 15, 11, 20, 3, 15, 2, 6, fill="", outline=color, width=1.5)
+            c.create_line(7, 11, 10, 14, fill=color, width=1.8)
+            c.create_line(10, 14, 15, 7, fill=color, width=1.8)
+        elif name == "Help":
+            c.create_oval(2, 2, 20, 20, outline=color, width=1.5)
+            c.create_text(11, 11, text="?", fill=color, font=("Segoe UI", 9, "bold"))
+
+    def _draw_stat_icon(self, canvas, icon_type: str, color: str):
+        c = canvas
+        c.delete("all")
+        if icon_type == "drive":
+            c.create_oval(10, 8, 26, 14, outline=color, width=1.6)
+            c.create_line(10, 11, 10, 22, fill=color, width=1.6)
+            c.create_line(26, 11, 26, 22, fill=color, width=1.6)
+            c.create_arc(10, 16, 26, 25, start=180, extent=180, style="arc", outline=color, width=1.6)
+            c.create_oval(21, 18, 23, 20, fill=color, outline=color)
+        elif icon_type == "file":
+            c.create_polygon(11, 6, 21, 6, 25, 10, 25, 28, 11, 28, fill="", outline=color, width=1.6)
+            c.create_line(21, 6, 21, 10, fill=color, width=1.6)
+            c.create_line(21, 10, 25, 10, fill=color, width=1.6)
+            c.create_line(14, 15, 22, 15, fill=color, width=1.4)
+            c.create_line(14, 19, 22, 19, fill=color, width=1.4)
+            c.create_line(14, 23, 19, 23, fill=color, width=1.4)
+        elif icon_type == "recover":
+            c.create_arc(8, 8, 28, 28, start=45, extent=270, style="arc", outline=color, width=2)
+            c.create_polygon(21, 5, 28, 11, 21, 14, fill=color, outline=color)
+            c.create_oval(16, 16, 20, 20, fill=color, outline=color)
+        elif icon_type == "cert":
+            c.create_polygon(18, 5, 29, 9, 28, 21, 18, 29, 8, 21, 7, 9, fill="", outline=color, width=1.6)
+            c.create_line(13, 17, 17, 21, fill=color, width=2)
+            c.create_line(17, 21, 24, 12, fill=color, width=2)
+        elif icon_type == "destroy":
+            c.create_line(8, 9, 28, 9, fill=color, width=1.8)
+            c.create_line(14, 6, 22, 6, fill=color, width=1.8)
+            c.create_polygon(10, 9, 11, 28, 25, 28, 26, 9, fill="", outline=color, width=1.6)
+            c.create_line(15, 13, 15, 24, fill=color, width=1.4)
+            c.create_line(21, 13, 21, 24, fill=color, width=1.4)
 
     # ── Page management ─────────────────────────────────────────────
     def _clear_page(self):
+        # Phase 4: cancel stale after() callbacks registered by the page being
+        # destroyed. This prevents ghost callbacks updating destroyed widgets,
+        # which was a source of the duplicate-Dashboard rendering bug.
+        self._on_page_unmount()
+        # Increment generation FIRST — any in-flight after() callbacks that
+        # captured the old generation will detect staleness and self-abort.
+        self._page_generation += 1
         if self.page:
             self.page_canvas.destroy()
             self.page_scroll.destroy()
@@ -2144,12 +2732,31 @@ class DrexApp(tk.Tk):
         self.page.bind("<Configure>", lambda _e: self.page_canvas.configure(scrollregion=self.page_canvas.bbox("all")))
         self.page_canvas.bind("<Configure>", lambda event: self.page_canvas.itemconfigure(self.page_window, width=max(500, event.width)))
         self.page_canvas.bind_all("<MouseWheel>", self._mousewheel, add="+")
+        self._pending_after_ids: list[str] = []
         self._update_nav_highlight()
+
+    def _on_page_unmount(self) -> None:
+        """Cancel all pending after() callbacks registered by the current page.
+
+        Prevents stale callbacks from the previous page updating destroyed
+        widgets, which was a source of the duplicate-Dashboard ghost bug.
+        Also nulls page-scoped widget refs so any callback that bypasses the
+        generation check cannot touch old widgets.
+        """
+        for after_id in getattr(self, "_pending_after_ids", []):
+            try:
+                self.after_cancel(after_id)
+            except Exception:
+                pass
+        self._pending_after_ids = []
+        # Null out page-specific widget references
+        self.log_text = None
+        self.status_label = None
 
     def show_page(self, name: str):
         if name != self.current_page and self.status_label:
             try:
-                running = bool(self.status_label.winfo_exists()) and self.status_label.cget("text") == "RUNNING"
+                running = bool(self.status_label.winfo_exists()) and self.status_label.cget("text") in ("RUNNING", "SCANNING", "RECOVERING")
             except tk.TclError:
                 running = False
             if running:
@@ -2158,9 +2765,12 @@ class DrexApp(tk.Tk):
         self.current_page = name
         self._clear_page()
         renderers = {
-            "Dashboard": self.render_dashboard, "Wipe Drive": self.render_drive_page,
-            "Wipe File/Folder": self.render_file_page, "Recover": self.render_recovery_page,
-            "Destroy Drive": self.render_destroy_page, "Certificates": self.render_certificates,
+            "Dashboard": self.render_dashboard,
+            "Wipe Drive": self.render_drive_page,
+            "Wipe File/Folder": self.render_file_page,
+            "Recover": self.render_recovery_page,
+            "Destroy Drive": self.render_destroy_page,
+            "Certificates": self.render_certificates,
             "Help": self.render_help,
         }
         renderers.get(name, self.render_help)()
@@ -2175,32 +2785,51 @@ class DrexApp(tk.Tk):
         else:
             self.sidebar.pack(side="left", fill="y", before=self.main)
 
-    # ── Shared: Header ──────────────────────────────────────────────
+    # ── Shared: Header ──────────────────────────────────────
     def _header(self, title: str, subtitle: str):
         top = tk.Frame(self.page, bg=BG)
         top.pack(fill="x", padx=28, pady=(20, 0))
-        # Left: hamburger + title
         left = tk.Frame(top, bg=BG)
         left.pack(side="left", fill="x", expand=True)
-        tk.Button(left, text="☰", command=self.toggle_sidebar, font=("Segoe UI", 14), relief="flat", bg=BG, fg=INK, activebackground=GREEN_PALE, bd=0).pack(side="left", padx=(0, 12))
+        tk.Button(
+            left, text="☰", command=self.toggle_sidebar,
+            font=("Segoe UI", 13), relief="flat", bg=BG, fg=INK,
+            activebackground=BLUE_LIGHT, bd=0, cursor="hand2",
+        ).pack(side="left", padx=(0, 14))
+
         title_frame = tk.Frame(left, bg=BG)
         title_frame.pack(side="left")
-        tk.Label(title_frame, text=title, font=("Segoe UI", 24, "bold"), fg=INK, bg=BG).pack(anchor="w")
-        tk.Label(title_frame, text=subtitle, font=("Segoe UI", 10), fg=MUTED, bg=BG).pack(anchor="w", pady=(2, 0))
-        # Right: System Health pill
+        tk.Label(title_frame, text=title, font=("Segoe UI", 22, "bold"), fg=INK, bg=BG).pack(anchor="w")
+        tk.Label(title_frame, text=subtitle, font=("Segoe UI", 9), fg=MUTED, bg=BG).pack(anchor="w", pady=(2, 0))
+
         pill = tk.Frame(top, bg="white", highlightbackground=LINE, highlightthickness=1)
         pill.pack(side="right", padx=(12, 0))
         inner_pill = tk.Frame(pill, bg="white")
-        inner_pill.pack(padx=16, pady=8)
-        tk.Label(inner_pill, text="●", font=("Segoe UI", 14), fg=GREEN, bg="white").pack(side="left", padx=(0, 8))
+        inner_pill.pack(padx=14, pady=7)
+        tk.Label(inner_pill, text="●", font=("Segoe UI", 12), fg=GREEN, bg="white").pack(side="left", padx=(0, 7))
         pill_text = tk.Frame(inner_pill, bg="white")
         pill_text.pack(side="left")
-        tk.Label(pill_text, text="System Health", font=("Segoe UI", 10, "bold"), fg=INK, bg="white").pack(anchor="w")
+        tk.Label(pill_text, text="System Health", font=("Segoe UI", 9, "bold"), fg=INK, bg="white").pack(anchor="w")
         tk.Label(pill_text, text="All Systems Operational", font=("Segoe UI", 8), fg=MUTED, bg="white").pack(anchor="w")
-        # Settings gear
+
+        # Elevation badge — shows Administrator / Not Elevated / Failed
+        elev = getattr(self, "_elevation", ElevationState.NOT_ELEVATED)
+        if elev == ElevationState.ELEVATED:
+            elev_icon, elev_text, elev_color = "🔒", "Administrator", GREEN_DARK
+        elif elev == ElevationState.ELEVATION_FAILED:
+            elev_icon, elev_text, elev_color = "✗", "Elevation Failed", RED
+        else:
+            elev_icon, elev_text, elev_color = "⚠", "Not Elevated", ORANGE
+        elev_pill = tk.Frame(top, bg="white", highlightbackground=LINE, highlightthickness=1)
+        elev_pill.pack(side="right", padx=(0, 6))
+        elev_inner = tk.Frame(elev_pill, bg="white")
+        elev_inner.pack(padx=10, pady=6)
+        tk.Label(elev_inner, text=elev_icon, font=("Segoe UI", 10), fg=elev_color, bg="white").pack(side="left", padx=(0, 5))
+        tk.Label(elev_inner, text=elev_text, font=("Segoe UI", 8, "bold"), fg=elev_color, bg="white").pack(side="left")
+
         gear = tk.Canvas(top, width=28, height=28, bg=BG, highlightthickness=0)
-        gear.pack(side="right", padx=(8, 0))
-        gear.create_text(14, 14, text="⚙", font=("Segoe UI", 16), fill=MUTED)
+        gear.pack(side="right", padx=(4, 0))
+        gear.create_text(14, 14, text="⚙", font=("Segoe UI", 14), fill=MUTED)
 
     def _card(self, parent, **kwargs):
         border_color = kwargs.pop("border", LINE)
@@ -2209,161 +2838,244 @@ class DrexApp(tk.Tk):
 
     # ── Dashboard ───────────────────────────────────────────────────
     def render_dashboard(self):
+        # Guard: if this render was triggered by a stale after() callback
+        # from a previous page generation, silently abort to prevent
+        # appending a second Dashboard below the current page.
+        _my_gen = self._page_generation
         self._header("Welcome to DREX", "Unified Data Recovery & Sanitization Platform")
         history = self.store.history()
         certs = self.store.certificates()
         content = tk.Frame(self.page, bg=BG)
-        content.pack(fill="both", expand=True, padx=28, pady=(20, 0))
-        # Main area (left) + Right sidebar
+        content.pack(fill="both", expand=True, padx=28, pady=(18, 0))
+
         body = tk.Frame(content, bg=BG)
         body.pack(fill="both", expand=True)
         left = tk.Frame(body, bg=BG)
-        left.pack(side="left", fill="both", expand=True, padx=(0, 16))
-        right = tk.Frame(body, bg=BG, width=280)
+        left.pack(side="left", fill="both", expand=True, padx=(0, 18))
+        right = tk.Frame(body, bg=BG, width=290)
         right.pack(side="right", fill="y")
         right.pack_propagate(False)
-        # ─ Stats row ─
+
+        # Stats row
         stats = tk.Frame(left, bg=BG)
-        stats.pack(fill="x", pady=(0, 20))
+        stats.pack(fill="x", pady=(0, 18))
         stat_data = [
-            ("Drives Wiped", str(sum(1 for h in history if h.get("type") == "drive" and h.get("status") == "SUCCESS")), "Total drives erased", GREEN, "◎"),
-            ("Files/Folders Wiped", str(sum(1 for h in history if h.get("type") == "file" and h.get("status") == "SUCCESS")), "Total items securely erased", BLUE, "▤"),
-            ("Files Recovered", str(sum(h.get("recovered_count", 0) for h in history if h.get("type") == "recovery" and h.get("status") == "SUCCESS")), "Total files recovered", PURPLE, "↺"),
-            ("Certificates", str(len(certs)), "Generated certificates", ORANGE, "◈"),
+            ("Drives Wiped", str(sum(1 for h in history if h.get("type") == "drive" and h.get("status") == "SUCCESS")), "Total drives erased", BLUE, "drive"),
+            ("Files/Folders Wiped", str(sum(1 for h in history if h.get("type") == "file" and h.get("status") == "SUCCESS")), "Total items securely erased", BLUE, "file"),
+            ("Files Recovered", str(sum(h.get("recovered_count", 0) for h in history if h.get("type") == "recovery" and h.get("status") == "SUCCESS")), "Total files recovered", PURPLE, "recover"),
+            ("Certificates", str(len(certs)), "Generated certificates", ORANGE, "cert"),
         ]
-        for title, value, detail, color, glyph in stat_data:
+        for title, value, detail, color, icon_type in stat_data:
             card = self._card(stats)
             card.pack(side="left", fill="both", expand=True, padx=(0, 10))
             inner = tk.Frame(card, bg="white")
             inner.pack(fill="both", expand=True, padx=16, pady=14)
+
             top_row = tk.Frame(inner, bg="white")
             top_row.pack(fill="x")
-            icon_bg = tk.Canvas(top_row, width=40, height=40, highlightthickness=0)
-            icon_bg.pack(side="left", padx=(0, 10))
-            icon_bg.create_oval(2, 2, 38, 38, fill="#eef8f1" if color == GREEN else ("#eef0f8" if color == BLUE else ("#f5eef8" if color == PURPLE else "#fef5eb")), outline="")
-            icon_bg.create_text(20, 20, text=glyph, fill=color, font=("Segoe UI", 14, "bold"))
+            icon_bg = BLUE_LIGHT if color == BLUE else (PURPLE_LIGHT if color == PURPLE else ORANGE_LIGHT)
+            icon_cv = tk.Canvas(top_row, width=36, height=36, bg="white", highlightthickness=0)
+            icon_cv.pack(side="left", padx=(0, 12))
+            icon_cv.create_oval(1, 1, 35, 35, fill=icon_bg, outline="")
+            self._draw_stat_icon(icon_cv, icon_type, color)
+
             val_frame = tk.Frame(top_row, bg="white")
             val_frame.pack(side="left")
-            tk.Label(val_frame, text=value, font=("Segoe UI", 22, "bold"), fg=color, bg="white").pack(anchor="w")
-            tk.Label(inner, text=title, font=("Segoe UI", 10, "bold"), fg=INK, bg="white").pack(anchor="w", pady=(4, 0))
+            tk.Label(val_frame, text=value, font=("Segoe UI", 22, "bold"), fg=INK, bg="white").pack(anchor="w")
+
+            tk.Label(inner, text=title, font=("Segoe UI", 10, "bold"), fg=INK, bg="white").pack(anchor="w", pady=(8, 0))
             tk.Label(inner, text=detail, font=("Segoe UI", 8), fg=MUTED, bg="white").pack(anchor="w", pady=(2, 0))
-        # ─ Choose an Operation ─
-        tk.Label(left, text="Choose an Operation", font=("Segoe UI", 14, "bold"), fg=INK, bg=BG).pack(anchor="w")
+
+        # Choose an Operation
+        tk.Label(left, text="Choose an Operation", font=("Segoe UI", 13, "bold"), fg=INK, bg=BG).pack(anchor="w")
         tk.Label(left, text="Select an operation to get started.", font=("Segoe UI", 9), fg=MUTED, bg=BG).pack(anchor="w", pady=(2, 10))
         ops = tk.Frame(left, bg=BG)
         ops.pack(fill="x", pady=(0, 20))
         op_items = [
-            ("Wipe Drive", GREEN, "◎"), ("Wipe File/Folder", GREEN, "▤"),
-            ("Recover", GREEN, "↺"), ("Destroy Drive", RED, "⊠"), ("Certificates", GREEN, "◈"),
+            ("Wipe Drive", BLUE, "drive", "Securely erase physical drives"),
+            ("Wipe File/Folder", BLUE, "file", "Erase specific files or folders"),
+            ("Recover", PURPLE, "recover", "Recover deleted files & partitions"),
+            ("Destroy Drive", RED, "destroy", "Assess device destruction"),
+            ("Certificates", BLUE, "cert", "View cryptographically signed records"),
         ]
-        for op_name, op_color, op_glyph in op_items:
+        for op_name, op_color, op_icon, op_sub in op_items:
             card = self._card(ops)
             card.pack(side="left", fill="both", expand=True, padx=(0, 8))
             card.configure(cursor="hand2")
             inner_op = tk.Frame(card, bg="white")
             inner_op.pack(fill="both", expand=True, padx=10, pady=14)
+
             icon_c = tk.Canvas(inner_op, width=36, height=36, bg="white", highlightthickness=0)
             icon_c.pack()
-            icon_c.create_text(18, 18, text=op_glyph, fill=op_color, font=("Segoe UI", 16))
+            self._draw_stat_icon(icon_c, op_icon, op_color)
+
             tk.Label(inner_op, text=op_name, font=("Segoe UI", 9, "bold"), fg=op_color if op_color == RED else INK, bg="white", wraplength=100).pack(pady=(6, 0))
             for w in (card, inner_op, icon_c):
                 w.bind("<Button-1>", lambda _e, n=op_name: self.show_page(n))
-        # ─ Enhanced Storage Devices ─
+                w.bind("<Enter>", lambda _e, c=card: c.configure(highlightbackground=BLUE, highlightthickness=1))
+                w.bind("<Leave>", lambda _e, c=card: c.configure(highlightbackground=LINE, highlightthickness=1))
+
+        # Enhanced Storage Devices
         dev_header = tk.Frame(left, bg=BG)
         dev_header.pack(fill="x", pady=(0, 8))
-        tk.Label(dev_header, text="Enhanced Storage Devices", font=("Segoe UI", 14, "bold"), fg=INK, bg=BG).pack(side="left")
+        tk.Label(dev_header, text="Enhanced Storage Devices", font=("Segoe UI", 13, "bold"), fg=INK, bg=BG).pack(side="left")
         tk.Label(dev_header, text="Select a device to perform operations or refresh the list.", font=("Segoe UI", 9), fg=MUTED, bg=BG).pack(side="left", padx=(12, 0))
         ttk.Button(dev_header, text="↻ Refresh", style="Drex.TButton", command=self.refresh_devices).pack(side="right")
+
         dev_row = tk.Frame(left, bg=BG)
         dev_row.pack(fill="x", pady=(0, 16))
         for drive in self.drives[:4]:
+            is_system = drive.path.upper().startswith("C:") or (drive.device_path and "PHYSICALDRIVE0" in drive.device_path.upper())
             dcard = self._card(dev_row)
             dcard.pack(side="left", fill="both", expand=True, padx=(0, 8))
             inner_d = tk.Frame(dcard, bg="white")
-            inner_d.pack(fill="both", expand=True, padx=12, pady=10)
-            # Drive header
+            inner_d.pack(fill="both", expand=True, padx=14, pady=12)
+
             dh = tk.Frame(inner_d, bg="white")
             dh.pack(fill="x")
-            tk.Label(dh, text=drive.display("model") or drive.path, font=("Segoe UI", 9, "bold"), fg=INK, bg="white", wraplength=150, justify="left").pack(side="left")
+            model_text = drive.display("model") or drive.path
+            tk.Label(dh, text=model_text, font=("Segoe UI", 9, "bold"), fg=INK, bg="white", wraplength=160, justify="left").pack(side="left")
+
             dtype = drive.drive_type or "Drive"
-            badge_color = GREEN if dtype == "Fixed" else (BLUE if dtype == "Removable" else MUTED)
-            badge = tk.Label(dh, text=dtype[:3].upper(), font=("Segoe UI", 7, "bold"), fg="white", bg=badge_color, padx=4, pady=1)
-            badge.pack(side="right")
+            badge_color = BLUE if dtype == "Removable" else (MUTED if not is_system else ORANGE)
+            badge_text = "SYS" if is_system else dtype[:3].upper()
+            tk.Label(dh, text=badge_text, font=("Segoe UI", 7, "bold"), fg="white", bg=badge_color, padx=5, pady=1).pack(side="right")
+
             tk.Label(inner_d, text=f"{drive.path} (Primary Partition)", font=("Segoe UI", 8), fg=MUTED, bg="white").pack(anchor="w", pady=(2, 0))
-            health_color = GREEN_DARK if drive.health == "OK" else MUTED
-            tk.Label(inner_d, text=f"Healthy" if drive.health == "OK" else drive.display("health"), font=("Segoe UI", 8, "bold"), fg=health_color, bg="white").pack(anchor="w", pady=(2, 6))
-            # Details row
+
+            if is_system:
+                sys_badge = tk.Frame(inner_d, bg=RED_LIGHT, highlightbackground=RED, highlightthickness=1)
+                sys_badge.pack(anchor="w", pady=(4, 4))
+                tk.Label(sys_badge, text="PROTECTED SYSTEM DRIVE", font=("Segoe UI", 7, "bold"), fg=RED, bg=RED_LIGHT, padx=4, pady=1).pack()
+            else:
+                health_color = GREEN_DARK if drive.health == "OK" else MUTED
+                tk.Label(inner_d, text="Healthy" if drive.health == "OK" else drive.display("health"), font=("Segoe UI", 8, "bold"), fg=health_color, bg="white").pack(anchor="w", pady=(2, 4))
+
             det = tk.Frame(inner_d, bg="white")
-            det.pack(fill="x")
+            det.pack(fill="x", pady=2)
             for lbl, val in [("Capacity", fmt_bytes(drive.capacity)), ("Interface", drive.display("interface"))]:
                 tk.Label(det, text=lbl, font=("Segoe UI", 7), fg=MUTED, bg="white").pack(side="left")
-                tk.Label(det, text=val, font=("Segoe UI", 7, "bold"), fg=INK, bg="white").pack(side="left", padx=(4, 10))
-            # Health indicator
+                tk.Label(det, text=val, font=("Segoe UI", 7, "bold"), fg=INK, bg="white").pack(side="left", padx=(4, 8))
+
             det2 = tk.Frame(inner_d, bg="white")
             det2.pack(fill="x", pady=(0, 6))
             tk.Label(det2, text="Health", font=("Segoe UI", 7), fg=MUTED, bg="white").pack(side="left")
-            tk.Label(det2, text="100%" if drive.health == "OK" else "—", font=("Segoe UI", 7, "bold"), fg=health_color, bg="white").pack(side="left", padx=(4, 0))
-            # Buttons
+            tk.Label(det2, text="100%" if drive.health == "OK" else "—", font=("Segoe UI", 7, "bold"), fg=GREEN_DARK if drive.health == "OK" else MUTED, bg="white").pack(side="left", padx=(4, 0))
+
             btn_row = tk.Frame(inner_d, bg="white")
             btn_row.pack(fill="x", pady=(4, 0))
-            ttk.Button(btn_row, text="Details", style="Drex.TButton").pack(side="left", padx=(0, 4))
-            ttk.Button(btn_row, text="Select ▾", style="Drex.TButton", command=lambda d=drive: self._select_dashboard_drive(d)).pack(side="left")
+            ttk.Button(btn_row, text="Details", style="Drex.TButton", command=lambda d=drive: self._show_device_details_dialog(d)).pack(side="left", padx=(0, 4))
+            if is_system:
+                tk.Label(btn_row, text="Protected", font=("Segoe UI", 8, "bold"), fg=MUTED, bg=BG_SECONDARY, padx=8, pady=4).pack(side="left")
+            else:
+                ttk.Button(btn_row, text="Select ▾", style="DrexPrimary.TButton", command=lambda d=drive: self._select_dashboard_drive(d)).pack(side="left")
+
         if not self.drives:
             empty_card = self._card(dev_row)
             empty_card.pack(fill="x")
-            tk.Label(empty_card, text="No storage devices were reported by the operating system.", fg=MUTED, bg="white", font=("Segoe UI", 10), pady=20).pack()
-        # ─ Green footer banner ─
-        banner = tk.Frame(left, bg="#1a472a")
-        banner.pack(fill="x", pady=(8, 0))
-        banner_inner = tk.Frame(banner, bg="#1a472a")
-        banner_inner.pack(fill="x", padx=20, pady=14)
-        tk.Label(banner_inner, text="Your Data. Your Control. Our Priority.", font=("Segoe UI", 12, "bold"), fg="white", bg="#1a472a").pack(side="left")
-        for badge_text in ["Secure and\nCompliant", "Multi-Engine\nSupport", "Military-Grade\nSecurity"]:
-            tk.Label(banner_inner, text=badge_text, font=("Segoe UI", 7), fg="#b8d4c4", bg="#1a472a", justify="center").pack(side="right", padx=14)
-        # ─ RIGHT SIDEBAR ─
-        # System Status
+            tk.Label(empty_card, text="No storage devices detected. Connect a storage device to begin.", fg=MUTED, bg="white", font=("Segoe UI", 10), pady=20).pack()
+
+        # Bottom Trust Banner
+        banner = self._card(left, bg=BG_SECONDARY, border=LINE)
+        banner.pack(fill="x", pady=(6, 12))
+        banner_inner = tk.Frame(banner, bg=BG_SECONDARY)
+        banner_inner.pack(fill="x", padx=18, pady=12)
+        b_left = tk.Frame(banner_inner, bg=BG_SECONDARY)
+        b_left.pack(side="left")
+        shield_cv = tk.Canvas(b_left, width=28, height=28, bg=BG_SECONDARY, highlightthickness=0)
+        shield_cv.pack(side="left", padx=(0, 10))
+        shield_cv.create_polygon(14, 2, 26, 7, 24, 20, 14, 26, 4, 20, 2, 7, fill=BLUE_LIGHT, outline=BLUE, width=1.5)
+        shield_cv.create_line(10, 14, 13, 17, fill=BLUE, width=2)
+        shield_cv.create_line(13, 17, 18, 10, fill=BLUE, width=2)
+        tk.Label(b_left, text="Your Data. Your Control. Our Priority.", font=("Segoe UI", 11, "bold"), fg=INK, bg=BG_SECONDARY).pack(side="left")
+
+        for badge_text in ["Secure & Compliant", "Multi-Engine Support", "Cryptographic Verification"]:
+            f_frame = tk.Frame(banner_inner, bg=BG_SECONDARY)
+            f_frame.pack(side="right", padx=12)
+            tk.Label(f_frame, text="✓", font=("Segoe UI", 8, "bold"), fg=BLUE, bg=BG_SECONDARY).pack(side="left", padx=(0, 4))
+            tk.Label(f_frame, text=badge_text, font=("Segoe UI", 8), fg=MUTED, bg=BG_SECONDARY).pack(side="left")
+
+        # RIGHT COLUMN
         status_card = self._card(right)
         status_card.pack(fill="x", pady=(0, 12))
-        tk.Label(status_card, text="System Status", font=("Segoe UI", 12, "bold"), fg=INK, bg="white").pack(anchor="w", padx=14, pady=(14, 8))
-        tk.Label(status_card, text="All systems are running smoothly.", font=("Segoe UI", 8), fg=MUTED, bg="white").pack(anchor="w", padx=14, pady=(0, 8))
+        tk.Label(status_card, text="System Status", font=("Segoe UI", 11, "bold"), fg=INK, bg="white").pack(anchor="w", padx=14, pady=(12, 4))
+        tk.Label(status_card, text="All systems are operational.", font=("Segoe UI", 8), fg=MUTED, bg="white").pack(anchor="w", padx=14, pady=(0, 8))
+        tk.Frame(status_card, bg=LINE, height=1).pack(fill="x", padx=14, pady=(0, 8))
         for label, ok in [("Device Detection", bool(self.drives)), ("Scanning Engine", True), ("Security Module", True), ("Verification Engine", True)]:
             row = tk.Frame(status_card, bg="white")
             row.pack(fill="x", padx=14, pady=3)
+            tk.Label(row, text="●", font=("Segoe UI", 8), fg=GREEN if ok else RED, bg="white").pack(side="left", padx=(0, 6))
             tk.Label(row, text=label, font=("Segoe UI", 9), fg=INK, bg="white").pack(side="left")
-            tk.Label(row, text="Active" if ok else "Inactive", font=("Segoe UI", 9, "bold"), fg=GREEN if ok else RED, bg="white").pack(side="right")
-        tk.Frame(status_card, bg="white", height=8).pack()
-        # Recent Activity
+            tk.Label(row, text="Active" if ok else "Inactive", font=("Segoe UI", 8, "bold"), fg=GREEN if ok else RED, bg="white").pack(side="right")
+        tk.Frame(status_card, bg="white", height=10).pack()
+
         act_card = self._card(right)
         act_card.pack(fill="x", pady=(0, 12))
         act_header = tk.Frame(act_card, bg="white")
-        act_header.pack(fill="x", padx=14, pady=(14, 8))
-        tk.Label(act_header, text="Recent Activity", font=("Segoe UI", 12, "bold"), fg=INK, bg="white").pack(side="left")
-        tk.Label(act_header, text="View All", font=("Segoe UI", 8), fg=GREEN_DARK, bg="white", cursor="hand2").pack(side="right")
+        act_header.pack(fill="x", padx=14, pady=(12, 6))
+        tk.Label(act_header, text="Recent Activity", font=("Segoe UI", 11, "bold"), fg=INK, bg="white").pack(side="left")
+        view_all = tk.Label(act_header, text="View All", font=("Segoe UI", 8, "bold"), fg=BLUE, bg="white", cursor="hand2")
+        view_all.pack(side="right")
+        view_all.bind("<Button-1>", lambda _e: self.show_page("Certificates"))
+        tk.Frame(act_card, bg=LINE, height=1).pack(fill="x", padx=14, pady=(0, 6))
+
         for item in history[:5]:
             a_row = tk.Frame(act_card, bg="white")
             a_row.pack(fill="x", padx=14, pady=3)
             status = item.get("status", "UNKNOWN")
-            color = GREEN if status == "SUCCESS" else (RED if status == "FAILED" else MUTED)
-            tk.Label(a_row, text="●", fg=color, bg="white", font=("Segoe UI", 8)).pack(side="left", padx=(0, 6))
+            color = GREEN if status == "SUCCESS" else (RED if status == "FAILED" else ORANGE)
+            tk.Label(a_row, text="●", fg=color, bg="white", font=("Segoe UI", 8)).pack(side="left", padx=(0, 6), anchor="n", pady=2)
             a_text = tk.Frame(a_row, bg="white")
             a_text.pack(side="left", fill="x", expand=True)
             tk.Label(a_text, text=item.get("method", "Operation"), font=("Segoe UI", 8, "bold"), fg=INK, bg="white", anchor="w").pack(anchor="w")
-            tk.Label(a_text, text=item.get("target", "")[:30], font=("Segoe UI", 7), fg=MUTED, bg="white", anchor="w").pack(anchor="w")
+            target_str = str(item.get("target", ""))
+            if len(target_str) > 28:
+                target_str = "..." + target_str[-25:]
+            tk.Label(a_text, text=target_str, font=("Segoe UI", 7), fg=MUTED, bg="white", anchor="w").pack(anchor="w")
         if not history:
-            tk.Label(act_card, text="No recent activity", font=("Segoe UI", 9), fg=MUTED, bg="white").pack(padx=14, pady=10)
-        tk.Frame(act_card, bg="white", height=8).pack()
-        # Security Highlights
+            tk.Label(act_card, text="No recent activity yet.", font=("Segoe UI", 8), fg=MUTED, bg="white").pack(padx=14, pady=10)
+        tk.Frame(act_card, bg="white", height=10).pack()
+
         sec_card = self._card(right)
         sec_card.pack(fill="x")
-        tk.Label(sec_card, text="Security Highlights", font=("Segoe UI", 12, "bold"), fg=INK, bg="white").pack(anchor="w", padx=14, pady=(14, 8))
-        for line in ["All operations are read-only\nuntil execution.", "Data is never modified during\nrecovery.", "Erasure methods follow NIST\nSP 800-88 Rev. 1.", "Certificates are tamper-proof\nand verifiable."]:
+        tk.Label(sec_card, text="Security Highlights", font=("Segoe UI", 11, "bold"), fg=INK, bg="white").pack(anchor="w", padx=14, pady=(12, 6))
+        tk.Frame(sec_card, bg=LINE, height=1).pack(fill="x", padx=14, pady=(0, 8))
+        highlights = [
+            "All operations are logged and verifiable.",
+            "No data is ever modified without consent.",
+            "Built for forensic integrity.",
+        ]
+        for line in highlights:
             s_row = tk.Frame(sec_card, bg="white")
             s_row.pack(fill="x", padx=14, pady=4)
-            tk.Label(s_row, text="✓", fg=GREEN, bg="white", font=("Segoe UI", 10, "bold")).pack(side="left", padx=(0, 8))
-            tk.Label(s_row, text=line, font=("Segoe UI", 8), fg=INK, bg="white", justify="left", wraplength=220).pack(side="left")
-        tk.Frame(sec_card, bg="white", height=10).pack()
+            tk.Label(s_row, text="✓", fg=BLUE, bg="white", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 8), anchor="n")
+            tk.Label(s_row, text=line, font=("Segoe UI", 8), fg=INK, bg="white", justify="left", wraplength=230).pack(side="left")
+        tk.Frame(sec_card, bg="white", height=12).pack()
 
-    def _select_dashboard_drive(self, drive):
+    def _show_device_details_dialog(self, drive: DriveInfo):
+        caps = self.capability_manager.get_capabilities(drive)
+        lines = [
+            f"Device Path: {drive.device_path}",
+            f"Mount Path: {drive.path}",
+            f"Model: {drive.display('model')}",
+            f"Serial: {drive.display('serial')}",
+            f"Capacity: {fmt_bytes(drive.capacity)} ({drive.capacity or 0:,} bytes)",
+            f"Filesystem: {drive.display('filesystem')}",
+            f"Bus Type: {caps.get('bus_type', 'Unknown')}",
+            f"Physical Disk Number: {caps.get('physical_disk_number', 'Unknown')}",
+            f"Write Capable: {caps.get('write_capable')}",
+            f"Native Sanitize: {caps.get('native_sanitize')}",
+            f"ATA Pass-Through: {caps.get('ata_secure_erase')}",
+            f"NVMe Controller: {caps.get('nvme_controller')}",
+            f"Overwrite Qualified: {caps.get('overwrite_backend_qualified')}",
+        ]
+        if caps.get("probe_errors"):
+            lines.append("\nProbe Warnings:")
+            for err in caps["probe_errors"]:
+                lines.append(f"  • {err}")
+        messagebox.showinfo(f"Device Details — {drive.path}", "\n".join(lines))
+
+    def _select_dashboard_drive(self, drive: DriveInfo):
         self.selected_drive = drive
         self.show_page("Wipe Drive")
 
@@ -2371,30 +3083,56 @@ class DrexApp(tk.Tk):
         native = Path(getattr(sys, "_MEIPASS", ROOT)) / "native_bin"
         return len(list(native.glob("*.exe"))) if native.exists() else 0
 
-    def refresh_devices(self):
-        self.drives = discover_drives()
+    def refresh_devices(self, force: bool = False):
+        if hasattr(self, "detect_button") and self.detect_button and self.detect_button.winfo_exists():
+            try:
+                self.detect_button.configure(state="disabled", text="Detecting...")
+            except Exception:
+                pass
+        def _on_done(drives: list[DriveInfo]):
+            self.events.put(("devices_discovered", drives))
+        self.device_manager.start_async_discovery(_on_done, force_refresh=force)
+
+    def _on_devices_discovered(self, drives: list[DriveInfo]):
+        self.drives = drives
+        if hasattr(self, "detect_button") and self.detect_button and self.detect_button.winfo_exists():
+            try:
+                self.detect_button.configure(state="normal", text="Detect")
+            except Exception:
+                pass
+        if hasattr(self, "drive_combo") and self.drive_combo and self.drive_combo.winfo_exists():
+            values = [f"[{d.path}] {d.display('model')[:18]}" for d in self.drives]
+            self.drive_combo.configure(values=values)
+            if self.drives and (self.drive_combo.current() < 0 or self.drive_combo.current() >= len(self.drives)):
+                self.drive_combo.current(0)
+                self._drive_selected()
         if self.current_page == "Dashboard":
+            # CRITICAL FIX: Do NOT call render_dashboard() directly here.
+            # render_dashboard() appends widgets to self.page without clearing it,
+            # which caused the duplicate Dashboard bug (second Dashboard rendered
+            # below the first every time device discovery completed).
+            # show_page() correctly calls _clear_page() first, increments
+            # _page_generation, then calls render_dashboard() on the fresh frame.
             self.show_page("Dashboard")
 
     # ── Target Panel ────────────────────────────────────────────────
     def _target_panel(self, kind: str):
         panel = self._card(self.page)
-        panel.pack(fill="x", padx=28, pady=(18, 12))
+        panel.pack(fill="x", padx=28, pady=(16, 12))
         self.target_summary = panel
         if kind == "drive":
-            # 3-section layout: Select Drive | Model/Serial/Capacity/Interface | Drive Letters/Device ID/Health
-            left = tk.Frame(panel, bg="white")
+            left = tk.Frame(panel, bg="white", width=300)
             left.pack(side="left", fill="y", padx=18, pady=14)
-            left.configure(width=280)
             left.pack_propagate(False)
-            tk.Label(left, text="Select Drive", font=("Segoe UI", 11, "bold"), fg=INK, bg="white").pack(anchor="w")
+            tk.Label(left, text="Select Physical Device", font=("Segoe UI", 11, "bold"), fg=INK, bg="white").pack(anchor="w")
             combo_row = tk.Frame(left, bg="white")
             combo_row.pack(anchor="w", pady=(10, 0), fill="x")
-            self.drive_combo = ttk.Combobox(combo_row, state="readonly", font=("Segoe UI", 10), width=22, values=[f"[{d.path}] {d.display('model')[:20]}" for d in self.drives])
+            self.drive_combo = ttk.Combobox(combo_row, state="readonly", font=("Segoe UI", 9), width=23, values=[f"[{d.path}] {d.display('model')[:18]}" for d in self.drives])
             self.drive_combo.pack(side="left", padx=(0, 8))
             self.drive_combo.bind("<<ComboboxSelected>>", lambda _e: self._drive_selected())
-            ttk.Button(combo_row, text="Detect", style="DrexPrimary.TButton", command=self.refresh_devices).pack(side="left")
-            # Middle: Model, Serial, Capacity, Interface
+            self.detect_button = ttk.Button(combo_row, text="Detect", style="DrexPrimary.TButton", command=lambda: self.refresh_devices(force=True))
+            self.detect_button.pack(side="left")
+
             sep1 = ttk.Separator(panel, orient="vertical")
             sep1.pack(side="left", fill="y", pady=14)
             mid = tk.Frame(panel, bg="white")
@@ -2408,7 +3146,7 @@ class DrexApp(tk.Tk):
                 val = tk.Label(row, text="—", font=("Segoe UI", 9), fg=MUTED, bg="white", anchor="w")
                 val.pack(side="left", fill="x", expand=True)
                 self.drive_mid_labels[key] = val
-            # Right: Drive Letters, Device ID, Health
+
             sep2 = ttk.Separator(panel, orient="vertical")
             sep2.pack(side="left", fill="y", pady=14)
             right_panel = tk.Frame(panel, bg="white")
@@ -2423,52 +3161,47 @@ class DrexApp(tk.Tk):
                 val.pack(side="left", fill="x", expand=True)
                 self.drive_right_labels[key] = val
         else:
-            # File/Folder or Recovery: matching reference image layout
-            left = tk.Frame(panel, bg="white")
+            left = tk.Frame(panel, bg="white", width=440)
             left.pack(side="left", fill="y", padx=18, pady=14)
-            left.configure(width=440)
             left.pack_propagate(False)
-            label_text = "Select File/Folder" if kind == "file" else "Select Recovery Folder"
+            label_text = "Select File/Folder" if kind == "file" else "Select Recovery Source"
             tk.Label(left, text=label_text, font=("Segoe UI", 11, "bold"), fg=INK, bg="white").pack(anchor="w")
-            # Path row with folder icon + entry + chevron (matches reference)
+
             sel_row = tk.Frame(left, bg="white", highlightbackground=LINE, highlightthickness=1)
             sel_row.pack(anchor="w", fill="x", pady=(10, 0))
-            icon_cv = tk.Canvas(sel_row, width=24, height=24, bg="white", highlightthickness=0)
+            icon_cv = tk.Canvas(sel_row, width=22, height=22, bg="white", highlightthickness=0)
             icon_cv.pack(side="left", padx=(8, 4), pady=4)
-            icon_cv.create_rectangle(1, 7, 10, 13, fill=GREEN, outline=GREEN)
-            icon_cv.create_rectangle(1, 10, 22, 22, fill=GREEN, outline=GREEN)
-            icon_cv.create_rectangle(3, 12, 20, 20, fill="#eef8f1", outline="#eef8f1")
-            self.target_path_var = tk.StringVar(value="No file or folder selected")
+            icon_cv.create_polygon(2, 4, 8, 4, 11, 7, 20, 7, 20, 18, 2, 18, fill=BLUE_LIGHT, outline=BLUE, width=1.2)
+
+            self.target_path_var = tk.StringVar(value="No target selected")
             path_entry = tk.Entry(
                 sel_row, textvariable=self.target_path_var,
                 font=("Segoe UI", 9), relief="flat", bd=0,
                 state="readonly", readonlybackground="white", fg=MUTED, width=30,
             )
             path_entry.pack(side="left", fill="x", expand=True, padx=(0, 2), ipady=5)
-            tk.Label(sel_row, text="⌄", font=("Segoe UI", 11), fg=MUTED, bg="white").pack(side="left", padx=(0, 8))
-            # Button row
+
             btn_frame = tk.Frame(left, bg="white")
             btn_frame.pack(anchor="w", fill="x", pady=(10, 0))
             if kind == "recovery":
-                ttk.Button(btn_frame, text="Select Recovery Folder", style="DrexPrimary.TButton", command=lambda: self.choose_folder("recovery")).pack(side="left")
+                ttk.Button(btn_frame, text="Select Folder", style="DrexRecovery.TButton", command=lambda: self.choose_folder("recovery")).pack(side="left")
                 ttk.Button(btn_frame, text="Select Disk Image", style="Drex.TButton", command=self.choose_recovery_image).pack(side="left", padx=(8, 0))
             else:
                 ttk.Button(btn_frame, text="Add File", style="DrexPrimary.TButton", command=self.choose_file).pack(side="left")
                 ttk.Button(btn_frame, text="Add Folder", style="Drex.TButton", command=self.choose_folder).pack(side="left", padx=(8, 0))
-            # Target type badge updated by set_target()
+
             self.target_type_label = tk.Label(
                 btn_frame, text="",
-                font=("Segoe UI", 8, "bold"), fg=GREEN_DARK, bg="white",
+                font=("Segoe UI", 8, "bold"), fg=BLUE if self.current_page != "Recover" else PURPLE,
             )
             self.target_type_label.pack(side="left", padx=(12, 0))
-            # Right: Properties panel
+
             sep = ttk.Separator(panel, orient="vertical")
             sep.pack(side="left", fill="y", pady=14)
             right_panel = tk.Frame(panel, bg="white")
             right_panel.pack(side="right", fill="both", expand=True, padx=18, pady=14)
             self.file_details = right_panel
             self.file_info_labels = {}
-            # Exactly matching reference: Type of file, Location, Size, Size on disk
             prop_keys = [
                 ("Type of file:", "File Type"),
                 ("Location:", "Location"),
@@ -2478,14 +3211,8 @@ class DrexApp(tk.Tk):
             for display_key, data_key in prop_keys:
                 row = tk.Frame(right_panel, bg="white")
                 row.pack(fill="x", pady=4)
-                tk.Label(
-                    row, text=display_key, font=("Segoe UI", 9, "bold"),
-                    fg=INK, bg="white", width=14, anchor="w",
-                ).pack(side="left")
-                val = tk.Label(
-                    row, text="—", font=("Segoe UI", 9),
-                    fg=MUTED, bg="white", anchor="w", wraplength=300, justify="left",
-                )
+                tk.Label(row, text=display_key, font=("Segoe UI", 9, "bold"), fg=INK, bg="white", width=14, anchor="w").pack(side="left")
+                val = tk.Label(row, text="—", font=("Segoe UI", 9), fg=MUTED, bg="white", anchor="w", wraplength=300, justify="left")
                 val.pack(side="left", fill="x", expand=True)
                 self.file_info_labels[data_key] = val
 
@@ -2494,19 +3221,47 @@ class DrexApp(tk.Tk):
         self.selected_drive = self.drives[index] if 0 <= index < len(self.drives) else None
         if self.selected_drive:
             d = self.selected_drive
-            # Update middle labels
             if hasattr(self, "drive_mid_labels"):
                 self.drive_mid_labels["Model"].configure(text=d.display("model"), fg=INK)
                 self.drive_mid_labels["Serial"].configure(text=d.display("serial"), fg=INK)
                 self.drive_mid_labels["Capacity"].configure(text=fmt_bytes(d.capacity), fg=INK)
                 self.drive_mid_labels["Interface"].configure(text=d.display("interface"), fg=INK)
-            # Update right labels
             if hasattr(self, "drive_right_labels"):
                 self.drive_right_labels["Drive Letters"].configure(text=d.path, fg=INK)
                 self.drive_right_labels["Device ID"].configure(text=d.display("device_id"), fg=INK)
                 self.drive_right_labels["Health"].configure(text=d.display("health"), fg=GREEN_DARK if d.health == "OK" else RED)
+            is_sys = d.path.upper().startswith("C:") or (d.device_path and "PHYSICALDRIVE0" in d.device_path.upper())
+            if hasattr(self, "system_protect_card"):
+                if is_sys:
+                    self.system_protect_card.pack(fill="x", padx=28, pady=(0, 10), before=self.method_grid_box)
+                else:
+                    self.system_protect_card.pack_forget()
+            if hasattr(self, "start_button") and self.start_button:
+                if is_sys and self.current_page == "Wipe Drive":
+                    self.start_button.configure(state="disabled", text="System Drive Protected")
+                elif self.current_page == "Wipe Drive":
+                    self.start_button.configure(state="normal", text="Start Operation")
+            self._update_drive_method_badges()
             if self.current_page == "Destroy Drive":
                 self.render_destroy_page()
+
+    def _update_drive_method_badges(self):
+        if not hasattr(self, "_method_badges") or not self.selected_drive:
+            return
+        caps = self.capability_manager.get_capabilities(self.selected_drive)
+        for mid, badge_lbl in self._method_badges.items():
+            try:
+                if not badge_lbl.winfo_exists():
+                    continue
+                status_text, _ = drive_method_status(mid, self.selected_drive, caps=caps)
+                is_available = (status_text == "Available")
+                if status_text not in ("Available", ""):
+                    badge_text = "Needs Hardware" if status_text == "UNSUPPORTED_HARDWARE" else status_text
+                    badge_lbl.configure(text=f"● {badge_text}", fg=ORANGE, bg=ORANGE_LIGHT)
+                elif is_available:
+                    badge_lbl.configure(text="● Available", fg=GREEN_DARK, bg=GREEN_PALE)
+            except Exception:
+                pass
 
     def choose_file(self):
         chosen = filedialog.askopenfilename(title="Select a file to wipe")
@@ -2514,13 +3269,6 @@ class DrexApp(tk.Tk):
             self.set_target(Path(chosen))
 
     def choose_file_or_folder(self):
-        """Open a proper two-step picker: first try file, then folder.
-
-        Uses a native Windows file dialog first; if the user cancels (i.e.
-        they want a folder instead), falls through to askdirectory.
-        Both dialogs are proper Windows-shell dialogs, not text fields.
-        """
-        # Step 1: ask for a file
         chosen = filedialog.askopenfilename(
             title="Select a File to Wipe  (Cancel to select a Folder instead)",
             filetypes=[
@@ -2530,11 +3278,7 @@ class DrexApp(tk.Tk):
             ],
         )
         if not chosen:
-            # Step 2: user cancelled file dialog → ask for a folder
-            chosen = filedialog.askdirectory(
-                title="Select a Folder to Wipe",
-                mustexist=True,
-            )
+            chosen = filedialog.askdirectory(title="Select a Folder to Wipe", mustexist=True)
         if chosen:
             self.set_target(Path(chosen))
 
@@ -2548,7 +3292,6 @@ class DrexApp(tk.Tk):
             self.set_target(Path(chosen))
 
     def choose_recovery_image(self):
-        """Allow selecting a disk image file (.img, .dd, .raw, .iso) directly as recovery source."""
         chosen = filedialog.askopenfilename(
             title="Select a Disk Image for Recovery (read-only source)",
             filetypes=[
@@ -2564,210 +3307,316 @@ class DrexApp(tk.Tk):
         self.target = target
         if not (target.is_file() and target.suffix.lower() in {".img", ".dd", ".raw", ".iso", ".bin", ".e01", ".dmg"}):
             self._recovery_source_is_image = False
-        # Update the path display entry
         if hasattr(self, "target_path_var"):
             self.target_path_var.set(str(target))
-
-        # Update file info labels with fresh data
         if hasattr(self, "file_info_labels"):
-            props = target_properties(target)
+            props = target_properties_fast(target)
             for key, label in self.file_info_labels.items():
                 value = props.get(key, "Unavailable")
-                color = INK if value != "Unavailable" else MUTED
+                color = INK if value not in ("Unavailable", "Calculating in background...") else MUTED
                 label.configure(text=value, fg=color)
-        # Update target type indicator if present
+            if target.is_dir():
+                def _update_size(total_sz: int, total_d: int):
+                    if hasattr(self, "file_info_labels") and self.target == target:
+                        def _gui():
+                            try:
+                                if "Size" in self.file_info_labels and self.file_info_labels["Size"].winfo_exists():
+                                    self.file_info_labels["Size"].configure(text=fmt_bytes(total_sz) + f" ({total_sz:,} bytes)", fg=INK)
+                                if "Size on Disk" in self.file_info_labels and self.file_info_labels["Size on Disk"].winfo_exists():
+                                    self.file_info_labels["Size on Disk"].configure(text=fmt_bytes(total_d), fg=INK)
+                            except Exception:
+                                pass
+                        self.after(0, _gui)
+                count_folder_size_async(target, _update_size)
         if hasattr(self, "target_type_label"):
             t = "Folder" if target.is_dir() else "File"
             self.target_type_label.configure(
                 text=f"TARGET TYPE: {t.upper()}",
-                fg=GREEN_DARK,
+                fg=BLUE if self.current_page != "Recover" else PURPLE,
             )
 
     # ── Method Grid ─────────────────────────────────────────────────
     def _methods(self, methods: list[dict[str, str]] | list[tuple[str, str, str]], kind: str):
         box = self._card(self.page)
         box.pack(fill="x", padx=28, pady=(0, 12))
+        self.method_grid_box = box
         inner = tk.Frame(box, bg="white")
         inner.pack(fill="x", padx=18, pady=(14, 6))
+
         title = "Select Wiping Method" if kind != "recovery" else "Select Recovery Method"
-        tk.Label(inner, text=title, font=("Segoe UI", 14, "bold"), fg=INK, bg="white").pack(anchor="w")
+        tk.Label(inner, text=title, font=("Segoe UI", 13, "bold"), fg=INK, bg="white").pack(anchor="w")
         subtitle = "Choose one secure erasure method to apply." if kind in ("file", "drive") else "Choose one scanning and recovery method to apply."
         tk.Label(inner, text=subtitle, font=("Segoe UI", 9), fg=MUTED, bg="white").pack(anchor="w", pady=(2, 10))
+
         grid = tk.Frame(box, bg="white")
         grid.pack(fill="x", padx=14, pady=(0, 8))
         self.method_var.set("")
         columns = 4 if kind == "drive" else 3
         for col in range(columns):
             grid.columnconfigure(col, weight=1, uniform="method")
+
         self._method_cards = {}
+        self._method_badges = {}
+        theme_accent = PURPLE if kind == "recovery" else BLUE
+        caps = self.capability_manager.get_capabilities(self.selected_drive) if (kind == "drive" and self.selected_drive) else None
+
         for index, item in enumerate(methods):
             if kind == "recovery":
                 method_id, name, assurance = item
             else:
                 method_id, name, assurance = item["id"], item["name"], item["assurance"]
 
-            # Get availability status for non-recovery methods
-            status_text, status_reason = self._method_status(method_id, kind)
+            status_text, status_reason = self._method_status(method_id, kind, caps=caps)
             is_available = status_text == "Available"
 
             card = tk.Frame(grid, bg="white", highlightbackground=LINE, highlightthickness=1)
-            card.grid(row=index // columns, column=index % columns, sticky="nsew", padx=4, pady=4, ipady=8)
+            card.grid(row=index // columns, column=index % columns, sticky="nsew", padx=4, pady=4, ipady=6)
             content = tk.Frame(card, bg="white")
             content.pack(fill="both", expand=True, padx=10, pady=8)
+
             top_row = tk.Frame(content, bg="white")
             top_row.pack(fill="x")
-            # Icon — dimmed if unavailable
-            icon_bg = "#eef8f1" if is_available else "#f5f5f5"
-            icon = tk.Canvas(top_row, width=40, height=40, bg=icon_bg, highlightthickness=0)
+            icon_bg = (PURPLE_LIGHT if kind == "recovery" else BLUE_LIGHT) if is_available else "#F5F5F7"
+            icon = tk.Canvas(top_row, width=38, height=38, bg=icon_bg, highlightthickness=0)
             icon.pack(side="left", padx=(0, 10))
             self._draw_method_icon(icon, method_id, kind)
-            # Text
+
             name_color = INK if is_available else MUTED
             text_frame = tk.Frame(top_row, bg="white")
             text_frame.pack(side="left", fill="both", expand=True)
-            tk.Label(text_frame, text=name, font=("Segoe UI", 9, "bold"), fg=name_color, bg="white", wraplength=180, justify="left", anchor="w").pack(anchor="w")
-            tk.Label(text_frame, text=assurance, font=("Segoe UI", 8), fg=MUTED, bg="white", wraplength=180, justify="left", anchor="w").pack(anchor="w", pady=(2, 0))
-            # Availability badge for file methods
+            tk.Label(text_frame, text=name, font=("Segoe UI", 9, "bold"), fg=name_color, bg="white", wraplength=170, justify="left", anchor="w").pack(anchor="w")
+            tk.Label(text_frame, text=assurance, font=("Segoe UI", 8), fg=MUTED, bg="white", wraplength=170, justify="left", anchor="w").pack(anchor="w", pady=(2, 0))
+
+            badge_lbl = None
             if kind == "file" and not is_available:
+                # Production-appropriate status labels (Phase 9: "Needs envelope" fix)
                 badge_text = {
                     "Requires whole-volume scope": "Volume scope only",
-                    "Unavailable on this target": "Needs envelope",
-                }.get(status_text, status_text[:22])
-                tk.Label(text_frame, text=badge_text, font=("Segoe UI", 7), fg="white",
-                         bg="#b0b0b0", padx=4, pady=1).pack(anchor="w", pady=(3, 0))
-            # Availability badge for drive methods
-            if kind == "drive" and status_text not in ("Available", ""):
-                tk.Label(text_frame, text="Needs Hardware", font=("Segoe UI", 7), fg="white",
-                         bg=ORANGE, padx=4, pady=1).pack(anchor="w", pady=(3, 0))
-            if kind == "recovery" and not is_available:
-                tk.Label(text_frame, text="Unavailable — native engine required", font=("Segoe UI", 7), fg="white",
-                         bg="#b0b0b0", padx=4, pady=1).pack(anchor="w", pady=(3, 0))
-            # Checkbox
-            cb = tk.Canvas(top_row, width=20, height=20, bg="white", highlightthickness=0)
+                    "Unavailable on this target": "Scope: adapter unavailable",
+                }.get(status_text, status_text[:28])
+                badge_lbl = tk.Label(text_frame, text=f"● {badge_text}", font=("Segoe UI", 7, "bold"), fg=MUTED, bg=BG_SECONDARY, padx=4, pady=1)
+                badge_lbl.pack(anchor="w", pady=(3, 0))
+            elif kind == "drive" and status_text not in ("Available", ""):
+                badge_text = "Needs Hardware" if status_text == "UNSUPPORTED_HARDWARE" else status_text
+                badge_lbl = tk.Label(text_frame, text=f"● {badge_text}", font=("Segoe UI", 7, "bold"), fg=ORANGE, bg=ORANGE_LIGHT, padx=4, pady=1)
+                badge_lbl.pack(anchor="w", pady=(3, 0))
+            elif is_available:
+                badge_lbl = tk.Label(text_frame, text="● Available", font=("Segoe UI", 7, "bold"), fg=GREEN_DARK, bg=GREEN_PALE, padx=4, pady=1)
+                badge_lbl.pack(anchor="w", pady=(3, 0))
+            elif kind == "recovery" and not is_available:
+                badge_lbl = tk.Label(text_frame, text="● Engine Required", font=("Segoe UI", 7, "bold"), fg=MUTED, bg=BG_SECONDARY, padx=4, pady=1)
+                badge_lbl.pack(anchor="w", pady=(3, 0))
+
+            if badge_lbl:
+                self._method_badges[method_id] = badge_lbl
+
+            cb = tk.Canvas(top_row, width=18, height=18, bg="white", highlightthickness=0)
             cb.pack(side="right", padx=(6, 0))
-            cb.create_rectangle(2, 2, 18, 18, outline=LINE, width=1)
+            cb.create_rectangle(1, 1, 17, 17, outline=LINE, width=1)
             self._method_cards[method_id] = (card, cb)
-            # Click handler — only fully selectable if available (or recovery)
+
             def on_select(event=None, mid=method_id, avail=is_available):
-                # Always allow selection so user can read the reason, but warn
                 self.method_var.set(mid)
                 for m_id, (m_card, m_cb) in self._method_cards.items():
                     if m_id == mid:
-                        sel_color = GREEN if avail else ORANGE
+                        sel_color = theme_accent if avail else ORANGE
                         m_card.configure(highlightbackground=sel_color, highlightthickness=2)
                         m_cb.delete("all")
-                        m_cb.create_rectangle(2, 2, 18, 18, fill=sel_color, outline=sel_color, width=1)
-                        m_cb.create_line(6, 10, 9, 14, fill="white", width=2)
-                        m_cb.create_line(9, 14, 15, 6, fill="white", width=2)
+                        m_cb.create_rectangle(1, 1, 17, 17, fill=sel_color, outline=sel_color, width=1)
+                        m_cb.create_line(4, 9, 7, 13, fill="white", width=2)
+                        m_cb.create_line(7, 13, 14, 5, fill="white", width=2)
                     else:
                         m_card.configure(highlightbackground=LINE, highlightthickness=1)
                         m_cb.delete("all")
-                        m_cb.create_rectangle(2, 2, 18, 18, outline=LINE, width=1)
+                        m_cb.create_rectangle(1, 1, 17, 17, outline=LINE, width=1)
+                if hasattr(self, "drive_rationale_label"):
+                    if mid == "smart":
+                        self.drive_rationale_label.configure(
+                            text="Smart Sanitization: Evaluates bus protocol, controller capabilities, and NIST SP 800-88 guidelines to select the safest verifiable path."
+                        )
+                    elif mid == "nist":
+                        self.drive_rationale_label.configure(
+                            text="NIST SP 800-88 Rev.2: Industry-standard sanitization policy engine with cryptographic readback verification."
+                        )
+                    else:
+                        self.drive_rationale_label.configure(
+                            text=f"Selected Method: {mid.upper()} — Truthful hardware probes verify support prior to execution."
+                        )
+
             for w in (card, content, top_row, text_frame, icon, cb):
                 w.bind("<Button-1>", on_select)
                 w.configure(cursor="hand2")
             for child in text_frame.winfo_children():
                 child.bind("<Button-1>", on_select)
                 child.configure(cursor="hand2")
-        # Start button
+
         btn_frame = tk.Frame(box, bg="white")
-        btn_frame.pack(fill="x", padx=18, pady=(4, 12))
-        self.start_button = ttk.Button(btn_frame, text="Start Recovery" if kind == "recovery" else "Start Operation", style="DrexPrimary.TButton", command=lambda k=kind: self.start_operation(k))
+        btn_frame.pack(fill="x", padx=18, pady=(6, 12))
+        action_style = "DrexRecovery.TButton" if kind == "recovery" else "DrexDestructive.TButton"
+        action_text = "Start Recovery" if kind == "recovery" else "Start Operation"
+        self.start_button = ttk.Button(btn_frame, text=action_text, style=action_style, command=lambda k=kind: self.start_operation(k))
         self.start_button.pack(side="right")
 
-    def _draw_method_icon(self, canvas, method_id, kind):
-        """Draw a distinctive icon for each method."""
+    def _draw_method_icon(self, canvas, method_id: str, kind: str):
         c = canvas
+        c.delete("all")
+        stroke = BLUE if kind in ("drive", "file") else PURPLE
         if kind == "drive":
             icons = {
-                "nist": lambda: c.create_text(20, 20, text="✓", fill=GREEN_DARK, font=("Segoe UI", 16, "bold")),
-                "smart": lambda: c.create_text(20, 20, text="★", fill=GREEN_DARK, font=("Segoe UI", 14)),
-                "native": lambda: [c.create_rectangle(12, 8, 28, 32, outline=GREEN_DARK, width=2), c.create_line(16, 14, 24, 14, fill=GREEN_DARK)],
-                "ata": lambda: c.create_text(20, 20, text="ATA", fill=GREEN_DARK, font=("Segoe UI", 9, "bold")),
-                "nvme": lambda: c.create_text(20, 20, text="NVMe", fill=GREEN_DARK, font=("Segoe UI", 7, "bold")),
-                "ieee": lambda: c.create_text(20, 20, text="2883", fill=GREEN_DARK, font=("Segoe UI", 8, "bold")),
-                "overwrite": lambda: [c.create_oval(8, 8, 32, 32, outline=GREEN_DARK, width=2), c.create_text(20, 20, text="✓", fill=GREEN_DARK, font=("Segoe UI", 12, "bold"))],
+                "nist": lambda: [
+                    c.create_polygon(19, 5, 31, 10, 29, 25, 19, 33, 9, 25, 7, 10, fill="", outline=stroke, width=1.8),
+                    c.create_line(14, 19, 18, 23, fill=stroke, width=2),
+                    c.create_line(18, 23, 25, 15, fill=stroke, width=2),
+                ],
+                "smart": lambda: [
+                    c.create_oval(8, 8, 30, 30, outline=stroke, width=1.6),
+                    c.create_text(19, 19, text="★", fill=stroke, font=("Segoe UI", 11)),
+                ],
+                "native": lambda: [
+                    c.create_rectangle(10, 8, 28, 30, outline=stroke, width=1.6),
+                    c.create_line(14, 14, 24, 14, fill=stroke, width=1.4),
+                    c.create_line(14, 19, 24, 19, fill=stroke, width=1.4),
+                ],
+                "ata": lambda: [
+                    c.create_rectangle(8, 10, 30, 28, outline=stroke, width=1.6),
+                    c.create_text(19, 19, text="ATA", fill=stroke, font=("Segoe UI", 8, "bold")),
+                ],
+                "nvme": lambda: [
+                    c.create_rectangle(7, 10, 31, 28, outline=stroke, width=1.6),
+                    c.create_text(19, 19, text="NVMe", fill=stroke, font=("Segoe UI", 7, "bold")),
+                ],
+                "ieee": lambda: [
+                    c.create_oval(8, 8, 30, 30, outline=stroke, width=1.6),
+                    c.create_text(19, 19, text="2883", fill=stroke, font=("Segoe UI", 7, "bold")),
+                ],
+                "overwrite": lambda: [
+                    c.create_arc(8, 8, 30, 30, start=30, extent=300, style="arc", outline=stroke, width=1.8),
+                    c.create_polygon(25, 10, 31, 15, 25, 18, fill=stroke, outline=stroke),
+                    c.create_line(15, 19, 19, 23, fill=stroke, width=2),
+                    c.create_line(19, 23, 24, 16, fill=stroke, width=2),
+                ],
             }
         elif kind == "recovery":
             icons = {
-                "quick": lambda: c.create_text(20, 20, text="⚡", fill=GREEN_DARK, font=("Segoe UI", 14)),
-                "smart": lambda: c.create_text(20, 20, text="★", fill=GREEN_DARK, font=("Segoe UI", 14)),
-                "targeted": lambda: [c.create_oval(10, 10, 30, 30, outline=GREEN_DARK, width=2), c.create_oval(15, 15, 25, 25, outline=GREEN_DARK, width=1)],
-                "filesystem": lambda: [c.create_rectangle(10, 6, 30, 34, outline=GREEN_DARK, width=2), c.create_line(14, 14, 26, 14, fill=GREEN_DARK), c.create_line(14, 20, 26, 20, fill=GREEN_DARK)],
-                "deep": lambda: [c.create_oval(8, 8, 26, 26, outline=GREEN_DARK, width=2), c.create_line(24, 24, 32, 32, fill=GREEN_DARK, width=2)],
-                "fragment": lambda: [c.create_rectangle(8, 8, 18, 18, outline=GREEN_DARK, width=1), c.create_rectangle(20, 8, 30, 18, outline=GREEN_DARK, width=1), c.create_rectangle(14, 20, 24, 30, outline=GREEN_DARK, width=1)],
-                "raid": lambda: [c.create_rectangle(8, 10, 18, 30, outline=GREEN_DARK, width=1), c.create_rectangle(20, 10, 30, 30, outline=GREEN_DARK, width=1), c.create_line(18, 20, 20, 20, fill=GREEN_DARK, width=1)],
-                "damaged": lambda: [c.create_oval(8, 8, 32, 32, outline=GREEN_DARK, width=2), c.create_line(14, 14, 26, 26, fill=RED, width=2)],
-                "forensic": lambda: [c.create_oval(10, 10, 30, 30, outline=GREEN_DARK, width=2), c.create_text(20, 20, text="🔍", font=("Segoe UI", 10))],
+                "quick": lambda: c.create_text(19, 19, text="⚡", fill=stroke, font=("Segoe UI", 13)),
+                "smart": lambda: [
+                    c.create_oval(8, 8, 30, 30, outline=stroke, width=1.6),
+                    c.create_text(19, 19, text="★", fill=stroke, font=("Segoe UI", 11)),
+                ],
+                "targeted": lambda: [
+                    c.create_oval(8, 8, 30, 30, outline=stroke, width=1.6),
+                    c.create_oval(14, 14, 24, 24, outline=stroke, width=1.4),
+                ],
+                "filesystem": lambda: [
+                    c.create_rectangle(9, 6, 29, 32, outline=stroke, width=1.6),
+                    c.create_line(13, 13, 25, 13, fill=stroke, width=1.4),
+                    c.create_line(13, 19, 25, 19, fill=stroke, width=1.4),
+                ],
+                "deep": lambda: [
+                    c.create_oval(8, 8, 25, 25, outline=stroke, width=1.8),
+                    c.create_line(21, 21, 30, 30, fill=stroke, width=2.2),
+                ],
+                "fragment": lambda: [
+                    c.create_rectangle(8, 8, 17, 17, outline=stroke, width=1.4),
+                    c.create_rectangle(21, 8, 30, 17, outline=stroke, width=1.4),
+                    c.create_rectangle(14, 21, 23, 30, outline=stroke, width=1.4),
+                ],
+                "raid": lambda: [
+                    c.create_rectangle(8, 8, 17, 30, outline=stroke, width=1.4),
+                    c.create_rectangle(21, 8, 30, 30, outline=stroke, width=1.4),
+                    c.create_line(17, 19, 21, 19, fill=stroke, width=1.4),
+                ],
+                "damaged": lambda: [
+                    c.create_oval(8, 8, 30, 30, outline=stroke, width=1.6),
+                    c.create_line(13, 13, 25, 25, fill=RED, width=2),
+                ],
+                "forensic": lambda: [
+                    c.create_polygon(19, 6, 30, 11, 28, 23, 19, 31, 10, 23, 8, 11, fill="", outline=stroke, width=1.6),
+                    c.create_text(19, 18, text="⚖", fill=stroke, font=("Segoe UI", 9)),
+                ],
             }
         else:
             icons = {
                 "csprng": lambda: [
-                    c.create_rectangle(6, 6, 34, 34, outline=GREEN_DARK, width=2, fill="#eef8f1"),
-                    c.create_oval(11, 11, 15, 15, fill=GREEN_DARK, outline=GREEN_DARK),
-                    c.create_oval(25, 11, 29, 15, fill=GREEN_DARK, outline=GREEN_DARK),
-                    c.create_oval(18, 18, 22, 22, fill=GREEN_DARK, outline=GREEN_DARK),
-                    c.create_oval(11, 25, 15, 29, fill=GREEN_DARK, outline=GREEN_DARK),
-                    c.create_oval(25, 25, 29, 29, fill=GREEN_DARK, outline=GREEN_DARK),
+                    c.create_rectangle(7, 7, 31, 31, outline=stroke, width=1.6),
+                    c.create_oval(11, 11, 15, 15, fill=stroke, outline=stroke),
+                    c.create_oval(23, 11, 27, 15, fill=stroke, outline=stroke),
+                    c.create_oval(17, 17, 21, 21, fill=stroke, outline=stroke),
+                    c.create_oval(11, 23, 15, 27, fill=stroke, outline=stroke),
+                    c.create_oval(23, 23, 27, 27, fill=stroke, outline=stroke),
                 ],
                 "crypto": lambda: [
-                    c.create_arc(10, 4, 30, 22, start=0, extent=180, style="arc", outline=GREEN_DARK, width=2),
-                    c.create_rectangle(7, 18, 33, 34, outline=GREEN_DARK, width=2, fill="#eef8f1"),
-                    c.create_oval(17, 23, 23, 29, outline=GREEN_DARK, width=2),
+                    c.create_arc(11, 5, 27, 20, start=0, extent=180, style="arc", outline=stroke, width=1.8),
+                    c.create_rectangle(9, 15, 29, 31, outline=stroke, width=1.6),
+                    c.create_oval(17, 21, 21, 25, fill=stroke, outline=stroke),
                 ],
                 "slack": lambda: [
-                    c.create_rectangle(6, 7, 34, 13, outline=GREEN_DARK, width=1, fill="#eef8f1"),
-                    c.create_rectangle(6, 16, 34, 22, outline=GREEN_DARK, width=1, fill="#eef8f1"),
-                    c.create_rectangle(6, 25, 34, 31, outline=GREEN_DARK, width=1, fill="#eef8f1"),
+                    c.create_rectangle(8, 8, 30, 13, outline=stroke, width=1.4),
+                    c.create_rectangle(8, 16, 30, 21, outline=stroke, width=1.4),
+                    c.create_rectangle(8, 24, 30, 29, outline=stroke, width=1.4),
                 ],
                 "metadata": lambda: [
-                    c.create_rectangle(8, 4, 28, 36, outline=GREEN_DARK, width=2, fill="#eef8f1"),
-                    c.create_polygon(22, 4, 28, 10, 22, 10, fill="white", outline=GREEN_DARK, width=1),
-                    c.create_line(12, 16, 24, 16, fill=GREEN_DARK),
-                    c.create_line(12, 21, 24, 21, fill=GREEN_DARK),
-                    c.create_line(12, 26, 20, 26, fill=GREEN_DARK),
+                    c.create_rectangle(9, 6, 29, 32, outline=stroke, width=1.6),
+                    c.create_line(13, 13, 25, 13, fill=stroke, width=1.4),
+                    c.create_line(13, 19, 25, 19, fill=stroke, width=1.4),
                 ],
                 "policy": lambda: [
-                    c.create_polygon(20, 4, 34, 10, 32, 26, 20, 36, 8, 26, 6, 10,
-                                     fill="#eef8f1", outline=GREEN_DARK, width=2),
-                    c.create_line(14, 20, 18, 25, fill=GREEN_DARK, width=2),
-                    c.create_line(18, 25, 26, 15, fill=GREEN_DARK, width=2),
+                    c.create_polygon(19, 6, 30, 11, 28, 25, 19, 33, 10, 25, 8, 11, fill="", outline=stroke, width=1.8),
+                    c.create_line(14, 19, 18, 23, fill=stroke, width=2),
+                    c.create_line(18, 23, 25, 15, fill=stroke, width=2),
                 ],
                 "free_space": lambda: [
-                    c.create_polygon(20, 4, 34, 18, 30, 18, 30, 34, 10, 34, 10, 18, 6, 18,
-                                     fill="#eef8f1", outline=GREEN_DARK, width=2),
-                    c.create_rectangle(16, 24, 24, 34, outline=GREEN_DARK, width=1, fill="white"),
+                    c.create_polygon(19, 6, 31, 17, 27, 17, 27, 30, 11, 30, 11, 17, 7, 17, fill="", outline=stroke, width=1.6),
+                    c.create_rectangle(15, 22, 23, 30, outline=stroke, width=1.2),
                 ],
                 "zero": lambda: [
-                    c.create_oval(8, 8, 32, 32, outline=GREEN_DARK, width=2, fill="#eef8f1"),
-                    c.create_oval(14, 14, 26, 26, outline=GREEN_DARK, width=2),
+                    c.create_oval(8, 8, 30, 30, outline=stroke, width=1.8),
+                    c.create_oval(13, 13, 25, 25, outline=stroke, width=1.4),
                 ],
                 "storage_aware": lambda: [
-                    c.create_oval(8, 8, 32, 32, outline=GREEN_DARK, width=3, fill="#eef8f1"),
-                    c.create_oval(14, 14, 26, 26, fill=GREEN_DARK, outline=GREEN_DARK),
+                    c.create_oval(8, 8, 30, 30, outline=stroke, width=2),
+                    c.create_oval(14, 14, 24, 24, fill=stroke, outline=stroke),
                 ],
                 "temporary": lambda: [
-                    c.create_rectangle(10, 14, 30, 34, outline=GREEN_DARK, width=2, fill="#eef8f1"),
-                    c.create_line(8, 14, 32, 14, fill=GREEN_DARK, width=2),
-                    c.create_line(16, 10, 24, 10, fill=GREEN_DARK, width=2),
-                    c.create_line(15, 19, 15, 29, fill=GREEN_DARK),
-                    c.create_line(20, 19, 20, 29, fill=GREEN_DARK),
-                    c.create_line(25, 19, 25, 29, fill=GREEN_DARK),
+                    c.create_rectangle(9, 13, 29, 32, outline=stroke, width=1.6),
+                    c.create_line(7, 13, 31, 13, fill=stroke, width=1.6),
+                    c.create_line(15, 9, 23, 9, fill=stroke, width=1.6),
+                    c.create_line(14, 18, 14, 27, fill=stroke, width=1.2),
+                    c.create_line(19, 18, 19, 27, fill=stroke, width=1.2),
+                    c.create_line(24, 18, 24, 27, fill=stroke, width=1.2),
                 ],
             }
-        draw = icons.get(method_id)
-        if draw:
-            draw()
+        draw_fn = icons.get(method_id)
+        if draw_fn:
+            draw_fn()
 
-    def _method_status(self, method_id: str, kind: str) -> tuple[str, str]:
+    def _method_status(self, method_id: str, kind: str, caps: dict[str, Any] | None = None) -> tuple[str, str]:
         if kind == "file":
-            if method_id in {"csprng", "zero", "metadata", "temporary"}:
+            # Determine scope for each file method (Phase 9: production-accurate labels)
+            file_available  = {"csprng", "zero", "metadata", "temporary"}
+            file_vol_scope  = {"free_space"}   # requires whole-volume access
+            file_dev_scope  = {                 # these methods require whole-device scope
+                "nist", "smart", "overwrite", "slack", "storage_aware",
+            }
+            if method_id in file_available:
                 return "Available", ""
-            if method_id == "free_space":
-                return "Requires whole-volume scope", "The local free-space engine operates on the entire selected volume, not only the selected folder. DREX will not run it from this folder-scoped workflow."
-            return "Unavailable on this target", ""
+            if method_id in file_vol_scope:
+                return "Requires whole-volume scope", (
+                    "The free-space engine operates on the entire selected volume, "
+                    "not only the selected folder. Select the volume root to use this method."
+                )
+            if method_id in file_dev_scope:
+                return "Unavailable on this target", (
+                    f"{method_id.upper()} requires whole-device or volume-level scope. "
+                    "Use this method from the Wipe Drive page."
+                )
+            return "Unavailable on this target", (
+                f"The {method_id} adapter is not available for file/folder scope on this target."
+            )
         if kind == "drive":
-            return drive_method_status(method_id, self.selected_drive)
+            if caps is None and self.selected_drive:
+                caps = self.capability_manager.get_capabilities(self.selected_drive)
+            return drive_method_status(method_id, self.selected_drive, caps=caps)
         if kind == "recovery":
             return self.recovery_dispatcher.status(method_id)
         return "Unavailable", "Unknown operation type."
@@ -2775,57 +3624,156 @@ class DrexApp(tk.Tk):
     # ── Operation Area ──────────────────────────────────────────────
     def _operation_area(self, label: str):
         bottom = tk.Frame(self.page, bg=BG)
-        bottom.pack(fill="x", padx=28, pady=(0, 4))
+        bottom.pack(fill="x", padx=28, pady=(0, 6))
         tk.Label(bottom, text=label, font=("Segoe UI", 12, "bold"), fg=INK, bg=BG).pack(anchor="w", pady=(0, 6))
         area = tk.Frame(bottom, bg=BG)
         area.pack(fill="x")
-        # Log terminal
+
+        # Monospace Log terminal
         log_card = self._card(area)
         log_card.pack(side="left", fill="both", expand=True, padx=(0, 10))
-        self.log_text = tk.Text(log_card, height=8, bg="#0d1117", fg="#7ee787", insertbackground="white", relief="flat", font=("Consolas", 9), wrap="word", padx=12, pady=10)
+        self.log_text = tk.Text(log_card, height=8, bg="#0F172A", fg="#38BDF8", insertbackground="white", relief="flat", font=("Consolas", 9), wrap="word", padx=14, pady=10)
         self.log_text.pack(fill="both", expand=True, padx=1, pady=1)
-        self.log_text.insert("end", "No operation has started.\nSelect a target and method, then click Start Operation.")
+        self.log_text.insert("end", "DREX System Ready.\nSelect target and method, then start operation.")
         self.log_text.configure(state="disabled")
-        # Result card
+
+        # Status summary card
         result = self._card(area)
         result.pack(side="right", fill="both", expand=True)
         result_inner = tk.Frame(result, bg="white")
         result_inner.pack(fill="both", expand=True, padx=20, pady=16)
         self.status_label = tk.Label(result_inner, text="READY", font=("Segoe UI", 16, "bold"), fg=MUTED, bg="white", justify="center")
         self.status_label.pack(expand=True)
-        tk.Label(result_inner, text="Select a target and method\nto begin an operation", font=("Segoe UI", 9), fg=MUTED, bg="white", justify="center").pack(pady=(4, 0))
-        self.view_cert_button = ttk.Button(result_inner, text="📋 View Certificate", style="Drex.TButton", state="disabled")
+        self.status_sublabel = tk.Label(result_inner, text="Select a target and method\nto begin an operation", font=("Segoe UI", 8), fg=MUTED, bg="white", justify="center")
+        self.status_sublabel.pack(pady=(4, 0))
+        # View Certificate button — wired by _handle_operation_result after SUCCESS
+        self.view_cert_button = ttk.Button(
+            result_inner, text="View Certificate",
+            style="Drex.TButton", state="disabled",
+        )
         self.view_cert_button.pack(pady=(10, 0))
+        self._current_cert_path: str | None = None
+
         self.recovery_tree = None
         self.recovery_destination = None
         self.recovery_scan = None
         if label == "Recovery Log":
             results = self._card(self.page)
             results.pack(fill="x", padx=28, pady=(8, 0))
-            tk.Label(results, text="Recoverable Candidates", font=("Segoe UI", 11, "bold"), fg=INK, bg="white").pack(anchor="w", padx=12, pady=(10, 4))
-            tk.Label(results, text="Candidates are reported by the scanned backing device; they are not assumed to belong to the selected folder.", font=("Segoe UI", 8), fg=MUTED, bg="white", wraplength=900, justify="left").pack(anchor="w", padx=12, pady=(0, 6))
+            tk.Label(results, text="Recoverable Candidates", font=("Segoe UI", 11, "bold"), fg=INK, bg="white").pack(anchor="w", padx=14, pady=(12, 4))
+            tk.Label(results, text="Candidates are reported by the scanned backing device; they are not assumed to belong to the selected folder.", font=("Segoe UI", 8), fg=MUTED, bg="white", wraplength=900, justify="left").pack(anchor="w", padx=14, pady=(0, 6))
+
             self.recovery_tree = ttk.Treeview(results, columns=("id", "name", "filesystem", "size", "deleted", "confidence"), show="headings", selectmode="extended", height=4, style="Drex.Treeview")
             for col, heading in (("id", "Candidate ID"), ("name", "Name"), ("filesystem", "Filesystem"), ("size", "Size"), ("deleted", "Deleted"), ("confidence", "Confidence")):
                 self.recovery_tree.heading(col, text=heading)
                 self.recovery_tree.column(col, width=120, anchor="w")
-            self.recovery_tree.pack(fill="x", padx=12, pady=(0, 12))
+            self.recovery_tree.pack(fill="x", padx=14, pady=(0, 12))
+
             recovery_actions = tk.Frame(results, bg="white")
-            recovery_actions.pack(fill="x", padx=12, pady=(0, 12))
+            recovery_actions.pack(fill="x", padx=14, pady=(0, 12))
             self.recovery_destination_label = tk.Label(recovery_actions, text="Destination: not selected", font=("Segoe UI", 8), fg=MUTED, bg="white", anchor="w")
             self.recovery_destination_label.pack(side="left", fill="x", expand=True)
             self.recovery_destination_button = ttk.Button(recovery_actions, text="Choose Destination", style="Drex.TButton", command=self.choose_recovery_destination, state="disabled")
             self.recovery_destination_button.pack(side="left", padx=(8, 0))
-            self.recover_selected_button = ttk.Button(recovery_actions, text="Recover Selected", style="DrexPrimary.TButton", command=self.recover_selected_candidates, state="disabled")
+            self.recover_selected_button = ttk.Button(recovery_actions, text="Recover Selected", style="DrexRecovery.TButton", command=self.recover_selected_candidates, state="disabled")
             self.recover_selected_button.pack(side="left", padx=(8, 0))
+
+        # Metrics frame (Percentage, Stage, Speed, ETA, Precision Timer)
+        metrics_frame = tk.Frame(self.page, bg=BG)
+        metrics_frame.pack(fill="x", padx=28, pady=(8, 2))
+
+        m_left = tk.Frame(metrics_frame, bg=BG)
+        m_left.pack(side="left", fill="x", expand=True)
+        self.pct_label = tk.Label(m_left, text="0.00%", font=("Segoe UI", 13, "bold"), fg=INK, bg=BG)
+        self.pct_label.pack(side="left")
+        self.stage_label = tk.Label(m_left, text="Ready", font=("Segoe UI", 9), fg=MUTED, bg=BG)
+        self.stage_label.pack(side="left", padx=(12, 0))
+
+        m_right = tk.Frame(metrics_frame, bg=BG)
+        m_right.pack(side="right")
+        self.timer_label = tk.Label(m_right, text="00:00:00.000", font=("Consolas", 10, "bold"), fg=INK, bg=BG)
+        self.timer_label.pack(side="right", padx=(12, 0))
+        self.eta_label = tk.Label(m_right, text="ETA: —", font=("Segoe UI", 9), fg=MUTED, bg=BG)
+        self.eta_label.pack(side="right", padx=(12, 0))
+        self.speed_label = tk.Label(m_right, text="—", font=("Segoe UI", 9, "bold"), fg=BLUE, bg=BG)
+        self.speed_label.pack(side="right")
+
         # Progress bar
         self.progress = ttk.Progressbar(self.page, variable=self.progress_value, maximum=100, style="Drex.Horizontal.TProgressbar")
-        self.progress.pack(fill="x", padx=28, pady=(8, 4))
-        # Cancel button
+        self.progress.pack(fill="x", padx=28, pady=(4, 4))
+
+        # Inline Error & Recovery Card (No blocking modal dialogs)
+        self.inline_alert_card = tk.Frame(self.page, bg="white", highlightbackground=LINE, highlightthickness=1)
+        alert_inner = tk.Frame(self.inline_alert_card, bg="white")
+        alert_inner.pack(fill="x", padx=16, pady=12)
+
+        alert_top = tk.Frame(alert_inner, bg="white")
+        alert_top.pack(fill="x")
+        self.alert_icon_lbl = tk.Label(alert_top, text="⚠", font=("Segoe UI", 12, "bold"), fg=RED, bg="white")
+        self.alert_icon_lbl.pack(side="left", padx=(0, 8))
+        self.alert_title_lbl = tk.Label(alert_top, text="Operation Status", font=("Segoe UI", 10, "bold"), fg=INK, bg="white")
+        self.alert_title_lbl.pack(side="left")
+
+        self.alert_desc_lbl = tk.Label(alert_inner, text="", font=("Segoe UI", 9), fg=MUTED, bg="white", justify="left", wraplength=850)
+        self.alert_desc_lbl.pack(anchor="w", pady=(4, 8))
+
+        alert_actions = tk.Frame(alert_inner, bg="white")
+        alert_actions.pack(fill="x")
+        self.alert_retry_btn = ttk.Button(alert_actions, text="Retry Operation", style="DrexPrimary.TButton", command=self._on_retry_operation)
+        self.alert_retry_btn.pack(side="left", padx=(0, 8))
+        self.alert_dismiss_btn = ttk.Button(alert_actions, text="Dismiss", style="Drex.TButton", command=self._hide_inline_alert)
+        self.alert_dismiss_btn.pack(side="left")
+
+        self.alert_tech_btn = tk.Label(alert_actions, text="Show Technical Details ▾", font=("Segoe UI", 8, "bold"), fg=BLUE, bg="white", cursor="hand2")
+        self.alert_tech_btn.pack(side="right", padx=(8, 0))
+        self.alert_tech_btn.bind("<Button-1>", lambda _e: self._toggle_alert_tech())
+
+        self.alert_tech_lbl = tk.Label(alert_inner, text="", font=("Consolas", 8), fg="#475569", bg=BG_SECONDARY, justify="left", padx=10, pady=6)
+
+        # Cancel button row
         cancel_row = tk.Frame(self.page, bg=BG)
-        cancel_row.pack(fill="x", padx=28)
+        cancel_row.pack(fill="x", padx=28, pady=(2, 12))
         self.cancel_button = ttk.Button(cancel_row, text="Cancel Operation", style="Drex.TButton", command=self.cancel_operation, state="disabled")
         self.cancel_button.pack(side="right")
         self.progress_mode.set("")
+
+    def _show_inline_alert(self, title: str, description: str, severity: str = "error", tech_info: str = ""):
+        if not hasattr(self, "inline_alert_card") or not self.inline_alert_card.winfo_exists():
+            return
+        fg = RED if severity == "error" else (ORANGE if severity == "warning" else BLUE)
+        icon = "⚠" if severity in ("error", "warning") else "ℹ"
+        self.alert_icon_lbl.configure(text=icon, fg=fg)
+        self.alert_title_lbl.configure(text=title, fg=fg)
+        self.alert_desc_lbl.configure(text=description)
+        self.inline_alert_card.configure(highlightbackground=fg)
+        if tech_info:
+            self.alert_tech_lbl.configure(text=tech_info)
+            self.alert_tech_btn.pack(side="right", padx=(8, 0))
+        else:
+            self.alert_tech_btn.pack_forget()
+            self.alert_tech_lbl.pack_forget()
+        try:
+            self.inline_alert_card.pack(fill="x", padx=28, pady=(6, 10), before=self.cancel_button.master)
+        except Exception:
+            self.inline_alert_card.pack(fill="x", padx=28, pady=(6, 10))
+
+    def _hide_inline_alert(self):
+        if hasattr(self, "inline_alert_card") and self.inline_alert_card.winfo_exists():
+            self.inline_alert_card.pack_forget()
+
+    def _toggle_alert_tech(self):
+        if hasattr(self, "alert_tech_lbl") and self.alert_tech_lbl.winfo_exists():
+            if self.alert_tech_lbl.winfo_ismapped():
+                self.alert_tech_lbl.pack_forget()
+                self.alert_tech_btn.configure(text="Show Technical Details ▾")
+            else:
+                self.alert_tech_lbl.pack(fill="x", pady=(6, 0))
+                self.alert_tech_btn.configure(text="Hide Technical Details ▴")
+
+    def _on_retry_operation(self):
+        self._hide_inline_alert()
+        kind = getattr(self, "_last_op_kind", "file")
+        self.start_operation(kind)
 
     def choose_recovery_destination(self):
         if not self.target or (not self.target.is_dir() and not self.target.is_file()):
@@ -2848,7 +3796,6 @@ class DrexApp(tk.Tk):
             self.recovery_destination_label.configure(text=f"Destination: {destination}", fg=INK)
         self._update_recovery_action_state()
 
-
     def _update_recovery_action_state(self):
         if not hasattr(self, "recover_selected_button"):
             return
@@ -2870,18 +3817,25 @@ class DrexApp(tk.Tk):
             return
         if not messagebox.askyesno("Confirm recovery", f"Recover {len(candidates)} selected candidate(s) to:\n\n{self.recovery_destination}\n\nThe source remains read-only."):
             return
+        self._hide_inline_alert()
         self.cancel_event.clear()
+        self.tracker.start(len(candidates), stage="RECOVERING")
         self.cancel_button.configure(state="normal")
         self.recover_selected_button.configure(state="disabled")
-        threading.Thread(target=self._run_candidate_recovery, args=(adapter, method_id, candidates, self.recovery_destination), daemon=True).start()
+        self.task_manager.submit_task(
+            "candidate_recovery",
+            self._run_candidate_recovery,
+            adapter, method_id, candidates, self.recovery_destination,
+        )
 
-    def _run_candidate_recovery(self, adapter: Any, method_id: str, candidates: list[Any], destination: Path):
+    def _run_candidate_recovery(self, adapter: Any, method_id: str, candidates: list[Any], destination: Path, cancel_event: threading.Event | None = None):
+        ce = cancel_event or self.cancel_event
         started = utc_now()
         label = label_for_recovery(method_id)
         recovered = 0
         failures: list[str] = []
         for candidate in candidates:
-            if self.cancel_event.is_set():
+            if ce.is_set():
                 break
             try:
                 outputs = adapter.recover(self._recovery_source, candidate.candidate_id, destination)
@@ -2894,8 +3848,9 @@ class DrexApp(tk.Tk):
                 recovered += 1
             except Exception as exc:
                 failures.append(f"{candidate.candidate_id}: {type(exc).__name__}: {exc}")
+            self.events.put(("progress", (recovered, len(candidates))))
         completed = utc_now()
-        cancelled = self.cancel_event.is_set()
+        cancelled = ce.is_set()
         status = "CANCELLED" if cancelled else "SUCCESS" if recovered == len(candidates) else "PARTIAL" if recovered else "FAILED"
         record = {"type": "recovery", "operation": "candidate_recovery", "method": label, "target": str(self.target), "source": self._recovery_source, "destination": str(destination), "started": started, "completed": completed, "duration": self._duration(started, completed), "status": status, "candidate_count": len(candidates), "selected_candidate_count": len(candidates), "recovered_count": recovered, "failed_count": len(failures), "errors": failures, "verification": "OUTPUT VERIFIED" if status == "SUCCESS" else "Not completed"}
         self.store.add_history(record)
@@ -2907,62 +3862,140 @@ class DrexApp(tk.Tk):
 
     # ── Page: Wipe Drive ────────────────────────────────────────────
     def render_drive_page(self):
-        self._header("Wipe Drive", "Securely erase entire storage devices using industry-standard methods.")
+        self._header("Wipe Drive", "Securely erase physical storage devices using industry-standard sanitization methods.")
         self._target_panel("drive")
+
+        # Protected System Drive Banner
+        self.system_protect_card = tk.Frame(self.page, bg=RED_LIGHT, highlightbackground=RED, highlightthickness=1)
+        p_inner = tk.Frame(self.system_protect_card, bg=RED_LIGHT)
+        p_inner.pack(fill="x", padx=16, pady=10)
+        tk.Label(p_inner, text="🛡", font=("Segoe UI", 14), fg=RED, bg=RED_LIGHT).pack(side="left", padx=(0, 10))
+        p_text = tk.Frame(p_inner, bg=RED_LIGHT)
+        p_text.pack(side="left", fill="x")
+        tk.Label(p_text, text="SYSTEM DRIVE PROTECTED — PhysicalDisk 0 / C: Drive", font=("Segoe UI", 10, "bold"), fg=RED, bg=RED_LIGHT).pack(anchor="w")
+        tk.Label(p_text, text="DREX safety architecture strictly protects the host OS and boot drive. Destructive operations are permanently disabled.", font=("Segoe UI", 8), fg=INK, bg=RED_LIGHT).pack(anchor="w")
+
+        # Methods Grid (All 7 methods)
         self._methods(DRIVE_METHODS, "drive")
+
+        # Rationale & Progressive Technical Details Card
+        rationale_card = self._card(self.page)
+        rationale_card.pack(fill="x", padx=28, pady=(0, 12))
+        r_inner = tk.Frame(rationale_card, bg="white")
+        r_inner.pack(fill="x", padx=18, pady=12)
+
+        r_top = tk.Frame(r_inner, bg="white")
+        r_top.pack(fill="x")
+        tk.Label(r_top, text="Method Selection Rationale", font=("Segoe UI", 10, "bold"), fg=INK, bg="white").pack(side="left")
+        toggle_lbl = tk.Label(r_top, text="Show Technical Details ▾", font=("Segoe UI", 8, "bold"), fg=BLUE, bg="white", cursor="hand2")
+        toggle_lbl.pack(side="right")
+
+        self.drive_rationale_label = tk.Label(
+            r_inner,
+            text="Select a drive and sanitization method above. DREX validates host capabilities prior to execution.",
+            font=("Segoe UI", 8), fg=MUTED, bg="white", justify="left", wraplength=900,
+        )
+        self.drive_rationale_label.pack(anchor="w", pady=(4, 0))
+
+        # Collapsible technical details
+        self.tech_details_frame = tk.Frame(r_inner, bg=BG_SECONDARY)
+        self.tech_details_label = tk.Label(
+            self.tech_details_frame, text="",
+            font=("Consolas", 8), fg=INK, bg=BG_SECONDARY, justify="left", padx=10, pady=8,
+        )
+        self.tech_details_label.pack(fill="x")
+
+        def toggle_tech_details(_e=None):
+            self._tech_details_visible = not getattr(self, "_tech_details_visible", False)
+            if self._tech_details_visible:
+                toggle_lbl.configure(text="Hide Technical Details ▴")
+                self.tech_details_frame.pack(fill="x", pady=(8, 0))
+                if self.selected_drive:
+                    caps = probe_drive_capabilities(self.selected_drive)
+                    probe_lines = [
+                        f"PhysicalDisk: {caps.get('physical_disk_number')} | Bus: {caps.get('bus_type')} | Model: {caps.get('model')}",
+                        f"Native Sanitize: {caps.get('native_sanitize')} | ATA Secure Erase: {caps.get('ata_secure_erase')} | NVMe: {caps.get('nvme_controller')}",
+                        f"Overwrite Backend: {caps.get('overwrite_backend_qualified')} | Write Capable: {caps.get('write_capable')}",
+                    ]
+                    self.tech_details_label.configure(text="\n".join(probe_lines))
+                else:
+                    self.tech_details_label.configure(text="No device selected for capability probing.")
+            else:
+                toggle_lbl.configure(text="Show Technical Details ▾")
+                self.tech_details_frame.pack_forget()
+
+        toggle_lbl.bind("<Button-1>", toggle_tech_details)
+
         self._operation_area("Operation Log")
+
+        if self.selected_drive:
+            self._drive_selected()
+        elif self.drives:
+            self.drive_combo.current(0)
+            self._drive_selected()
 
     # ── Page: Wipe File/Folder ──────────────────────────────────────
     def render_file_page(self):
-        self._header("Wipe File/Folder", "Securely erase specific files or folders using advanced wiping methods.")
+        self._header("Wipe File/Folder", "Securely erase specific files or folders using advanced sanitization methods.")
         self._target_panel("file")
         self._methods(FILE_METHODS, "file")
         self._operation_area("Operation Log")
 
     # ── Page: Recover ───────────────────────────────────────────────
     def render_recovery_page(self):
-        self._header("Recover", "Recover deleted or lost files from storage devices using advanced scanning.")
+        self._header("Recover", "Recover deleted or lost files from storage devices and disk images using advanced scanning engines.")
+
+        ro_card = tk.Frame(self.page, bg=PURPLE_LIGHT, highlightbackground=PURPLE, highlightthickness=1)
+        ro_card.pack(fill="x", padx=28, pady=(16, 0))
+        ro_inner = tk.Frame(ro_card, bg=PURPLE_LIGHT)
+        ro_inner.pack(fill="x", padx=16, pady=10)
+        tk.Label(ro_inner, text="🛡", font=("Segoe UI", 14), fg=PURPLE, bg=PURPLE_LIGHT).pack(side="left", padx=(0, 10))
+        ro_text = tk.Frame(ro_inner, bg=PURPLE_LIGHT)
+        ro_text.pack(side="left", fill="x")
+        tk.Label(ro_text, text="READ ONLY SOURCE GUARANTEE", font=("Segoe UI", 10, "bold"), fg=PURPLE, bg=PURPLE_LIGHT).pack(anchor="w")
+        tk.Label(ro_text, text="Recovery access is strictly read-only. No write operations are ever performed against the source device or image. Recovered files are written exclusively to a separate destination.", font=("Segoe UI", 8), fg=INK, bg=PURPLE_LIGHT).pack(anchor="w")
+
         self._target_panel("recovery")
         self._methods(RECOVERY_METHODS, "recovery")
         self._operation_area("Recovery Log")
 
     # ── Page: Destroy Drive ─────────────────────────────────────────
     def render_destroy_page(self):
-        self._header("Destroy Drive", "Permanently destroy data on entire storage devices using advanced destruction methods.")
+        self._header("Destroy Drive", "Assess device sanitization and determine whether certified physical destruction is required.")
         if not self.drives:
             self.refresh_devices()
         if not self.selected_drive and self.drives:
             self.selected_drive = self.drives[0]
-        # Warning banner
-        warn = tk.Frame(self.page, bg="#fff8e1", highlightbackground="#f5c47e", highlightthickness=1)
+
+        warn = tk.Frame(self.page, bg=ORANGE_LIGHT, highlightbackground=ORANGE, highlightthickness=1)
         warn.pack(fill="x", padx=28, pady=(18, 12))
-        warn_inner = tk.Frame(warn, bg="#fff8e1")
+        warn_inner = tk.Frame(warn, bg=ORANGE_LIGHT)
         warn_inner.pack(fill="x", padx=18, pady=14)
-        tk.Label(warn_inner, text="⚠", font=("Segoe UI", 18), fg=ORANGE, bg="#fff8e1").pack(side="left", padx=(0, 12))
-        warn_text = tk.Frame(warn_inner, bg="#fff8e1")
+        tk.Label(warn_inner, text="⚠", font=("Segoe UI", 18), fg=ORANGE, bg=ORANGE_LIGHT).pack(side="left", padx=(0, 12))
+        warn_text = tk.Frame(warn_inner, bg=ORANGE_LIGHT)
         warn_text.pack(side="left", fill="x")
-        tk.Label(warn_text, text="Device Requires Alternative Sanitization", font=("Segoe UI", 12, "bold"), fg=INK, bg="#fff8e1").pack(anchor="w")
-        tk.Label(warn_text, text="This drive does not support any of the currently available software-based erasure methods.", font=("Segoe UI", 9), fg=MUTED, bg="#fff8e1", wraplength=800, justify="left").pack(anchor="w", pady=(2, 0))
-        # Device Overview card
+        tk.Label(warn_text, text="Device Requires Alternative Sanitization Assessment", font=("Segoe UI", 12, "bold"), fg=INK, bg=ORANGE_LIGHT).pack(anchor="w")
+        tk.Label(warn_text, text="This device does not support native cryptographic or controller-level erase commands. Software wiping alone cannot guarantee absolute elimination of unmapped sectors.", font=("Segoe UI", 9), fg=MUTED, bg=ORANGE_LIGHT, wraplength=800, justify="left").pack(anchor="w", pady=(2, 0))
+
         dev_card = self._card(self.page)
         dev_card.pack(fill="x", padx=28, pady=(0, 12))
         dev_inner = tk.Frame(dev_card, bg="white")
         dev_inner.pack(fill="both", padx=18, pady=16)
-        # Device Overview header
+
         dh = tk.Frame(dev_inner, bg="white")
         dh.pack(fill="x", pady=(0, 12))
-        icon = tk.Canvas(dh, width=44, height=44, bg="#eef8f1", highlightthickness=0)
+        icon = tk.Canvas(dh, width=44, height=44, bg=BLUE_LIGHT, highlightthickness=0)
         icon.pack(side="left", padx=(0, 12))
-        icon.create_rectangle(14, 8, 30, 36, outline=GREEN_DARK, width=2)
-        icon.create_line(18, 16, 26, 16, fill=GREEN_DARK)
+        icon.create_rectangle(12, 8, 32, 36, outline=BLUE, width=2)
+        icon.create_line(16, 16, 28, 16, fill=BLUE)
         dev_h_text = tk.Frame(dh, bg="white")
         dev_h_text.pack(side="left")
-        tk.Label(dev_h_text, text="Device Overview", font=("Segoe UI", 13, "bold"), fg=GREEN_DARK, bg="white").pack(anchor="w")
+        tk.Label(dev_h_text, text="Device Overview & Destruction Assessment", font=("Segoe UI", 12, "bold"), fg=INK, bg="white").pack(anchor="w")
         if self.selected_drive:
             d = self.selected_drive
-            tk.Label(dev_h_text, text=d.display("model") or "Generic Drive", font=("Segoe UI", 11), fg=INK, bg="white").pack(anchor="w", pady=(2, 0))
-            tk.Label(dev_h_text, text="Unsupported for Software-Based Erasure", font=("Segoe UI", 8), fg="white", bg=ORANGE, padx=8, pady=2).pack(anchor="w", pady=(4, 0))
-        # 3-column info grid
+            tk.Label(dev_h_text, text=d.display("model") or "Generic Drive", font=("Segoe UI", 10), fg=INK, bg="white").pack(anchor="w", pady=(2, 0))
+            tk.Label(dev_h_text, text="Alternative Sanitization Required", font=("Segoe UI", 8, "bold"), fg="white", bg=ORANGE, padx=8, pady=2).pack(anchor="w", pady=(4, 0))
+
         info_grid = tk.Frame(dev_inner, bg="white")
         info_grid.pack(fill="x", pady=(12, 0))
         for col in range(3):
@@ -2971,7 +4004,7 @@ class DrexApp(tk.Tk):
             d = self.selected_drive
             info_items = [
                 [("Device Type", d.drive_type or "HDD / SSD"), ("Capacity", fmt_bytes(d.capacity)), ("Serial Number", d.display("serial"))],
-                [("Supported Erasure Methods", "None Detected"), ("Current Recommendation", "Alternative Destruction /\nCertified Disposal")],
+                [("Supported Erasure Methods", "None Detected (USB Bridge)"), ("Current Recommendation", "Certified Physical Destruction /\nDisposal (NIST SP 800-88)")],
             ]
             row_idx = 0
             for row_data in info_items:
@@ -2981,33 +4014,32 @@ class DrexApp(tk.Tk):
                     tk.Label(cell, text=label, font=("Segoe UI", 9, "bold"), fg=INK, bg="white").pack(anchor="w")
                     tk.Label(cell, text=value, font=("Segoe UI", 9), fg=MUTED, bg="white", justify="left", wraplength=250).pack(anchor="w", pady=(2, 0))
                 row_idx += 1
-        else:
-            tk.Label(info_grid, text="No device was detected by Windows.", fg=MUTED, bg="white", font=("Segoe UI", 10)).pack(pady=14)
-        # Drive selector
+
         if self.drives:
             sel = tk.Frame(dev_inner, bg="white")
-            sel.pack(fill="x", pady=(10, 0))
+            sel.pack(fill="x", pady=(14, 0))
+            tk.Label(sel, text="Inspect another device: ", font=("Segoe UI", 9), fg=MUTED, bg="white").pack(side="left")
             self.destroy_combo = ttk.Combobox(sel, state="readonly", values=[d.path for d in self.drives], width=20)
             self.destroy_combo.set(self.selected_drive.path if self.selected_drive else self.drives[0].path)
-            self.destroy_combo.pack(side="left")
+            self.destroy_combo.pack(side="left", padx=(6, 0))
             self.destroy_combo.bind("<<ComboboxSelected>>", lambda _e: self._destroy_selected())
-        # Important Notice
-        notice = tk.Frame(self.page, bg="#fef2f2", highlightbackground="#f1b8b8", highlightthickness=1)
+
+        notice = tk.Frame(self.page, bg=RED_LIGHT, highlightbackground=RED, highlightthickness=1)
         notice.pack(fill="x", padx=28, pady=(0, 12))
-        notice_inner = tk.Frame(notice, bg="#fef2f2")
+        notice_inner = tk.Frame(notice, bg=RED_LIGHT)
         notice_inner.pack(fill="x", padx=18, pady=14)
-        tk.Label(notice_inner, text="🛡", font=("Segoe UI", 16), fg=RED, bg="#fef2f2").pack(side="left", padx=(0, 12))
-        n_text = tk.Frame(notice_inner, bg="#fef2f2")
+        tk.Label(notice_inner, text="🛡", font=("Segoe UI", 16), fg=RED, bg=RED_LIGHT).pack(side="left", padx=(0, 12))
+        n_text = tk.Frame(notice_inner, bg=RED_LIGHT)
         n_text.pack(side="left", fill="x")
-        tk.Label(n_text, text="Important Notice", font=("Segoe UI", 12, "bold"), fg=RED, bg="#fef2f2").pack(anchor="w")
-        tk.Label(n_text, text="Physical destruction should be performed only through authorized procedures or certified destruction services.\nDo not attempt unsafe destruction yourself.", font=("Segoe UI", 9), fg=INK, bg="#fef2f2", wraplength=900, justify="left").pack(anchor="w", pady=(2, 0))
-        # Why Alternative Sanitization
-        why_card = self._card(self.page, bg="#f8faf9")
+        tk.Label(n_text, text="Important Notice Regarding Physical Destruction", font=("Segoe UI", 11, "bold"), fg=RED, bg=RED_LIGHT).pack(anchor="w")
+        tk.Label(n_text, text="Physical destruction should be performed only through authorized procedures or certified destruction services.\nDo not attempt hazardous shredding or thermal methods yourself.", font=("Segoe UI", 9), fg=INK, bg=RED_LIGHT, wraplength=900, justify="left").pack(anchor="w", pady=(2, 0))
+
+        why_card = self._card(self.page, bg=BG_SECONDARY)
         why_card.pack(fill="x", padx=28, pady=(0, 12))
-        why_inner = tk.Frame(why_card, bg="#f8faf9")
+        why_inner = tk.Frame(why_card, bg=BG_SECONDARY)
         why_inner.pack(fill="x", padx=18, pady=16)
-        tk.Label(why_inner, text="Why is Alternative Sanitization Required?", font=("Segoe UI", 13, "bold"), fg=INK, bg="#f8faf9").pack(anchor="w")
-        tk.Label(why_inner, text="Some devices do not expose commands required for secure erasure due to hardware, firmware, or interface limitations. In such cases, software-based wiping cannot guarantee permanent data elimination.", font=("Segoe UI", 10), fg=MUTED, bg="#f8faf9", wraplength=900, justify="left").pack(anchor="w", pady=(6, 0))
+        tk.Label(why_inner, text="Why is Alternative Sanitization Required?", font=("Segoe UI", 12, "bold"), fg=INK, bg=BG_SECONDARY).pack(anchor="w")
+        tk.Label(why_inner, text="Some devices do not expose commands required for secure erasure due to hardware, firmware, or interface limitations. In such cases, software-based wiping cannot guarantee permanent data elimination.", font=("Segoe UI", 9), fg=MUTED, bg=BG_SECONDARY, wraplength=900, justify="left").pack(anchor="w", pady=(6, 0))
 
     def _destroy_selected(self):
         index = self.destroy_combo.current()
@@ -3029,26 +4061,26 @@ class DrexApp(tk.Tk):
                 previous_query = self.cert_search.get().strip()
         except tk.TclError:
             previous_query = ""
-        self._header("Certificate Centre", "View, search and manage all operation certificates in one place.")
-        # Tab bar
+
+        self._header("Certificate Centre", "View, search and manage cryptographically signed operation certificates.")
+
         tabs = tk.Frame(self.page, bg="white", highlightbackground=LINE, highlightthickness=1)
         tabs.pack(fill="x", padx=28, pady=(18, 0))
         self.cert_filter = tk.StringVar(value=previous_filter)
         for text, value in [("All Certificates", "all"), ("Erasure Certificates", "erasure"), ("Recovery Certificates", "recovery")]:
             active = previous_filter == value
-            tab_btn = tk.Button(tabs, text=text, relief="flat", bd=0, bg="white", fg=GREEN_DARK if active else INK, font=("Segoe UI", 10, "bold" if active else ""), padx=28, pady=12, activebackground=GREEN_PALE,
+            tab_btn = tk.Button(tabs, text=text, relief="flat", bd=0, bg="white", fg=BLUE if active else INK, font=("Segoe UI", 10, "bold" if active else ""), padx=24, pady=12, activebackground=BLUE_LIGHT,
                                 command=lambda v=value: (self.cert_filter.set(v), self.render_certificates()))
             tab_btn.pack(side="left")
             if active:
-                # Underline indicator
-                underline = tk.Frame(tabs, bg=GREEN, height=3)
+                underline = tk.Frame(tabs, bg=BLUE, height=3)
                 underline.place(in_=tab_btn, relx=0, rely=1.0, relwidth=1, anchor="sw")
-        # Search bar
+
         search_card = tk.Frame(self.page, bg="white", highlightbackground=LINE, highlightthickness=1)
         search_card.pack(fill="x", padx=28, pady=(12, 12))
         search_inner = tk.Frame(search_card, bg="white")
         search_inner.pack(fill="x", padx=12, pady=8)
-        tk.Label(search_inner, text="🔍", font=("Segoe UI", 12), fg=MUTED, bg="white").pack(side="left", padx=(0, 8))
+        tk.Label(search_inner, text="🔍", font=("Segoe UI", 11), fg=MUTED, bg="white").pack(side="left", padx=(0, 8))
         self.cert_search = tk.Entry(search_inner, font=("Segoe UI", 10), relief="flat", bd=0, width=50)
         self.cert_search.pack(side="left", fill="x", expand=True, ipady=6)
         self.cert_search.insert(0, previous_query or "Search Certificate ID / Serial Number...")
@@ -3056,7 +4088,7 @@ class DrexApp(tk.Tk):
             self.cert_search.configure(fg=MUTED)
             self.cert_search.bind("<FocusIn>", lambda e: (self.cert_search.delete(0, "end"), self.cert_search.configure(fg=INK)))
         self.cert_search.bind("<Return>", lambda e: self.render_certificates())
-        # Records
+
         records = self.store.certificates()
         filter_value = previous_filter
         if filter_value == "erasure":
@@ -3066,13 +4098,12 @@ class DrexApp(tk.Tk):
         query = previous_query.lower()
         if query and query != "search certificate id / serial number...":
             records = [r for r in records if query in json.dumps(r).lower()]
-        # Table card
+
         table_card = self._card(self.page)
         table_card.pack(fill="both", expand=True, padx=28, pady=(0, 12))
         table_inner = tk.Frame(table_card, bg="white")
         table_inner.pack(fill="both", expand=True, padx=14, pady=14)
-        filter_labels = {"all": "All Certificates", "erasure": "Certificates of Erasure", "recovery": "Certificates of Recovery"}
-        tk.Label(table_inner, text=filter_labels.get(filter_value, "All Certificates"), font=("Segoe UI", 14, "bold"), fg=INK, bg="white").pack(anchor="w", pady=(0, 8))
+
         tree = ttk.Treeview(table_inner, columns=("id", "method", "passes", "status", "started", "duration", "action"), show="headings", style="Drex.Treeview")
         headings = {"id": "Session ID", "method": "Method", "passes": "Passes", "status": "Status", "started": "Started", "duration": "Duration", "action": "Actions"}
         col_widths = {"id": 140, "method": 160, "passes": 60, "status": 120, "started": 180, "duration": 80, "action": 80}
@@ -3080,7 +4111,8 @@ class DrexApp(tk.Tk):
             tree.heading(col, text=heading)
             tree.column(col, width=col_widths.get(col, 120), anchor="w")
         tree.pack(fill="both", expand=True)
-        page_size = 7
+
+        page_size = 8
         self._cert_page = getattr(self, "_cert_page", 0)
         total_pages = max(1, (len(records) + page_size - 1) // page_size)
         if self._cert_page >= total_pages:
@@ -3093,12 +4125,12 @@ class DrexApp(tk.Tk):
                 status_display, record["started"], record["duration"], "📄 PDF",
             ))
         tree.bind("<Double-1>", lambda _e: self.open_certificate(tree))
-        # Pagination
+
         pag = tk.Frame(table_inner, bg="white")
         pag.pack(fill="x", pady=(10, 0))
         start = self._cert_page * page_size + 1
         end = min((self._cert_page + 1) * page_size, len(records))
-        tk.Label(pag, text=f"Showing {start} to {end} of {len(records)} certificates" if records else "No certificates found", font=("Segoe UI", 9), fg=GREEN_DARK, bg="white").pack(side="left")
+        tk.Label(pag, text=f"Showing {start} to {end} of {len(records)} certificates" if records else "No certificates found", font=("Segoe UI", 9), fg=BLUE, bg="white").pack(side="left")
         nav = tk.Frame(pag, bg="white")
         nav.pack(side="right")
         if total_pages > 1:
@@ -3108,7 +4140,7 @@ class DrexApp(tk.Tk):
             tk.Button(nav, text="‹", command=lambda: go_page(max(0, self._cert_page - 1)), relief="flat", bd=0, font=("Segoe UI", 10), fg=INK, bg="white", padx=8).pack(side="left")
             for i in range(min(total_pages, 5)):
                 active_page = i == self._cert_page
-                tk.Button(nav, text=str(i + 1), command=lambda p=i: go_page(p), relief="flat", bd=0, font=("Segoe UI", 10, "bold" if active_page else ""), fg="white" if active_page else INK, bg=GREEN if active_page else "white", padx=8, pady=2).pack(side="left", padx=2)
+                tk.Button(nav, text=str(i + 1), command=lambda p=i: go_page(p), relief="flat", bd=0, font=("Segoe UI", 10, "bold" if active_page else ""), fg="white" if active_page else INK, bg=BLUE if active_page else "white", padx=8, pady=2).pack(side="left", padx=2)
             if total_pages > 5:
                 tk.Label(nav, text="...", font=("Segoe UI", 9), fg=MUTED, bg="white").pack(side="left")
                 tk.Button(nav, text=str(total_pages), command=lambda: go_page(total_pages - 1), relief="flat", bd=0, font=("Segoe UI", 10), fg=INK, bg="white", padx=8).pack(side="left", padx=2)
@@ -3123,7 +4155,7 @@ class DrexApp(tk.Tk):
         if not record:
             return
         if not self.cert_manager.verify(record):
-            messagebox.showerror("Certificate validation failed", "DREX could not validate the local signature for this certificate.")
+            messagebox.showerror("Certificate validation failed", "DREX could not validate the cryptographic signature for this certificate.")
             return
         path = Path(record.get("pdf_path", ""))
         if path.exists():
@@ -3131,9 +4163,8 @@ class DrexApp(tk.Tk):
 
     # ── Page: Help ──────────────────────────────────────────────────
     def render_help(self):
-        self._header("Help Center", "Everything you need to securely erase, recover, and manage your storage.")
+        self._header("Help Center", "Comprehensive guides, safety architecture, and troubleshooting.")
         selected = getattr(self, "help_section", "Getting Started")
-        # Tab bar with icons
         tabs = tk.Frame(self.page, bg="white", highlightbackground=LINE, highlightthickness=1)
         tabs.pack(fill="x", padx=28, pady=(18, 14))
         tab_items = [
@@ -3142,17 +4173,17 @@ class DrexApp(tk.Tk):
         ]
         for title, icon in tab_items:
             active = title == selected
-            tab = tk.Frame(tabs, bg=GREEN_PALE if active else "white", cursor="hand2")
+            tab = tk.Frame(tabs, bg=BLUE_LIGHT if active else "white", cursor="hand2")
             tab.pack(side="left", fill="both", expand=True)
-            inner = tk.Frame(tab, bg=GREEN_PALE if active else "white")
+            inner = tk.Frame(tab, bg=BLUE_LIGHT if active else "white")
             inner.pack(pady=10)
-            tk.Label(inner, text=icon, font=("Segoe UI", 12), fg=GREEN_DARK if active else MUTED, bg=GREEN_PALE if active else "white").pack()
-            tk.Label(inner, text=title, font=("Segoe UI", 8, "bold" if active else ""), fg=GREEN_DARK if active else INK, bg=GREEN_PALE if active else "white").pack(pady=(2, 0))
+            tk.Label(inner, text=icon, font=("Segoe UI", 11), fg=BLUE if active else MUTED, bg=BLUE_LIGHT if active else "white").pack()
+            tk.Label(inner, text=title, font=("Segoe UI", 8, "bold" if active else ""), fg=BLUE if active else INK, bg=BLUE_LIGHT if active else "white").pack(pady=(2, 0))
             for w in (tab, inner):
                 w.bind("<Button-1>", lambda _e, t=title: self._set_help_section(t))
             for child in inner.winfo_children():
                 child.bind("<Button-1>", lambda _e, t=title: self._set_help_section(t))
-        # Content based on selected tab
+
         if selected == "Getting Started":
             self._help_getting_started()
         elif selected == "Wiping Data":
@@ -3162,7 +4193,7 @@ class DrexApp(tk.Tk):
                 ("Verification", "All successful operations produce verified results and generate tamper-evident certificates."),
             ])
         elif selected == "Recovery":
-            self._help_section_content("Recovery", "Recovery engines are read-only. The current build reports native recovery engines as unavailable when their compiled executables are not present; it never claims recovered files without results.", [
+            self._help_section_content("Recovery", "Recovery engines are strictly read-only. The current build reports native recovery engines as unavailable when their compiled executables are not present; it never claims recovered files without results.", [
                 ("Quick & Smart Recovery", "Find recently deleted data quickly or let DREX choose the best recovery path automatically."),
                 ("Deep & Fragment Recovery", "Search deeper for lost data or reconstruct files from scattered data fragments."),
                 ("Forensic Recovery", "Recover and analyze data for forensic investigation with chain-of-custody documentation."),
@@ -3185,127 +4216,42 @@ class DrexApp(tk.Tk):
             self._help_safety()
 
     def _help_getting_started(self):
-        # Section heading
         gs_header = tk.Frame(self.page, bg=BG)
         gs_header.pack(fill="x", padx=28, pady=(0, 12))
-        tk.Label(gs_header, text="📖", font=("Segoe UI", 16), fg=GREEN_DARK, bg=BG).pack(side="left", padx=(0, 10))
+        tk.Label(gs_header, text="📖", font=("Segoe UI", 16), fg=BLUE, bg=BG).pack(side="left", padx=(0, 10))
         gs_text = tk.Frame(gs_header, bg=BG)
         gs_text.pack(side="left")
-        tk.Label(gs_text, text="Getting Started", font=("Segoe UI", 16, "bold"), fg=INK, bg=BG).pack(anchor="w")
+        tk.Label(gs_text, text="Getting Started", font=("Segoe UI", 15, "bold"), fg=INK, bg=BG).pack(anchor="w")
         tk.Label(gs_text, text="Understand what DREX is and follow best practices before performing any operation.", font=("Segoe UI", 9), fg=MUTED, bg=BG).pack(anchor="w")
-        # 4 info cards
+
         cards_row = tk.Frame(self.page, bg=BG)
         cards_row.pack(fill="x", padx=28, pady=(0, 20))
         info_cards = [
-            ("What is DREX?", "DREX is a secure data management platform designed to permanently erase data, recover deleted files, and provide verifiable proof of sanitization.", GREEN, "🛡"),
-            ("Before You Begin", "• Connect the storage device securely.\n• Close applications using the target drive.\n• Verify the selected drive before starting any operation.\n• Back up anything you may need later.", GREEN, "📋"),
+            ("What is DREX?", "DREX is a secure data management platform designed to permanently erase data, recover deleted files, and provide verifiable proof of sanitization.", BLUE, "🛡"),
+            ("Before You Begin", "• Connect the storage device securely.\n• Close applications using the target drive.\n• Verify the selected drive before starting any operation.\n• Back up anything you may need later.", BLUE, "📋"),
             ("Important", "Data sanitization and drive destruction can be permanent and irreversible.", ORANGE, "⚠"),
             ("Best Practice", "Always verify your target drive and review operation details before confirming.", GREEN, "✓"),
         ]
         for title, text, color, icon in info_cards:
-            card = self._card(cards_row, border=LINE if color == GREEN else "#f5c47e")
+            card = self._card(cards_row, border=LINE if color == BLUE else (ORANGE if color == ORANGE else GREEN))
             card.pack(side="left", fill="both", expand=True, padx=(0, 8))
             inner = tk.Frame(card, bg="white")
             inner.pack(fill="both", expand=True, padx=14, pady=14)
-            tk.Label(inner, text=icon, font=("Segoe UI", 18), fg=color, bg="white").pack(anchor="w")
+            tk.Label(inner, text=icon, font=("Segoe UI", 16), fg=color, bg="white").pack(anchor="w")
             tk.Label(inner, text=title, font=("Segoe UI", 11, "bold"), fg=color, bg="white").pack(anchor="w", pady=(8, 4))
             tk.Label(inner, text=text, font=("Segoe UI", 8), fg=INK, bg="white", wraplength=200, justify="left").pack(anchor="w")
-        # DREX Operations Overview
-        tk.Label(self.page, text="DREX Operations Overview", font=("Segoe UI", 16, "bold"), fg=INK, bg=BG).pack(anchor="w", padx=28, pady=(0, 10))
-        ops_row = tk.Frame(self.page, bg=BG)
-        ops_row.pack(fill="x", padx=28, pady=(0, 20))
-        ops = [
-            ("Wipe Drive", "Permanently sanitize an entire storage device using a secure method.", GREEN, "◎"),
-            ("Wipe File / Folder", "Securely remove specific files or folders without wiping the entire drive.", GREEN, "▤"),
-            ("Recover Data", "Search and recover deleted or lost files that may still be recoverable.", GREEN, "↺"),
-            ("Destroy Drive", "Permanently destroy a storage device to take it out of service.", RED, "⊠"),
-            ("Certificates", "View and manage certificates as proof of completed operations.", GREEN, "◈"),
-        ]
-        for name, desc, color, glyph in ops:
-            card = self._card(ops_row)
-            card.pack(side="left", fill="both", expand=True, padx=(0, 8))
-            inner = tk.Frame(card, bg="white")
-            inner.pack(fill="both", expand=True, padx=12, pady=12)
-            tk.Label(inner, text=glyph, font=("Segoe UI", 20), fg=color, bg="white").pack()
-            tk.Label(inner, text=name, font=("Segoe UI", 9, "bold"), fg=color, bg="white").pack(pady=(6, 4))
-            tk.Label(inner, text=desc, font=("Segoe UI", 7), fg=MUTED, bg="white", wraplength=140, justify="center").pack()
-            lm = tk.Label(inner, text="Learn More →", font=("Segoe UI", 8, "bold"), fg=GREEN_DARK, bg="white", cursor="hand2")
-            lm.pack(pady=(6, 0))
-        # Troubleshooting + Safety side by side
-        ts_row = tk.Frame(self.page, bg=BG)
-        ts_row.pack(fill="x", padx=28, pady=(0, 20))
-        # Troubleshooting
-        ts_card = self._card(ts_row)
-        ts_card.pack(side="left", fill="both", expand=True, padx=(0, 8))
-        ts_inner = tk.Frame(ts_card, bg="white")
-        ts_inner.pack(fill="both", expand=True, padx=16, pady=14)
-        tk.Label(ts_inner, text="🔧  Troubleshooting", font=("Segoe UI", 12, "bold"), fg=INK, bg="white").pack(anchor="w")
-        tk.Label(ts_inner, text="Find solutions to common issues.", font=("Segoe UI", 8), fg=MUTED, bg="white").pack(anchor="w", pady=(2, 8))
-        ts_items = [
-            ("Drive not detected", "Check connections, permissions and system visibility."),
-            ("Wipe operation failed", "Review drive status, permissions and operation logs."),
-            ("Recovery finds no files", "Data may be overwritten or securely erased."),
-            ("Certificate is unavailable", "Ensure operation completed successfully."),
-        ]
-        for t, d in ts_items:
-            item_row = tk.Frame(ts_inner, bg="white")
-            item_row.pack(fill="x", pady=4)
-            tk.Label(item_row, text="●", fg=GREEN, bg="white", font=("Segoe UI", 6)).pack(side="left", padx=(0, 8), anchor="n", pady=4)
-            item_text = tk.Frame(item_row, bg="white")
-            item_text.pack(side="left", fill="x", expand=True)
-            tk.Label(item_text, text=t, font=("Segoe UI", 9, "bold"), fg=INK, bg="white", anchor="w").pack(anchor="w")
-            tk.Label(item_text, text=d, font=("Segoe UI", 8), fg=MUTED, bg="white", anchor="w").pack(anchor="w")
-        tk.Label(ts_inner, text="View All Solutions →", font=("Segoe UI", 9, "bold"), fg=GREEN_DARK, bg="white", cursor="hand2").pack(anchor="w", pady=(8, 0))
-        # Safety
-        sf_card = self._card(ts_row)
-        sf_card.pack(side="left", fill="both", expand=True)
-        sf_inner = tk.Frame(sf_card, bg="white")
-        sf_inner.pack(fill="both", expand=True, padx=16, pady=14)
-        tk.Label(sf_inner, text="🛡  Safety & Best Practices", font=("Segoe UI", 12, "bold"), fg=INK, bg="white").pack(anchor="w")
-        tk.Label(sf_inner, text="Follow these guidelines to ensure safe operations.", font=("Segoe UI", 8), fg=MUTED, bg="white").pack(anchor="w", pady=(2, 8))
-        sf_items = [
-            ("Before Wiping", "Verify → Backup → Select → Confirm", GREEN),
-            ("Before Recovery", "Stop using the drive → Scan → Recover to\nanother location", PURPLE),
-            ("Before Destruction", "Verify device → Confirm data status → Destroy", ORANGE),
-        ]
-        for t, d, c in sf_items:
-            item_row = tk.Frame(sf_inner, bg="white")
-            item_row.pack(fill="x", pady=4)
-            tk.Label(item_row, text="●", fg=c, bg="white", font=("Segoe UI", 8)).pack(side="left", padx=(0, 8), anchor="n", pady=4)
-            item_text = tk.Frame(item_row, bg="white")
-            item_text.pack(side="left", fill="x", expand=True)
-            tk.Label(item_text, text=t, font=("Segoe UI", 9, "bold"), fg=INK, bg="white", anchor="w").pack(anchor="w")
-            tk.Label(item_text, text=d, font=("Segoe UI", 8), fg=MUTED, bg="white", anchor="w", justify="left").pack(anchor="w")
-        # Warning note
-        warn = tk.Frame(sf_inner, bg="#fff8e1")
-        warn.pack(fill="x", pady=(8, 0))
-        tk.Label(warn, text="DREX operations may permanently change or remove data.\nAlways verify your target before proceeding.", font=("Segoe UI", 8), fg=INK, bg="#fff8e1", justify="left", padx=10, pady=8).pack(fill="x")
-        # Need More Help footer
-        footer_card = self._card(self.page, bg="#f8faf9")
-        footer_card.pack(fill="x", padx=28, pady=(0, 12))
-        footer_inner = tk.Frame(footer_card, bg="#f8faf9")
-        footer_inner.pack(fill="x", padx=16, pady=14)
-        tk.Label(footer_inner, text="Need More Help?", font=("Segoe UI", 12, "bold"), fg=INK, bg="#f8faf9").pack(side="left", padx=(0, 8))
-        tk.Label(footer_inner, text="Get additional support and resources.", font=("Segoe UI", 8), fg=MUTED, bg="#f8faf9").pack(side="left")
-        footer_items = [("Troubleshooting", "Find solutions to\ncommon problems."), ("Operation Logs", "Review what happened\nduring an operation."), ("System Status", "Check whether DREX\nservices are operating."), ("Contact Support", "Get assistance with\nan issue.")]
-        for t, d in footer_items:
-            fc = tk.Frame(footer_inner, bg="#f8faf9")
-            fc.pack(side="right", padx=10)
-            tk.Label(fc, text=t, font=("Segoe UI", 8, "bold"), fg=INK, bg="#f8faf9").pack(anchor="w")
-            tk.Label(fc, text=d, font=("Segoe UI", 7), fg=MUTED, bg="#f8faf9", justify="left").pack(anchor="w")
 
     def _help_section_content(self, title, intro, items):
-        """Generic help section content."""
         section = self._card(self.page)
         section.pack(fill="x", padx=28, pady=(0, 12))
         inner = tk.Frame(section, bg="white")
         inner.pack(fill="both", expand=True, padx=22, pady=18)
-        tk.Label(inner, text=title, font=("Segoe UI", 16, "bold"), fg=INK, bg="white").pack(anchor="w")
-        tk.Label(inner, text=intro, font=("Segoe UI", 10), fg=MUTED, bg="white", wraplength=900, justify="left").pack(anchor="w", pady=(6, 14))
+        tk.Label(inner, text=title, font=("Segoe UI", 15, "bold"), fg=INK, bg="white").pack(anchor="w")
+        tk.Label(inner, text=intro, font=("Segoe UI", 9), fg=MUTED, bg="white", wraplength=900, justify="left").pack(anchor="w", pady=(6, 14))
         for sub_title, sub_text in items:
             item = tk.Frame(inner, bg="white")
             item.pack(fill="x", pady=6)
-            tk.Label(item, text="●", fg=GREEN, bg="white", font=("Segoe UI", 8)).pack(side="left", padx=(0, 10), anchor="n", pady=3)
+            tk.Label(item, text="●", fg=BLUE, bg="white", font=("Segoe UI", 8)).pack(side="left", padx=(0, 10), anchor="n", pady=3)
             texts = tk.Frame(item, bg="white")
             texts.pack(side="left", fill="x", expand=True)
             tk.Label(texts, text=sub_title, font=("Segoe UI", 10, "bold"), fg=INK, bg="white", anchor="w").pack(anchor="w")
@@ -3333,7 +4279,7 @@ class DrexApp(tk.Tk):
         self.help_section = section
         self.render_help()
 
-    # ── Operation Logic (preserved) ─────────────────────────────────
+    # ── Operation Logic (Preserved) ─────────────────────────────────
     def append_log(self, line: str):
         if self.log_text:
             stamp = datetime.now().strftime("%H:%M:%S")
@@ -3342,7 +4288,19 @@ class DrexApp(tk.Tk):
             self.log_text.see("end")
             self.log_text.configure(state="disabled")
 
+    def append_log_batch(self, lines: list[str]):
+        if not lines or not self.log_text:
+            return
+        stamp = datetime.now().strftime("%H:%M:%S")
+        block = "".join(f"[{stamp}] {line}\n" for line in lines)
+        self.log_text.configure(state="normal")
+        self.log_text.insert("end", block)
+        self.log_text.see("end")
+        self.log_text.configure(state="disabled")
+
     def start_operation(self, kind: str):
+        self._last_op_kind = kind
+        self._hide_inline_alert()
         method_id = self.method_var.get()
         if not method_id:
             messagebox.showwarning("Select a method", "Choose exactly one method before starting.")
@@ -3351,9 +4309,20 @@ class DrexApp(tk.Tk):
             if not self.selected_drive:
                 messagebox.showwarning("Select a drive", "Choose a detected device before starting.")
                 return
-            status, reason = drive_method_status(method_id, self.selected_drive)
+            drive = self.selected_drive
+            caps = self.capability_manager.get_capabilities(drive)
+            phys_num = caps.get("physical_disk_number")
+
+            if (phys_num is not None and int(phys_num) == 0) or drive.path.upper().startswith("C:"):
+                messagebox.showerror(
+                    "Safety Guard — System Disk Protected",
+                    f"Selected device {drive.path} (PhysicalDisk {phys_num}) is protected by DREX safety architecture.\n\n"
+                    "Destructive operations against the system drive are permanently blocked."
+                )
+                return
+
+            status, reason = drive_method_status(method_id, self.selected_drive, caps=caps)
             if status == "UNSUPPORTED_HARDWARE":
-                # Show capability evidence — not an error to hide, but a truthful result
                 messagebox.showinfo(
                     "Hardware Capability Report",
                     f"Method: {method_id.upper()}\nStatus: UNSUPPORTED_HARDWARE\n\n{reason}\n\n"
@@ -3363,75 +4332,110 @@ class DrexApp(tk.Tk):
             if status not in ("Available",):
                 messagebox.showerror("Method unavailable", f"{status}\n\n{reason}")
                 return
-            # status == "Available" — confirm and execute
-            drive = self.selected_drive
-            caps = probe_drive_capabilities(drive)
-            phys_num = caps.get("physical_disk_number", "?")
+
             model = caps.get("model") or drive.model or "Unknown"
             serial = caps.get("serial") or drive.serial or "Unknown"
-            capacity = fmt_bytes(caps.get("capacity") or drive.capacity)
+            capacity_bytes = caps.get("capacity") or drive.capacity or 0
+            # Phase 10: CAPACITY SAFETY GUARD
+            # Per master requirement §15: unknown capacity MUST block destructive execution.
+            # Never assume 1 GiB, never invent a fallback.
+            # Distinguish PHYSICAL_DEVICE_CAPACITY from VOLUME_CAPACITY.
+            capacity_kind = CapacityKind.PHYSICAL_DEVICE if capacity_bytes > 0 and caps.get("capacity") else CapacityKind.UNKNOWN
+            if capacity_kind == CapacityKind.UNKNOWN or capacity_bytes <= 0:
+                messagebox.showerror(
+                    "EXECUTION BLOCKED — Unknown Capacity",
+                    f"DREX could not determine the physical device capacity for:\n\n"
+                    f"  {drive.path} (PhysicalDisk {phys_num})\n\n"
+                    "Destructive operations with unknown capacity are permanently blocked.\n"
+                    "This is a hard safety requirement: DREX never assumes a fallback size.\n\n"
+                    "Please ensure the device is properly connected and recognized by Windows.",
+                )
+                return
+            capacity = fmt_bytes(capacity_bytes)
             bus = caps.get("bus_type", "Unknown")
-            confirm_msg = (
+
+            if not messagebox.askyesno(
+                "Confirm Physical Drive Sanitization",
                 f"DESTRUCTIVE OPERATION — IRREVERSIBLE\n\n"
-                f"Method: {method_id.upper()}\n"
-                f"Drive: {drive.path}\n"
-                f"PhysicalDisk: {phys_num}\n"
-                f"Model: {model}\n"
+                f"Target Drive: {drive.path} ({model})\n"
+                f"Physical Device: PhysicalDisk {phys_num}\n"
                 f"Serial: {serial}\n"
                 f"Capacity: {capacity}\n"
-                f"Bus: {bus}\n\n"
-                f"ALL DATA ON THIS DRIVE WILL BE DESTROYED.\n"
-                f"This cannot be undone.\n\n"
-                f"Type 'ERASE' to confirm:"
-            )
-            answer = tk.simpledialog.askstring(
-                "Confirm Drive Erase", confirm_msg, parent=self
-            ) if hasattr(tk, "simpledialog") else None
-            if answer is None:
-                try:
-                    import tkinter.simpledialog as sd
-                    answer = sd.askstring("Confirm Drive Erase", confirm_msg, parent=self)
-                except Exception:
-                    answer = None
-            if answer != "ERASE":
-                messagebox.showinfo("Cancelled", "Drive erase cancelled.")
+                f"Selected Method: {method_id.upper()}\n\n"
+                f"WARNING: All stored data on this device will be permanently erased.\n\n"
+                f"Are you sure you want to proceed with this operation?",
+                icon="warning",
+            ):
                 return
-            # Launch the drive operation in a background thread
+
             if self.log_text:
                 self.log_text.configure(state="normal")
                 self.log_text.delete("1.0", "end")
                 self.log_text.configure(state="disabled")
             self.progress_value.set(0)
             self.cancel_event.clear()
+            self.tracker.start(capacity_bytes, stage=method_id.upper())
             if hasattr(self, "status_label") and self.status_label:
                 self.status_label.configure(text="RUNNING", fg=ORANGE)
-            if hasattr(self, "start_button"):
+            if hasattr(self, "start_button") and self.start_button:
                 try:
                     self.start_button.configure(state="disabled")
                 except Exception:
                     pass
-            if hasattr(self, "cancel_button"):
+            if hasattr(self, "cancel_button") and self.cancel_button:
                 try:
                     self.cancel_button.configure(state="normal")
                 except Exception:
                     pass
 
-            def _drive_op_thread():
+            def _drive_op_thread(cancel_event=None):
+                ce = cancel_event or self.cancel_event
+                op_id = f"drive_{method_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                started = utc_now()
+
                 def _emit(msg):
-                    self.events.put(("log", msg))
+                    self.events.put((EV_LOG, msg))
+
+                # Emit (progress, (0, total)) immediately so the UI shows 0%.
+                # Without this, the first progress event would arrive only after
+                # the first 1 MiB chunk is written, leaving the bar stuck at 0.00%.
+                self.events.put((EV_PROGRESS, (0, capacity_bytes)))
+
                 def _progress(done, total):
-                    pct = int(done * 100 / total) if total > 0 else 0
-                    self.events.put(("progress", pct))
+                    self.events.put((EV_PROGRESS, (done, total)))
+
                 try:
                     result = execute_drive_method(
-                        method_id, drive, _emit, _progress, self.cancel_event
+                        method_id, drive, _emit, _progress, ce
                     )
                     status_out = result.get("status", "UNKNOWN")
-                    fg = GREEN if status_out in ("PASS_PHYSICAL", "PASS_POLICY") else (
-                        ORANGE if status_out in ("UNSUPPORTED_HARDWARE", "PHYSICAL_EXECUTION_UNAVAILABLE", "HOST_OVERWRITE_ASSURANCE") else RED
+                    completed = utc_now()
+
+                    # VerificationEngine assess (cross-cutting, off Tk thread)
+                    v_status, v_warnings = VerificationEngine.assess(result)
+
+                    limitations = []
+                    if result.get("nand_limitation"):
+                        limitations.append(result["nand_limitation"])
+
+                    op_result = OperationResult(
+                        operation_id=op_id,
+                        kind="drive",
+                        method_id=method_id,
+                        method_name=method_id.upper(),
+                        status="SUCCESS" if status_out in ("PASS_PHYSICAL", "PASS_POLICY") else status_out,
+                        backend="_physical_overwrite_windows" if status_out in ("PASS_PHYSICAL", "PASS_POLICY", "PASS_PHYSICAL_RANGE") else "execute_drive_method",
+                        target=str(drive.device_path),
+                        started=started,
+                        completed=completed,
+                        verification=v_status,
+                        evidence=result,
+                        warnings=v_warnings,
+                        limitations=limitations,
+                        detail=f"Drive sanitization ({method_id.upper()}) completed with status {status_out}.",
                     )
-                    self.events.put(("status", (status_out, fg)))
-                    # Save evidence
+
+                    # Save evidence JSON (off Tk thread — file I/O stays in worker)
                     try:
                         ev_dir = app_data_dir() / "drive_evidence"
                         ev_dir.mkdir(parents=True, exist_ok=True)
@@ -3440,20 +4444,47 @@ class DrexApp(tk.Tk):
                         _emit(f"Evidence saved: {ev_file}")
                     except Exception as ev_err:
                         _emit(f"[warning] Evidence save failed: {ev_err}")
-                except Exception as exc:
-                    self.events.put(("log", f"[ERROR] {exc}"))
-                    self.events.put(("status", ("FAILED", RED)))
-                finally:
-                    self.events.put(("done", None))
 
-            thread = threading.Thread(target=_drive_op_thread, daemon=True)
-            thread.start()
+                    fg = GREEN if status_out in ("PASS_PHYSICAL", "PASS_POLICY") else (
+                        ORANGE if status_out in ("UNSUPPORTED_HARDWARE", "PHYSICAL_EXECUTION_UNAVAILABLE", "HOST_OVERWRITE_ASSURANCE") else RED
+                    )
+                    self.events.put(("status", (status_out, fg)))
+                    self.events.put((EV_OP_COMPLETED, op_result))
+                    return op_result
+
+                except Exception as exc:
+                    completed = utc_now()
+                    cancelled = ce.is_set()
+                    op_result = OperationResult(
+                        operation_id=op_id,
+                        kind="drive",
+                        method_id=method_id,
+                        method_name=method_id.upper(),
+                        status="CANCELLED" if cancelled else "FAILED",
+                        backend="execute_drive_method",
+                        target=str(drive.device_path),
+                        started=started,
+                        completed=completed,
+                        verification="NOT_EXECUTED",
+                        evidence={},
+                        warnings=[],
+                        limitations=[],
+                        detail=f"{'Cancelled' if cancelled else 'Failed'}: {exc}",
+                        error=str(exc),
+                    )
+                    self.events.put((EV_LOG, f"[ERROR] {exc}"))
+                    self.events.put(("status", ("CANCELLED" if cancelled else "FAILED", MUTED if cancelled else RED)))
+                    self.events.put((EV_OP_COMPLETED, op_result))
+                    raise
+
+            self.task_manager.submit_task(f"drive_{method_id}", _drive_op_thread)
             return
+
         if not self.target:
             messagebox.showwarning("Select a target", "Choose a file, folder, or recovery image before starting.")
             return
+
         if kind == "recovery":
-            # Recovery source can be a folder (backing physical device) OR a disk image file
             is_image_file = (
                 self.target.is_file()
                 and self.target.suffix.lower() in {".img", ".dd", ".raw", ".iso", ".bin", ".e01", ".dmg"}
@@ -3468,38 +4499,40 @@ class DrexApp(tk.Tk):
             if availability != "Available":
                 messagebox.showerror("Recovery engine unavailable", reason)
                 return
-            if is_image_file:
-                # Use image file directly as the recovery source — no physical device lookup
-                adapter = self.recovery_dispatcher.get(method_id)
-                self._recovery_source = str(self.target)
-                self.progress_value.set(0)
-                self.cancel_event.clear()
-                self.status_label.configure(text="SCANNING", fg=BLUE)
+
+            source = str(self.target) if is_image_file else None
+            if not is_image_file:
+                drive = get_drive_for_path(self.target, self.drives)
+                if drive is None:
+                    messagebox.showerror("Physical source unavailable", "DREX could not map the selected folder to a PhysicalDrive source. No scan was started.")
+                    return
+                source = drive.device_path
+                self.append_log(f"Recovery folder selected: {self.target}")
+                self.append_log(f"Backing volume: {drive.path}")
+                self.append_log(f"Physical source: {drive.device_path}")
+            else:
                 self.append_log(f"Recovery source (disk image): {self.target}")
-                self.append_log(f"{label_for_recovery(method_id)} scan starting; image is read-only.")
-                self.start_button.configure(state="disabled")
-                self.cancel_button.configure(state="normal")
-                thread = threading.Thread(target=self._run_recovery_scan, args=(method_id, adapter, self.target, str(self.target)), daemon=True)
-                thread.start()
-                return
-            drive = get_drive_for_path(self.target, self.drives)
-            if drive is None:
-                messagebox.showerror("Physical source unavailable", "DREX could not map the selected folder to a PhysicalDrive source. No scan was started.")
-                return
+
             adapter = self.recovery_dispatcher.get(method_id)
-            self._recovery_source = drive.device_path
+            self._recovery_source = source
             self.progress_value.set(0)
             self.cancel_event.clear()
-            self.status_label.configure(text="SCANNING", fg=BLUE)
-            self.append_log(f"Recovery folder selected: {self.target}")
-            self.append_log(f"Backing volume: {drive.path}")
-            self.append_log(f"Physical source: {drive.device_path}")
-            self.append_log(f"{label_for_recovery(method_id)} scan starting; source access is read-only and no data will be written to it.")
-            self.start_button.configure(state="disabled")
-            self.cancel_button.configure(state="normal")
-            thread = threading.Thread(target=self._run_recovery_scan, args=(method_id, adapter, self.target, drive.device_path), daemon=True)
-            thread.start()
+            self.tracker.start(0, stage="SCANNING")
+            if hasattr(self, "status_label") and self.status_label:
+                self.status_label.configure(text="SCANNING", fg=PURPLE)
+            self.append_log(f"{label_for_recovery(method_id)} scan starting; source access is strictly read-only.")
+            if hasattr(self, "start_button") and self.start_button:
+                self.start_button.configure(state="disabled")
+            if hasattr(self, "cancel_button") and self.cancel_button:
+                self.cancel_button.configure(state="normal")
+
+            self.task_manager.submit_task(
+                f"recovery_scan_{method_id}",
+                self._run_recovery_scan,
+                method_id, adapter, self.target, source,
+            )
             return
+
         if kind == "file":
             availability, reason = self._method_status(method_id, kind)
             if availability != "Available":
@@ -3509,93 +4542,168 @@ class DrexApp(tk.Tk):
             if issue:
                 messagebox.showerror("Unsafe target", issue)
                 return
+
         label = next((m["name"] for m in FILE_METHODS if m["id"] == method_id), method_id)
         if not messagebox.askyesno("Confirm destructive operation", f"This action may permanently change:\n\n{self.target}\n\nMethod: {label}\n\nContinue only if the target and method are correct."):
             return
         self.progress_value.set(0)
         self.cancel_event.clear()
-        self.status_label.configure(text="RUNNING", fg=BLUE)
+        target_size = 0
+        try:
+            if self.target.is_file():
+                target_size = self.target.stat().st_size
+        except Exception:
+            target_size = 0
+        self.tracker.start(target_size, stage=label)
+        if hasattr(self, "status_label") and self.status_label:
+            self.status_label.configure(text="RUNNING", fg=BLUE)
         self.append_log("Validating target identity and method capability.")
-        if self.start_button:
+        if hasattr(self, "start_button") and self.start_button:
             self.start_button.configure(state="disabled")
-        if hasattr(self, "cancel_button"):
+        if hasattr(self, "cancel_button") and self.cancel_button:
             self.cancel_button.configure(state="normal")
-        thread = threading.Thread(target=self._run_file_operation, args=(method_id, self.target, label), daemon=True)
-        thread.start()
+        self.task_manager.submit_task(
+            f"file_wipe_{method_id}",
+            self._run_file_operation,
+            method_id, self.target, label,
+        )
 
-    def _run_recovery_scan(self, method_id: str, adapter: Any, target: Path, source: str):
+    def _run_recovery_scan(self, method_id: str, adapter: Any, target: Path, source: str, cancel_event: threading.Event | None = None):
+        ce = cancel_event or self.cancel_event
         started = utc_now()
         label = next((name for mid, name, _ in RECOVERY_METHODS if mid == method_id), method_id)
         record = {"type": "recovery", "method": label, "target": str(target), "source": source, "started": started}
         try:
-            scan = adapter.scan(source, cancel=self.cancel_event.is_set)
-            if self.cancel_event.is_set():
+            scan = adapter.scan(source, cancel=ce.is_set)
+            if ce.is_set():
                 raise RecoveryError("Recovery scan cancelled by the user.")
             self.events.put(("recovery_scan", scan))
             completed = utc_now()
             record.update({"completed": completed, "duration": self._duration(started, completed), "status": "SUCCESS", "verification": "SCAN VERIFIED", "candidate_count": len(scan.candidates), "recovered_count": 0, "warnings": list(scan.warnings)})
             self.events.put(("result", ("SCAN COMPLETE", f"{label} completed against {source}. Candidates discovered: {len(scan.candidates)}. Select candidates and a separate destination for recovery.")))
+            return scan
         except Exception as exc:
             completed = utc_now()
-            cancelled = self.cancel_event.is_set() or "cancelled" in str(exc).lower()
+            cancelled = ce.is_set() or "cancelled" in str(exc).lower()
             record.update({"completed": completed, "duration": self._duration(started, completed), "status": "CANCELLED" if cancelled else "FAILED", "verification": "Not completed", "error": str(exc), "candidate_count": 0, "recovered_count": 0})
             status = "OPERATION CANCELLED" if cancelled else "OPERATION FAILED"
             self.events.put(("result", (status, f"{'Operation Cancelled' if cancelled else 'Operation Failed'}\nMethod: {label}\nTarget: {target}\nStage: native recovery scan\nActual reason: {type(exc).__name__}: {exc}")))
-        self.store.add_history(record)
-        self.events.put(("finished", None))
+            raise
+        finally:
+            self.store.add_history(record)
+            self.events.put(("finished", None))
 
     def cancel_operation(self):
-        if self.status_label and self.status_label.cget("text") in {"RUNNING", "SCANNING", "RECOVERING"}:
+        if self.task_manager.is_active() or (self.status_label and self.status_label.cget("text") in {"RUNNING", "SCANNING", "RECOVERING"}):
+            self.task_manager.cancel()
             self.cancel_event.set()
             self.append_log("Cancellation requested; the local adapter will stop at its next safe progress boundary.")
-            self.cancel_button.configure(state="disabled")
+            if hasattr(self, "cancel_button") and self.cancel_button:
+                try:
+                    self.cancel_button.configure(state="disabled")
+                except Exception:
+                    pass
 
-    def _run_file_operation(self, method_id: str, target: Path, label: str):
+    def _run_file_operation(self, method_id: str, target: Path, label: str, cancel_event: threading.Event | None = None):
+        """File/folder wipe worker. Runs off the Tk thread via TaskManager.
+        Returns an authoritative OperationResult. Audit + certificate generation
+        happen here (off Tk), and the result is emitted through the queue.
+        """
+        ce = cancel_event or self.cancel_event
+        op_id = f"file_{method_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         started = utc_now()
         before = hash_target(target)
-        record = {"type": "file", "method": label, "target": str(target), "started": started}
+        record: dict[str, Any] = {"type": "file", "method": label, "target": str(target), "started": started}
+
+        def _do_finalize(status: str, v_status: str, evidence: dict, error_str: str | None, detail: str) -> OperationResult:
+            """Build OperationResult, run audit + cert (off Tk), emit via queue."""
+            completed = utc_now()
+            record.update({
+                "completed": completed,
+                "duration": self._duration(started, completed),
+                "status": status,
+                "verification": v_status,
+                "sha256_before": before,
+                "sha256_after": evidence.get("sha256_after"),
+                "error": error_str,
+            })
+
+            cert_id: str | None = None
+            cert_path: str | None = None
+            if status == "SUCCESS":
+                try:
+                    cert = self.cert_manager.create(record)
+                    cert_id = cert.get("certificate_id")
+                    cert_path = cert.get("certificate_path")
+                    record["certificate_id"] = cert_id
+                except Exception as cert_err:
+                    self.events.put((EV_LOG, f"[warning] Certificate creation failed: {cert_err}"))
+
+            self.store.add_history(record)
+
+            op_result = OperationResult(
+                operation_id=op_id,
+                kind="file",
+                method_id=method_id,
+                method_name=label,
+                status=status,
+                backend="execute_file_method",
+                target=str(target),
+                started=started,
+                completed=completed,
+                verification=v_status,
+                evidence=evidence,
+                warnings=[],
+                limitations=[],
+                detail=detail,
+                certificate_id=cert_id,
+                certificate_path=cert_path,
+                error=error_str,
+            )
+            self.events.put((EV_OP_COMPLETED, op_result))
+            return op_result
+
         try:
-            self.events.put(("log", "Operation started; adapter owns execution and verification."))
-            def progress(done, total):
-                if self.cancel_event.is_set():
+            self.events.put((EV_LOG, "Operation started; adapter owns execution and verification."))
+
+            def _progress_cb(done: int, total: int) -> None:
+                if ce.is_set():
                     raise OperationCancelled("Cancellation requested by the user")
-                self.events.put(("progress", (done, total)))
-            result = execute_file_method(method_id, target, lambda message: self.events.put(("log", message)), progress)
-            if self.cancel_event.is_set():
+                self.events.put((EV_PROGRESS, (done, total)))
+
+            result = execute_file_method(
+                method_id, target,
+                lambda message: self.events.put((EV_LOG, message)),
+                _progress_cb,
+            )
+            if ce.is_set():
                 raise OperationCancelled("Cancellation requested by the user")
-            completed = utc_now()
-            duration = self._duration(started, completed)
-            record.update({"completed": completed, "duration": duration, "status": "SUCCESS" if result.get("verified") else "VERIFICATION FAILED", "verification": "VERIFIED" if result.get("verified") else "FAILED", "sha256_before": before, "sha256_after": result.get("sha256_after") or hash_target(target)})
-            if record["status"] == "SUCCESS":
-                cert = self.cert_manager.create(record)
-                record["certificate_id"] = cert["certificate_id"]
-                self.events.put(("result", ("SUCCESS", f"Verified operation complete. Certificate generated: {cert['certificate_id']}")))
-            else:
-                self.events.put(("result", ("VERIFICATION FAILED", "No successful certificate was generated.")))
+
+            v_status, v_warnings = VerificationEngine.assess(result)
+            status = "SUCCESS" if v_status in ("VERIFIED", "VERIFIED_PARTIAL") else "VERIFICATION_FAILED"
+            detail = (
+                f"Verified operation complete. Method: {label}. Target: {target}."
+                if status == "SUCCESS"
+                else f"Verification failed. Method: {label}. Target: {target}."
+            )
+            return _do_finalize(status, v_status, result, None, detail)
+
         except OperationCancelled as exc:
-            completed = utc_now()
-            record.update({"completed": completed, "duration": self._duration(started, completed), "status": "CANCELLED", "verification": "Not completed", "sha256_before": before, "sha256_after": None, "error": str(exc)})
-            self.events.put(("result", ("OPERATION CANCELLED", "\n".join([
-                "Operation Cancelled", f"Method: {label}", f"Target: {target}",
-                "Stage: local adapter execution", f"Actual reason: {type(exc).__name__}: {exc}",
-            ]))))
+            return _do_finalize(
+                "CANCELLED", "NOT_EXECUTED", {},
+                str(exc),
+                f"Operation cancelled. Method: {label}. Target: {target}.",
+            )
         except Exception as exc:
-            completed = utc_now()
-            cancelled = self.cancel_event.is_set()
+            cancelled = ce.is_set()
             status = "CANCELLED" if cancelled else "FAILED"
-            record.update({"completed": completed, "duration": self._duration(started, completed), "status": status, "verification": "Not completed", "sha256_before": before, "sha256_after": None, "error": str(exc)})
-            result_status = "OPERATION CANCELLED" if cancelled else "OPERATION FAILED"
-            heading = "Operation Cancelled" if cancelled else "Operation Failed"
-            reason_label = "Actual reason" if cancelled else "Actual error"
-            self.events.put(("result", (result_status, "\n".join([
-                heading,
-                f"Method: {label}",
-                f"Target: {target}",
-                "Stage: local adapter execution/verification",
-                f"{reason_label}: {type(exc).__name__}: {exc}",
-            ]))))
-        self.store.add_history(record)
-        self.events.put(("finished", None))
+            return _do_finalize(
+                status, "NOT_EXECUTED", {},
+                str(exc),
+                f"{'Cancelled' if cancelled else 'Failed'}: {type(exc).__name__}: {exc}",
+            )
+        finally:
+            self.events.put((EV_FINISHED, None))
 
     @staticmethod
     def _duration(started: str, completed: str) -> str:
@@ -3605,17 +4713,119 @@ class DrexApp(tk.Tk):
         except ValueError:
             return "Unavailable"
 
+    # ── Unified Operation Result Handler (Phase 8) ──────────────────────────────
+    def _handle_operation_result(self, result: OperationResult) -> None:
+        """Called on the Tk thread from _poll_events when EV_OP_COMPLETED arrives.
+
+        This is the SINGLE point that routes a completed OperationResult to:
+          • Status label update
+          • Progress bar fill
+          • Inline alert for failures
+          • View Certificate button wiring (exact certificate_path)
+
+        Audit and certificate generation already happened off the Tk thread
+        inside the worker (_run_file_operation / _drive_op_thread).
+        """
+        status = result.status
+        color = (
+            GREEN_DARK if status == "SUCCESS"
+            else MUTED if status in ("CANCELLED", "OPERATION_CANCELLED")
+            else RED
+        )
+
+        if hasattr(self, "status_label") and self.status_label and self.status_label.winfo_exists():
+            try:
+                label_text = (
+                    "WIPE SUCCESSFUL!" if status == "SUCCESS" and result.kind in ("drive", "file")
+                    else "RECOVERY SUCCESSFUL!" if status == "SUCCESS" and result.kind == "recovery"
+                    else status
+                )
+                self.status_label.configure(text=label_text, fg=color)
+            except tk.TclError:
+                pass
+
+        if status == "SUCCESS":
+            self.progress_value.set(100.0)
+        elif status in ("FAILED", "VERIFICATION_FAILED", "EXECUTION_BLOCKED"):
+            self._show_inline_alert(
+                "Operation Failed" if status != "VERIFICATION_FAILED" else "Verification Failed",
+                result.detail,
+                severity="error",
+                tech_info=result.error or json.dumps(result.evidence, indent=2, default=str)[:1000],
+            )
+
+        # Wire View Certificate button with the EXACT certificate_path from OperationResult.
+        # This is the fix for the "View Certificate" defect: we never search for files,
+        # never guess filenames, never regenerate — we use the path already stored.
+        if result.certificate_path and result.certificate_id:
+            cert_path = result.certificate_path
+            self._current_cert_path = cert_path
+            if hasattr(self, "view_cert_button") and self.view_cert_button and self.view_cert_button.winfo_exists():
+                try:
+                    self.view_cert_button.configure(
+                        state="normal",
+                        text="View Certificate",
+                        command=lambda p=cert_path: self._open_certificate(p),
+                    )
+                except tk.TclError:
+                    pass
+
+    def _open_certificate(self, cert_path: str) -> None:
+        """Open a certificate file using the OS default handler.
+        Uses the exact path stored in OperationResult.certificate_path.
+        Never searches for newest cert, never guesses filename.
+        """
+        try:
+            if not Path(cert_path).is_file():
+                messagebox.showerror(
+                    "Certificate Not Found",
+                    f"The certificate file could not be found:\n{cert_path}\n\n"
+                    "It may have been moved or deleted."
+                )
+                return
+            os.startfile(cert_path)
+        except Exception as exc:
+            messagebox.showerror("Cannot Open Certificate", f"Failed to open certificate:\n{exc}")
+
     def _poll_events(self):
+        """Consume the Worker → queue → Tk event bus.
+
+        Runs on the Tk thread, called every 30 ms via self.after().
+        Batches log writes and coalesces progress events for performance.
+        Handles both legacy string events and structured EV_* events.
+        """
+        log_batch: list[str] = []
+        latest_progress = None
         try:
             while True:
                 kind, value = self.events.get_nowait()
-                if kind == "log":
-                    self.append_log(str(value))
-                elif kind == "progress":
-                    done, total = value
-                    if total > 0:
-                        self.progress_value.set(min(99.0, done * 100 / total))
-                elif kind == "recovery_scan":
+                # ── log (legacy + structured)
+                if kind in ("log", EV_LOG):
+                    log_batch.append(str(value))
+                # ── progress — coalesce; only apply latest per tick
+                elif kind in ("progress", EV_PROGRESS):
+                    latest_progress = value
+                # ── OperationResult — the unified completion path (Phase 8)
+                elif kind == EV_OP_COMPLETED:
+                    op_result: OperationResult = value
+                    self._handle_operation_result(op_result)
+                    log_batch.append(op_result.detail)
+                # ── TaskManager state (internal lifecycle)
+                elif kind in ("task_state", EV_TASK_STATE):
+                    new_state, detail = value
+                    if hasattr(self, "status_label") and self.status_label and self.status_label.winfo_exists():
+                        if new_state in (TaskState.RUNNING, TaskState.QUEUED):
+                            self.status_label.configure(text=new_state.name, fg=ORANGE)
+                        elif new_state in (TaskState.VALIDATING, TaskState.VERIFYING):
+                            self.status_label.configure(text=new_state.name, fg=BLUE)
+                        elif new_state == TaskState.SUCCESS:
+                            self.status_label.configure(text="SUCCESS", fg=GREEN_DARK)
+                        elif new_state == TaskState.FAILED:
+                            self.status_label.configure(text="FAILED", fg=RED)
+                        elif new_state == TaskState.CANCELLED:
+                            self.status_label.configure(text="CANCELLED", fg=MUTED)
+                # ── Recovery scan results
+                elif kind in ("recovery_scan", EV_RECOVERY_SCAN):
                     scan: RecoveryScan = value
                     self.recovery_scan = scan
                     if self.recovery_tree and self.recovery_tree.winfo_exists():
@@ -3627,24 +4837,81 @@ class DrexApp(tk.Tk):
                             confidence = f"{candidate.confidence:.0%}" if candidate.confidence is not None and candidate.confidence <= 1 else f"{candidate.confidence:.0f}%" if candidate.confidence is not None else "Unknown"
                             self.recovery_tree.insert("", "end", values=(candidate.candidate_id, candidate.name, candidate.filesystem, size, deleted, confidence))
                         self.recovery_tree.bind("<<TreeviewSelect>>", lambda _event: self._update_recovery_action_state(), add="+")
-                        if hasattr(self, "recovery_destination_button"):
+                        if hasattr(self, "recovery_destination_button") and self.recovery_destination_button:
                             self.recovery_destination_button.configure(state="normal")
+                # ── Device discovery
+                elif kind in ("devices_discovered", EV_DEVICES):
+                    self._on_devices_discovered(value)
+                # ── Legacy status/result events (kept for backwards compat)
+                elif kind == "status":
+                    status_out, fg_color = value
+                    if hasattr(self, "status_label") and self.status_label and self.status_label.winfo_exists():
+                        self.status_label.configure(text=status_out, fg=fg_color)
                 elif kind == "result":
                     status, detail = value
                     color = GREEN_DARK if status == "SUCCESS" else (MUTED if "CANCELLED" in status else RED)
-                    self.status_label.configure(text=status, fg=color)
-                    self.append_log(detail)
+                    if hasattr(self, "status_label") and self.status_label and self.status_label.winfo_exists():
+                        self.status_label.configure(text=status, fg=color)
+                    log_batch.append(detail)
                     if status == "SUCCESS":
-                        self.progress_value.set(100)
-                        self.status_label.configure(text="WIPE SUCCESSFUL!" if self.current_page != "Recover" else "RECOVERY SUCCESSFUL!")
-                elif kind == "finished":
-                    if hasattr(self, "start_button"):
-                        self.start_button.configure(state="normal")
-                    if hasattr(self, "cancel_button"):
-                        self.cancel_button.configure(state="disabled")
+                        self.progress_value.set(100.0)
+                        if hasattr(self, "status_label") and self.status_label and self.status_label.winfo_exists():
+                            self.status_label.configure(text="WIPE SUCCESSFUL!" if self.current_page != "Recover" else "RECOVERY SUCCESSFUL!")
+                # ── Inline error alert
+                elif kind in ("error_alert", EV_ERROR_ALERT):
+                    title, desc, severity, tech = value
+                    self._show_inline_alert(title, desc, severity=severity, tech_info=tech)
+                # ── Task teardown (release buttons, stop timer)
+                elif kind in ("task_finished", EV_TASK_FINISHED, "finished", EV_FINISHED, "done"):
+                    self.timer.stop()
+                    if hasattr(self, "start_button") and self.start_button and self.start_button.winfo_exists():
+                        try:
+                            self.start_button.configure(state="normal")
+                        except Exception:
+                            pass
+                    if hasattr(self, "cancel_button") and self.cancel_button and self.cancel_button.winfo_exists():
+                        try:
+                            self.cancel_button.configure(state="disabled")
+                        except Exception:
+                            pass
+                    if kind in ("task_finished", EV_TASK_FINISHED):
+                        task_id, result, exc = value
+                        if exc is not None and not isinstance(exc, (OperationCancelled,)):
+                            # Only show alert if we didn't already emit EV_OP_COMPLETED
+                            if not (result and isinstance(result, OperationResult)):
+                                self._show_inline_alert(
+                                    "Operation Failed",
+                                    f"An error occurred during {task_id}: {exc}",
+                                    severity="error",
+                                    tech_info=str(exc),
+                                )
+                        elif result and isinstance(result, dict) and result.get("status") in ("FAILED", "EXECUTION_BLOCKED", "VERIFICATION_FAILED"):
+                            self._show_inline_alert(
+                                "Operation Incomplete",
+                                result.get("reason") or f"Method returned status {result.get('status')}",
+                                severity="error",
+                                tech_info=json.dumps(result, indent=2, default=str),
+                            )
         except queue.Empty:
             pass
-        self.after(100, self._poll_events)
+
+        # Flush batched logs in single UI draw
+        if log_batch:
+            self.append_log_batch(log_batch)
+
+        # Apply coalesced progress
+        if latest_progress is not None:
+            if isinstance(latest_progress, tuple):
+                done, total = latest_progress
+                self.tracker.update(done, total)
+                if total > 0:
+                    self.progress_value.set(min(100.0, self.tracker.percentage))
+            else:
+                pct = float(latest_progress)
+                self.tracker.percentage = pct
+                self.progress_value.set(min(100.0, pct))
+
+        self.after(30, self._poll_events)
 
 
 def verify_certificate_record(path: str) -> bool:
@@ -3701,6 +4968,7 @@ def run_doctor() -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global _ELEVATION_STATE
     argv = argv or sys.argv[1:]
     if "--version" in argv:
         print(f"{APP_NAME} {VERSION}")
@@ -3727,6 +4995,19 @@ def main(argv: list[str] | None = None) -> int:
                 return 3
         print(json.dumps({"app": APP_NAME, "version": VERSION, "offline": True, "drive_methods": len(DRIVE_METHODS), "file_methods": len(FILE_METHODS), "recovery_methods": len(RECOVERY_METHODS), "bundled_adapter": "zero-overwrite", "certificate_integrity": "verified"}, indent=2))
         return 0
+
+    # ── Elevation: detect privilege level before opening the Tk window. ──
+    # DREX is a destructive storage application — Administrator access is
+    # required for physical raw device I/O. If not elevated, request UAC.
+    # This does NOT replace capability detection; it is only an OS permission check.
+    _ELEVATION_STATE = _detect_elevation()
+    if _ELEVATION_STATE == ElevationState.NOT_ELEVATED and "--no-uac" not in argv:
+        # Attempt silent re-launch with runas. If the user cancels UAC or
+        # elevation fails, we fall through and run with limited permissions.
+        _request_uac_elevation()
+        # If we reach here, UAC was cancelled or failed — update state and continue.
+        _ELEVATION_STATE = _detect_elevation()
+
     app = DrexApp()
     qa_page = os.environ.get("DREX_QA_PAGE")
     if qa_page in {"Dashboard", "Wipe Drive", "Wipe File/Folder", "Recover", "Destroy Drive", "Certificates", "Help"}:

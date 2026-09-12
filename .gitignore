@@ -17,4 +17,5 @@ build/native/
 __pycache__/
 *.pyc
 *.pyo
+*.exe
 .pytest_cache/

@@ -26,6 +26,7 @@ $DataArgs = @("--add-data", $MethodsData)
 if (Test-Path $NativeBin) { $DataArgs += @("--add-data", ($NativeBin + ";native_bin")) }
 python -m PyInstaller --noconfirm --clean --windowed --onefile `
   --name DREX `
+  --uac-admin `
   @DataArgs `
   --distpath $DistRoot `
   --workpath $PyInstallerRoot `
