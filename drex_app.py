@@ -634,6 +634,7 @@ def _detect_device_crypto_erase_capability(target: Path) -> dict[str, Any]:
     # Attempt lightweight WMI query to confirm interface type (read-only, non-destructive)
     device_type = "UNKNOWN"
     interface = "UNKNOWN"
+    probe_diagnostic = None
     try:
         if os.name == "nt":
             import subprocess as _sp
@@ -656,8 +657,8 @@ def _detect_device_crypto_erase_capability(target: Path) -> dict[str, Any]:
                     elif "SCSI" in iface or "NVME" in iface or "ATA" in iface:
                         interface = iface
                         device_type = "DIRECT_ATTACHED"
-    except Exception:
-        pass
+    except Exception as exc:
+        probe_diagnostic = f"capability_probe_error: {type(exc).__name__}: {exc}"
 
     if device_type == "USB_REMOVABLE" or is_usb_or_file:
         return {
@@ -670,6 +671,7 @@ def _detect_device_crypto_erase_capability(target: Path) -> dict[str, Any]:
             ),
             "interface": interface or "USB",
             "can_device_crypto_erase": False,
+            "probe_diagnostic": probe_diagnostic,
         }
 
     # Direct-attached devices may support it, but safe execution requires
